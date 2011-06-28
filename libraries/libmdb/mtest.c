@@ -25,7 +25,8 @@ int main(int argc,char * argv[])
 			values[i] = random()%1024;
 	    }
     
-		rc = mdbenv_create(&env, 10485760);
+		rc = mdbenv_create(&env);
+		rc = mdbenv_set_mapsize(env, 10485760);
 		rc = mdbenv_open(env, "./testdb", MDB_FIXEDMAP|MDB_NOSYNC, 0664);
 		rc = mdb_txn_begin(env, 0, &txn);
 		rc = mdb_open(env, txn, NULL, 0, &db);
