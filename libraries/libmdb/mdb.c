@@ -40,7 +40,7 @@
 #define MDB_VERSION	 1
 #define MAXKEYSIZE	 255
 
-#define P_INVALID	 0xFFFFFFFF
+#define P_INVALID	 (~0L)
 
 #define F_ISSET(w, f)	 (((w) & (f)) == (f))
 

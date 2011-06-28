@@ -53,10 +53,10 @@ int main(int argc,char * argv[])
 		mdb_cursor_close(cursor);
 
 		j=0;
+		key.mv_data = sval;
 	    for (i= count - 1; i > -1; i-= (random()%5)) {	
 			j++;
 			rc = mdb_txn_begin(env, 0, &txn);
-			key.mv_data = sval;
 			sprintf(sval, "%03x ", values[i]);
 			rc = mdb_del(db, txn, &key, NULL);
 			if (rc) {
