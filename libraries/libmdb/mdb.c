@@ -782,6 +782,7 @@ mdbenv_read_meta(MDB_env *env, pgno_t *p_next)
 	if (size == env->me_head.mh_psize) {		/* there is only the header */
 		if (p_next != NULL)
 			*p_next = 1;
+		env->me_meta.mm_stat.ms_psize = env->me_head.mh_psize;
 		return MDB_SUCCESS;		/* new file */
 	}
 
@@ -846,8 +847,6 @@ mdbenv_create(MDB_env **env, size_t size)
 {
 	MDB_env *e;
 
-	if (!size) return EINVAL;
-
 	e = calloc(1, sizeof(*e));
 	if (!e) return ENOMEM;
 
@@ -878,6 +877,9 @@ mdbenv_open2(MDB_env *env, unsigned int flags)
 		DPRINTF("new mdbenv");
 		newenv = 1;
 	}
+
+	if (!env->me_mapsize)
+		env->me_mapsize = env->me_head.mh_mapsize;
 
 	i = MAP_SHARED;
 	if (env->me_head.mh_address && (flags & MDB_FIXEDMAP))
