@@ -7,6 +7,8 @@
 #ifdef HAVE_SYS_FILE_H
 #include <sys/file.h>
 #endif
+#include <sys/ipc.h>
+#include <sys/shm.h>
 
 #include <assert.h>
 #include <err.h>
@@ -245,7 +247,7 @@ struct MDB_db {
 
 struct MDB_env {
 	int			me_fd;
-	int			me_lfd;
+	key_t		me_shmkey;
 #define MDB_FIXPADDING		 0x01		/* internal */
 	uint32_t	me_flags;
 	int			me_maxreaders;
@@ -908,7 +910,7 @@ fail:
 }
 
 int
-mdbenv_create(MDB_env **env, size_t size)
+mdbenv_create(MDB_env **env)
 {
 	MDB_env *e;
 
@@ -1022,41 +1024,9 @@ mdbenv_reader_dest(void *ptr)
 int
 mdbenv_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 {
-	int		oflags, rc, len;
-	char	*lpath;
-	off_t	size, rsize;
+	int		oflags, rc, shmid;
+	off_t	size;
 
-	len = strlen(path);
-	lpath = malloc(len + sizeof(".lock"));
-	sprintf(lpath, "%s.lock", path);
-	if ((env->me_lfd = open(lpath, O_RDWR | O_CREAT, mode)) == -1)
-		return errno;
-
-	size = lseek(env->me_lfd, 0, SEEK_END);
-	rsize = (env->me_maxreaders-1) * sizeof(MDB_reader) + sizeof(MDB_txninfo);
-	if (size < rsize) {
-		if (ftruncate(env->me_lfd, rsize) != 0) {
-			rc = errno;
-			close(env->me_lfd);
-			return rc;
-		}
-	} else {
-		rsize = size;
-		size = rsize - sizeof(MDB_txninfo);
-		env->me_maxreaders = size/sizeof(MDB_reader) + 1;
-	}
-	env->me_txns = mmap(0, rsize, PROT_READ|PROT_WRITE, MAP_SHARED,
-		env->me_lfd, 0);
-	if (env->me_txns == MAP_FAILED)
-		return errno;
-	if (size == 0) {
-		pthread_mutexattr_t mattr;
-
-		pthread_mutexattr_init(&mattr);
-		pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
-		pthread_mutex_init(&env->me_txns->mt_mutex, &mattr);
-		pthread_mutex_init(&env->me_txns->mt_wmutex, &mattr);
-	}
 
 	if (F_ISSET(flags, MDB_RDONLY))
 		oflags = O_RDONLY;
@@ -1065,6 +1035,28 @@ mdbenv_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 
 	if ((env->me_fd = open(path, oflags, mode)) == -1)
 		return errno;
+
+	env->me_shmkey = ftok(path, 'm');
+	size = (env->me_maxreaders-1) * sizeof(MDB_reader) + sizeof(MDB_txninfo);
+	shmid = shmget(env->me_shmkey, size, IPC_CREAT|IPC_EXCL|mode);
+	if (shmid == -1) {
+		if (errno == EEXIST) {
+			shmid = shmget(env->me_shmkey, size, IPC_CREAT|mode);
+			if (shmid == -1)
+				return errno;
+			env->me_txns = shmat(shmid, NULL, 0);
+		} else {
+			return errno;
+		}
+	} else {
+		pthread_mutexattr_t mattr;
+
+		env->me_txns = shmat(shmid, NULL, 0);
+		pthread_mutexattr_init(&mattr);
+		pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
+		pthread_mutex_init(&env->me_txns->mt_mutex, &mattr);
+		pthread_mutex_init(&env->me_txns->mt_wmutex, &mattr);
+	}
 
 	if ((rc = mdbenv_open2(env, flags)) != MDB_SUCCESS) {
 		close(env->me_fd);
@@ -1092,10 +1084,8 @@ mdbenv_close(MDB_env *env)
 	}
 	close(env->me_fd);
 	if (env->me_txns) {
-		size_t size = (env->me_maxreaders-1) * sizeof(MDB_reader) + sizeof(MDB_txninfo);
-		munmap(env->me_txns, size);
+		shmdt(env->me_txns);
 	}
-	close(env->me_lfd);
 	free(env);
 }
 
@@ -2507,8 +2497,9 @@ mdbenv_compact(MDB_env *env)
 		return rc;
 	}
 
-	rc = mdbenv_create(&envc, env->me_mapsize);
+	rc = mdbenv_create(&envc);
 	if (rc) goto failed;
+	rc = mdbenv_set_mapsize(envc, env->me_mapsize);
 
 	envc->me_fd = fd;
 	rc = mdbenv_open2(envc, env->me_flags);
