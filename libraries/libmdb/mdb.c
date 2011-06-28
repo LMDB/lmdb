@@ -1123,8 +1123,15 @@ mdb_search_page_root(MDB_db *bt, MDB_val *key,
 		if (cursor && cursor_push_page(cursor, mp) == NULL)
 			return MDB_FAIL;
 
-		if (modify && (rc = mdb_touch(bt->md_env->me_txn, mpp)))
-			return rc;
+		if (modify) {
+			MDB_dhead *dh = ((MDB_dhead *)mp)-1;
+			if (rc = mdb_touch(bt->md_env->me_txn, mpp))
+				return rc;
+			dh = ((MDB_dhead *)mpp->mp_page)-1;
+			dh->md_parent = mpp->mp_parent;
+			dh->md_pi = mpp->mp_pi;
+		}
+
 		mp = mpp->mp_page;
 	}
 
@@ -1295,10 +1302,10 @@ mdb_sibling(MDB_cursor *cursor, int move_right)
 	}
 	assert(IS_BRANCH(parent->mp_page));
 
-#if 0
 	indx = NODEPTR(parent->mp_page, parent->mp_ki);
-	if ((mp = mdbenv_get_page(cursor->bt, indx->n_pgno)) == NULL)
+	if ((mp = mdbenv_get_page(cursor->mc_db->md_env, indx->mn_pgno)) == NULL)
 		return MDB_FAIL;
+#if 0
 	mp->parent = parent->mp_page;
 	mp->parent_index = parent->mp_ki;
 #endif
@@ -1492,7 +1499,7 @@ mdbenv_new_page(MDB_env *env, uint32_t flags, int num)
 	    env->me_txn->mt_next_pgno, env->me_head.mh_psize);
 	if ((dp = mdb_newpage(env->me_txn, NULL, 0, num)) == NULL)
 		return NULL;
-	dp->p.mp_flags = flags;
+	dp->p.mp_flags = flags | P_DIRTY;
 	dp->p.mp_lower = PAGEHDRSZ;
 	dp->p.mp_upper = env->me_head.mh_psize;
 
