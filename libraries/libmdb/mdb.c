@@ -902,6 +902,7 @@ mdbenv_open2(MDB_env *env, unsigned int flags)
 
 	env->me_flags = flags;
 	env->me_meta.mm_root = P_INVALID;
+	env->me_meta.mm_last_pg = 2;
 
 	if ((i = mdbenv_read_header(env)) != 0) {
 		if (i != ENOENT)
