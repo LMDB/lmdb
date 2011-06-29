@@ -45,13 +45,11 @@ typedef enum MDB_cursor_op {		/* cursor operations */
 #define MDB_FIXEDMAP	0x01		/* mmap at a fixed address */
 
 typedef struct MDB_stat {
-	time_t			ms_created_at;
 	unsigned int	ms_psize;
 	unsigned int	ms_depth;
 	unsigned long	ms_branch_pages;
 	unsigned long	ms_leaf_pages;
 	unsigned long	ms_overflow_pages;
-	unsigned long	ms_revisions;
 	unsigned long	ms_entries;
 } MDB_stat;
 

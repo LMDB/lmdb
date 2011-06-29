@@ -23,8 +23,6 @@
 #include <unistd.h>
 #include <pthread.h>
 
-#include <openssl/sha.h>
-
 #include "mdb.h"
 
 #define DEBUG
@@ -135,21 +133,11 @@ typedef struct MDB_head {			/* header page content */
 	size_t		mh_mapsize;			/* size of mmap region */
 } MDB_head;
 
-typedef struct MDB_rootstat {
-	pgno_t		mr_root;			/* page number of root page */
-	MDB_stat	mr_stat;
-} MDB_rootstat;
-
 typedef struct MDB_meta {			/* meta (footer) page content */
-	pgno_t		mm_root;			/* page number of root page */
 	MDB_stat	mm_stat;
-	pgno_t		mm_prev_meta;		/* previous meta page number */
-	ulong		mm_txnid;
-#define MDB_TOMBSTONE	 0x01		/* file is replaced */
-	uint32_t	mm_flags;
-#define mm_revisions mm_stat.ms_revisions
-#define mm_created_at mm_stat.ms_created_at
-	uint8_t		mm_hash[SHA_DIGEST_LENGTH];
+	pgno_t		mm_root;			/* page number of root page */
+	pgno_t		mm_last_pg;			/* last used page in file */
+	ulong		mm_txnid;			/* txnid that committed this page */
 } MDB_meta;
 
 typedef struct MDB_dhead {					/* a dirty page */
@@ -241,16 +229,16 @@ struct MDB_db {
 	MDB_rel_func	*md_rel;		/* user relocate function */
 	MDB_db			*md_parent;		/* parent tree */
 	MDB_env 		*md_env;
-	pgno_t			md_root;		/* page number of root page */
 	MDB_stat		md_stat;
+	pgno_t			md_root;		/* page number of root page */
 };
 
 struct MDB_env {
 	int			me_fd;
 	key_t		me_shmkey;
-#define MDB_FIXPADDING		 0x01		/* internal */
 	uint32_t	me_flags;
 	int			me_maxreaders;
+	int			me_metatoggle;
 	char		*me_path;
 	char *me_map;
 	MDB_txninfo	*me_txns;
@@ -288,9 +276,8 @@ static int  mdb_search_page(MDB_db *db,
 static int  mdbenv_write_header(MDB_env *env);
 static int  mdbenv_read_header(MDB_env *env);
 static int  mdb_check_meta_page(MDB_page *p);
-static int  mdbenv_read_meta(MDB_env *env, pgno_t *p_next);
-static int  mdbenv_write_meta(MDB_env *env, pgno_t root,
-			    unsigned int flags);
+static int  mdbenv_read_meta(MDB_env *env);
+static int  mdbenv_write_meta(MDB_txn *txn);
 static MDB_page *mdbenv_get_page(MDB_env *env, pgno_t pgno);
 
 static MDB_node *mdb_search_node(MDB_db *db, MDB_page *mp,
@@ -509,11 +496,12 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 
 	txn->mt_env = env;
 
-	if ((rc = mdbenv_read_meta(env, &txn->mt_next_pgno)) != MDB_SUCCESS) {
+	if ((rc = mdbenv_read_meta(env)) != MDB_SUCCESS) {
 		mdb_txn_abort(txn);
 		return rc;
 	}
 
+	txn->mt_next_pgno = env->me_meta.mm_last_pg+1;
 	txn->mt_first_pgno = txn->mt_next_pgno;
 	txn->mt_root = env->me_meta.mm_root;
 	DPRINTF("begin transaction on mdbenv %p, root page %lu", env, txn->mt_root);
@@ -569,6 +557,7 @@ mdb_txn_commit(MDB_txn *txn)
 	off_t		 size;
 	MDB_dpage	*dp;
 	MDB_env	*env;
+	pgno_t	next;
 	struct iovec	 iov[MDB_COMMIT_PAGES];
 
 	assert(txn != NULL);
@@ -597,31 +586,28 @@ mdb_txn_commit(MDB_txn *txn)
 	if (SIMPLEQ_EMPTY(txn->mt_u.dirty_queue))
 		goto done;
 
-	if (F_ISSET(env->me_flags, MDB_FIXPADDING)) {
-		size = lseek(env->me_fd, 0, SEEK_END);
-		size += env->me_head.mh_psize - (size % env->me_head.mh_psize);
-		DPRINTF("extending to multiple of page size: %lu", size);
-		if (ftruncate(env->me_fd, size) != 0) {
-			n = errno;
-			DPRINTF("ftruncate: %s", strerror(errno));
-			mdb_txn_abort(txn);
-			return n;
-		}
-		env->me_flags ^= MDB_FIXPADDING;
-	}
-
 	DPRINTF("committing transaction on mdbenv %p, root page %lu",
 	    env, txn->mt_root);
 
 	/* Commit up to MDB_COMMIT_PAGES dirty pages to disk until done.
 	 */
+	next = 0;
 	do {
 		n = 0;
 		done = 1;
+		size = 0;
 		SIMPLEQ_FOREACH(dp, txn->mt_u.dirty_queue, h.md_next) {
+			if (dp->p.mp_pgno != next) {
+				lseek(env->me_fd, dp->p.mp_pgno * env->me_head.mh_psize, SEEK_SET);
+				next = dp->p.mp_pgno;
+				if (n)
+					break;
+			}
 			DPRINTF("committing page %lu", dp->p.mp_pgno);
 			iov[n].iov_len = env->me_head.mh_psize * dp->h.md_num;
 			iov[n].iov_base = &dp->p;
+			size += iov[n].iov_len;
+			next = dp->p.mp_pgno + dp->h.md_num;
 			/* clear dirty flag */
 			dp->p.mp_flags &= ~P_DIRTY;
 			if (++n >= MDB_COMMIT_PAGES) {
@@ -635,7 +621,7 @@ mdb_txn_commit(MDB_txn *txn)
 
 		DPRINTF("committing %u dirty pages", n);
 		rc = writev(env->me_fd, iov, n);
-		if (rc != (ssize_t)env->me_head.mh_psize*n) {
+		if (rc != size) {
 			n = errno;
 			if (rc > 0)
 				DPRINTF("short write, filesystem full?");
@@ -657,13 +643,15 @@ mdb_txn_commit(MDB_txn *txn)
 	} while (!done);
 
 	if ((n = mdbenv_sync(env)) != 0 ||
-	    (n = mdbenv_write_meta(env, txn->mt_root, 0)) != MDB_SUCCESS ||
+	    (n = mdbenv_write_meta(txn)) != MDB_SUCCESS ||
 	    (n = mdbenv_sync(env)) != 0) {
 		mdb_txn_abort(txn);
 		return n;
 	}
 	env->me_txn = NULL;
 	pthread_mutex_unlock(&env->me_txns->mt_wmutex);
+	free(txn->mt_u.dirty_queue);
+	free(txn);
 	txn = NULL;
 
 done:
@@ -754,44 +742,64 @@ mdbenv_read_header(MDB_env *env)
 }
 
 static int
-mdbenv_write_meta(MDB_env *env, pgno_t root, unsigned int flags)
+mdbenv_init_meta(MDB_env *env)
 {
-	MDB_dpage	*dp;
-	MDB_meta	*meta;
-	ssize_t		 rc;
+	MDB_page *p, *q;
+	MDB_meta *meta;
+	int rc;
 
-	DPRINTF("writing meta page for root page %lu", root);
+	p = calloc(2, env->me_head.mh_psize);
+	p->mp_pgno = 1;
+	p->mp_flags = P_META;
 
-	assert(env != NULL);
-	assert(env->me_txn != NULL);
+	meta = METADATA(p);
+	meta->mm_root = P_INVALID;
+	meta->mm_last_pg = 2;
 
-	if ((dp = mdbenv_new_page(env, P_META, 1)) == NULL)
-		return ENOMEM;
+	q = (MDB_page *)((char *)p + env->me_head.mh_psize);
 
-	env->me_meta.mm_prev_meta = env->me_meta.mm_root;
-	env->me_meta.mm_root = root;
-	env->me_meta.mm_flags = flags;
-	env->me_meta.mm_created_at = time(0);
-	env->me_meta.mm_revisions++;
-	SHA1((unsigned char *)&env->me_meta, METAHASHLEN, env->me_meta.mm_hash);
+	q->mp_pgno = 2;
+	q->mp_flags = P_META;
 
-	/* Copy the meta data changes to the new meta page. */
-	meta = METADATA(&dp->p);
-	bcopy(&env->me_meta, meta, sizeof(*meta));
+	meta = METADATA(q);
+	meta->mm_root = P_INVALID;
+	meta->mm_last_pg = 2;
 
-	rc = write(env->me_fd, &dp->p, env->me_head.mh_psize);
-	SIMPLEQ_REMOVE_HEAD(env->me_txn->mt_u.dirty_queue, h.md_next);
-	free(dp);
-	if (rc != (ssize_t)env->me_head.mh_psize) {
-		int err = errno;
-		if (rc > 0)
-			DPRINTF("short write, filesystem full?");
-		return err;
-	}
+	rc = write(env->me_fd, p, env->me_head.mh_psize * 2);
+	free(p);
+	return (rc == env->me_head.mh_psize * 2) ? MDB_SUCCESS : errno;
+}
 
-	if ((env->me_size = lseek(env->me_fd, 0, SEEK_END)) == -1) {
-		DPRINTF("failed to update file size: %s", strerror(errno));
-		env->me_size = 0;
+static int
+mdbenv_write_meta(MDB_txn *txn)
+{
+	MDB_env *env;
+	MDB_meta	meta;
+	off_t off;
+	int rc;
+
+	assert(txn != NULL);
+	assert(txn->mt_env != NULL);
+
+	DPRINTF("writing meta page for root page %lu", txn->mt_root);
+
+	env = txn->mt_env;
+
+	bcopy(&env->me_meta, &meta, sizeof(meta));
+	meta.mm_root = txn->mt_root;
+	meta.mm_last_pg = txn->mt_next_pgno - 1;
+	meta.mm_txnid = txn->mt_txnid;
+
+	off = env->me_head.mh_psize;
+	if (!env->me_metatoggle)
+		off *= 2;
+	off += PAGEHDRSZ;
+
+	lseek(env->me_fd, off, SEEK_SET);
+	rc = write(env->me_fd, &meta, sizeof(meta));
+	if (rc != sizeof(meta)) {
+		DPRINTF("write failed, disk error?");
+		return errno;
 	}
 
 	return MDB_SUCCESS;
@@ -802,23 +810,8 @@ mdbenv_write_meta(MDB_env *env, pgno_t root, unsigned int flags)
 static int
 mdb_check_meta_page(MDB_page *p)
 {
-	MDB_meta	*m;
-	unsigned char	 hash[SHA_DIGEST_LENGTH];
-
-	m = METADATA(p);
 	if (!F_ISSET(p->mp_flags, P_META)) {
 		DPRINTF("page %lu not a meta page", p->mp_pgno);
-		return EINVAL;
-	}
-
-	if (m->mm_root >= p->mp_pgno && m->mm_root != P_INVALID) {
-		DPRINTF("page %lu points to an invalid root page", p->mp_pgno);
-		return EINVAL;
-	}
-
-	SHA1((unsigned char *)m, METAHASHLEN, hash);
-	if (bcmp(hash, m->mm_hash, SHA_DIGEST_LENGTH) != 0) {
-		DPRINTF("page %lu has an invalid digest", p->mp_pgno);
 		return EINVAL;
 	}
 
@@ -826,87 +819,36 @@ mdb_check_meta_page(MDB_page *p)
 }
 
 static int
-mdbenv_read_meta(MDB_env *env, pgno_t *p_next)
+mdbenv_read_meta(MDB_env *env)
 {
-	MDB_page	*mp;
-	MDB_meta	*meta;
-	pgno_t		 meta_pgno, next_pgno;
-	off_t		 size;
+	MDB_page	*mp0, *mp1;
+	MDB_meta	*meta[2];
+	int toggle = 0, rc;
 
 	assert(env != NULL);
 
-	if ((size = lseek(env->me_fd, 0, SEEK_END)) == -1)
-		goto fail;
+	if ((mp0 = mdbenv_get_page(env, 1)) == NULL ||
+		(mp1 = mdbenv_get_page(env, 2)) == NULL)
+		return EIO;
 
-	DPRINTF("mdbenv_read_meta: size = %lu", size);
+	rc = mdb_check_meta_page(mp0);
+	if (rc) return rc;
 
-	if (size < env->me_size) {
-		DPRINTF("file has shrunk!");
-		errno = EIO;
-		goto fail;
-	}
+	rc = mdb_check_meta_page(mp1);
+	if (rc) return rc;
 
-	if (size == env->me_head.mh_psize) {		/* there is only the header */
-		if (p_next != NULL)
-			*p_next = 1;
-		env->me_meta.mm_stat.ms_psize = env->me_head.mh_psize;
-		return MDB_SUCCESS;		/* new file */
-	}
+	meta[0] = METADATA(mp0);
+	meta[1] = METADATA(mp1);
 
-	next_pgno = size / env->me_head.mh_psize;
-	if (next_pgno == 0) {
-		DPRINTF("corrupt file");
-		errno = EIO;
-		goto fail;
-	}
+	if (meta[0]->mm_txnid < meta[1]->mm_txnid)
+		toggle = 1;
 
-	meta_pgno = next_pgno - 1;
+	bcopy(meta[toggle], &env->me_meta, sizeof(env->me_meta));
+	env->me_metatoggle = toggle;
 
-	if (size % env->me_head.mh_psize != 0) {
-		DPRINTF("filesize not a multiple of the page size!");
-		env->me_flags |= MDB_FIXPADDING;
-		next_pgno++;
-	}
+	DPRINTF("Using meta page %d", toggle);
 
-	if (p_next != NULL)
-		*p_next = next_pgno;
-
-	if (size == env->me_size) {
-		DPRINTF("size unchanged, keeping current meta page");
-		if (F_ISSET(env->me_meta.mm_flags, MDB_TOMBSTONE)) {
-			DPRINTF("file is dead");
-			errno = ESTALE;
-			return MDB_FAIL;
-		} else
-			return MDB_SUCCESS;
-	} else {
-		env->me_size = size;
-	}
-
-	while (meta_pgno > 0) {
-		if ((mp = mdbenv_get_page(env, meta_pgno)) == NULL)
-			break;
-		if (!mdb_check_meta_page(mp)) {
-			meta = METADATA(mp);
-			DPRINTF("flags = 0x%x", meta->mm_flags);
-			if (F_ISSET(meta->mm_flags, MDB_TOMBSTONE)) {
-				DPRINTF("file is dead");
-				errno = ESTALE;
-				return MDB_FAIL;
-			} else {
-				/* Make copy of last meta page. */
-				bcopy(meta, &env->me_meta, sizeof(env->me_meta));
-				return MDB_SUCCESS;
-			}
-		}
-		--meta_pgno;	/* scan backwards to first valid meta page */
-	}
-
-	errno = EIO;
-fail:
-	if (p_next != NULL)
-		*p_next = P_INVALID;
-	return MDB_FAIL;
+	return MDB_SUCCESS;
 }
 
 int
@@ -956,12 +898,7 @@ mdbenv_open2(MDB_env *env, unsigned int flags)
 {
 	int i, newenv = 0;
 
-	i = fcntl(env->me_fd, F_GETFL, 0);
-	if (fcntl(env->me_fd, F_SETFL, i | O_APPEND) == -1)
-		return errno;
-
 	env->me_flags = flags;
-	env->me_flags &= ~MDB_FIXPADDING;
 	env->me_meta.mm_root = P_INVALID;
 
 	if ((i = mdbenv_read_header(env)) != 0) {
@@ -991,22 +928,24 @@ mdbenv_open2(MDB_env *env, unsigned int flags)
 			munmap(env->me_map, env->me_mapsize);
 			return i;
 		}
+		i = mdbenv_init_meta(env);
+		if (i != MDB_SUCCESS) {
+			munmap(env->me_map, env->me_mapsize);
+			return i;
+		}
 	}
 
-	if ((i = mdbenv_read_meta(env, NULL)) != 0)
+	if ((i = mdbenv_read_meta(env)) != 0)
 		return i;
 
 	DPRINTF("opened database version %u, pagesize %u",
 	    env->me_head.mh_version, env->me_head.mh_psize);
-	DPRINTF("timestamp: %s", ctime(&env->me_meta.mm_created_at));
 	DPRINTF("depth: %u", env->me_meta.mm_stat.ms_depth);
 	DPRINTF("entries: %lu", env->me_meta.mm_stat.ms_entries);
-	DPRINTF("revisions: %lu", env->me_meta.mm_stat.ms_revisions);
 	DPRINTF("branch pages: %lu", env->me_meta.mm_stat.ms_branch_pages);
 	DPRINTF("leaf pages: %lu", env->me_meta.mm_stat.ms_leaf_pages);
 	DPRINTF("overflow pages: %lu", env->me_meta.mm_stat.ms_overflow_pages);
 	DPRINTF("root: %lu", env->me_meta.mm_root);
-	DPRINTF("previous me_meta.me_page: %lu", env->me_meta.mm_prev_meta);
 
 	return MDB_SUCCESS;
 }
@@ -1031,7 +970,7 @@ mdbenv_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 	if (F_ISSET(flags, MDB_RDONLY))
 		oflags = O_RDONLY;
 	else
-		oflags = O_RDWR | O_CREAT | O_APPEND;
+		oflags = O_RDWR | O_CREAT;
 
 	if ((env->me_fd = open(path, oflags, mode)) == -1)
 		return errno;
@@ -1045,6 +984,13 @@ mdbenv_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 			if (shmid == -1)
 				return errno;
 			env->me_txns = shmat(shmid, NULL, 0);
+			if (env->me_txns->mt_magic != MDB_MAGIC ||
+				env->me_txns->mt_version != MDB_VERSION) {
+					DPRINTF("invalid lock region %d", shmid);
+					shmdt(env->me_txns);
+					env->me_txns = NULL;
+					return EIO;
+				}
 		} else {
 			return errno;
 		}
@@ -1056,6 +1002,8 @@ mdbenv_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 		pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
 		pthread_mutex_init(&env->me_txns->mt_mutex, &mattr);
 		pthread_mutex_init(&env->me_txns->mt_wmutex, &mattr);
+		env->me_txns->mt_version = MDB_VERSION;
+		env->me_txns->mt_magic = MDB_MAGIC;
 	}
 
 	if ((rc = mdbenv_open2(env, flags)) != MDB_SUCCESS) {
@@ -1303,7 +1251,7 @@ mdb_search_page(MDB_db *db, MDB_txn *txn, MDB_val *key,
 	 * committed root page.
 	 */
 	if (txn == NULL) {
-		if ((rc = mdbenv_read_meta(db->md_env, NULL)) != MDB_SUCCESS)
+		if ((rc = mdbenv_read_meta(db->md_env)) != MDB_SUCCESS)
 			return rc;
 		root = db->md_env->me_meta.mm_root;
 	} else if (F_ISSET(txn->mt_flags, MDB_TXN_ERROR)) {
@@ -2402,159 +2350,13 @@ done:
 	return rc;
 }
 
-static pgno_t
-mdbenv_compact_tree(MDB_env *env, pgno_t pgno, MDB_env *envc)
-{
-	ssize_t		 rc;
-	indx_t		 i;
-	pgno_t		*pnext, next;
-	MDB_node	*node;
-	MDB_page	*p;
-	MDB_page	*mp;
-
-	/* Get the page and make a copy of it.
-	 */
-	if ((mp = mdbenv_get_page(env, pgno)) == NULL)
-		return P_INVALID;
-	if ((p = malloc(env->me_head.mh_psize)) == NULL)
-		return P_INVALID;
-	bcopy(mp, p, env->me_head.mh_psize);
-
-	/* Go through all nodes in the (copied) page and update the
-	 * page pointers.
-	 */
-	if (F_ISSET(p->mp_flags, P_BRANCH)) {
-		for (i = 0; i < NUMKEYS(p); i++) {
-			node = NODEPTR(p, i);
-			node->mn_pgno = mdbenv_compact_tree(env, node->mn_pgno, envc);
-			if (node->mn_pgno == P_INVALID) {
-				free(p);
-				return P_INVALID;
-			}
-		}
-	} else if (F_ISSET(p->mp_flags, P_LEAF)) {
-		for (i = 0; i < NUMKEYS(p); i++) {
-			node = NODEPTR(p, i);
-			if (F_ISSET(node->mn_flags, F_BIGDATA)) {
-				bcopy(NODEDATA(node), &next, sizeof(next));
-				next = mdbenv_compact_tree(env, next, envc);
-				if (next == P_INVALID) {
-					free(p);
-					return P_INVALID;
-				}
-				bcopy(&next, NODEDATA(node), sizeof(next));
-			}
-		}
-	} else if (F_ISSET(p->mp_flags, P_OVERFLOW)) {
-		; 	/* handled below */
-	} else
-		assert(0);
-
-	pgno = p->mp_pgno = envc->me_txn->mt_next_pgno++;
-	rc = write(envc->me_fd, p, env->me_head.mh_psize);
-	free(p);
-	if (rc != (ssize_t)env->me_head.mh_psize)
-		return P_INVALID;
-
-	if (F_ISSET(mp->mp_flags, P_OVERFLOW)) {
-		if (mp->mp_pages > 1) {
-			size_t len = (mp->mp_pages-1) * env->me_head.mh_psize;
-			envc->me_txn->mt_next_pgno += mp->mp_pages-1;
-			rc = write(envc->me_fd, mp+1, len);
-			if (rc != len)
-				return P_INVALID;
-		}
-	}
-	return pgno;
-}
-
-int
-mdbenv_compact(MDB_env *env)
-{
-	char			*compact_path = NULL;
-	MDB_env		*envc;
-	MDB_txn	*txn, *txnc = NULL;
-	int			 fd, rc;
-	pgno_t			 root;
-
-	assert(env != NULL);
-
-	if (env->me_path == NULL) {
-		return EINVAL;
-	}
-
-	DPRINTF("compacting mdbenv %p with path %s", env, env->me_path);
-
-	rc = mdb_txn_begin(env, 0, &txn);
-	if (rc) return rc;
-
-	asprintf(&compact_path, "%s.compact.XXXXXX", env->me_path);
-	fd = mkstemp(compact_path);
-	if (fd == -1) {
-		rc = errno;
-		free(compact_path);
-		mdb_txn_abort(txn);
-		return rc;
-	}
-
-	rc = mdbenv_create(&envc);
-	if (rc) goto failed;
-	rc = mdbenv_set_mapsize(envc, env->me_mapsize);
-
-	envc->me_fd = fd;
-	rc = mdbenv_open2(envc, env->me_flags);
-	if (rc) goto failed;
-
-	bcopy(&env->me_meta, &envc->me_meta, sizeof(env->me_meta));
-	envc->me_meta.mm_stat.ms_revisions = 0;
-
-	rc = mdb_txn_begin(envc, 0, &txnc);
-	if (rc) goto failed;
-
-	if (env->me_meta.mm_root != P_INVALID) {
-		root = mdbenv_compact_tree(env, env->me_meta.mm_root, envc);
-		if (root == P_INVALID)
-			goto failed;
-		if ((rc = mdbenv_write_meta(envc, root, 0)) != MDB_SUCCESS)
-			goto failed;
-	}
-
-	fsync(fd);
-
-	DPRINTF("renaming %s to %s", compact_path, env->me_path);
-	if (rename(compact_path, env->me_path) != 0) {
-		rc = errno;
-		goto failed;
-	}
-
-	/* Write a "tombstone" meta page so other processes can pick up
-	 * the change and re-open the file.
-	 */
-	if (mdbenv_write_meta(env, P_INVALID, MDB_TOMBSTONE) != MDB_SUCCESS)
-		goto failed;
-
-	mdb_txn_abort(txn);
-	mdb_txn_abort(txnc);
-	free(compact_path);
-	mdbenv_close(envc);
-	return 0;
-
-failed:
-	mdb_txn_abort(txn);
-	mdb_txn_abort(txnc);
-	unlink(compact_path);
-	free(compact_path);
-	mdbenv_close(envc);
-	return rc;
-}
-
 int
 mdbenv_get_flags(MDB_env *env, unsigned int *arg)
 {
 	if (!env || !arg)
 		return EINVAL;
 
-	*arg = (env->me_flags & ~MDB_FIXPADDING);
+	*arg = env->me_flags;
 	return MDB_SUCCESS;
 }
 
