@@ -193,9 +193,9 @@ typedef struct MDB_node {
 		pgno_t		 np_pgno;	/* child page number */
 		uint32_t	 np_dsize;	/* leaf data size */
 	} mn_p;
-	uint16_t	mn_ksize;			/* key size */
+	unsigned int	mn_flags:4;
+	unsigned int	mn_ksize:12;			/* key size */
 #define F_BIGDATA	 0x01			/* data put on overflow page */
-	uint8_t		mn_flags;
 	char		mn_data[1];
 } MDB_node;
 
@@ -1650,21 +1650,22 @@ mdb_add_node(MDB_db *db, MDB_page *mp, indx_t indx,
 
 	if (IS_LEAF(mp)) {
 		assert(data);
-		node_size += data->mv_size;
 		if (F_ISSET(flags, F_BIGDATA)) {
 			/* Data already on overflow page. */
-			node_size -= data->mv_size - sizeof(pgno_t);
+			node_size += sizeof(pgno_t);
 		} else if (data->mv_size >= db->md_env->me_head.mh_psize / MDB_MINKEYS) {
 			int ovpages = PAGEHDRSZ + data->mv_size + db->md_env->me_head.mh_psize - 1;
 			ovpages /= db->md_env->me_head.mh_psize;
 			/* Put data on overflow page. */
 			DPRINTF("data size is %zu, put on overflow page",
 			    data->mv_size);
-			node_size -= data->mv_size - sizeof(pgno_t);
+			node_size += sizeof(pgno_t);
 			if ((ofp = mdbenv_new_page(db->md_env, P_OVERFLOW, ovpages)) == NULL)
 				return MDB_FAIL;
 			DPRINTF("allocated overflow page %lu", ofp->p.mp_pgno);
 			flags |= F_BIGDATA;
+		} else {
+			node_size += data->mv_size;
 		}
 	}
 
