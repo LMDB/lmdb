@@ -498,7 +498,8 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 	txn->mt_next_pgno = env->me_meta.mm_last_pg+1;
 	txn->mt_first_pgno = txn->mt_next_pgno;
 	txn->mt_root = env->me_meta.mm_root;
-	DPRINTF("begin transaction %lu on mdbenv %p, root page %lu", txn->mt_txnid, env, txn->mt_root);
+	DPRINTF("begin transaction %lu on mdbenv %p, root page %lu",
+		txn->mt_txnid, (void *) env, txn->mt_root);
 
 	*ret = txn;
 	return MDB_SUCCESS;
@@ -514,7 +515,8 @@ mdb_txn_abort(MDB_txn *txn)
 		return;
 
 	env = txn->mt_env;
-	DPRINTF("abort transaction %lu on mdbenv %p, root page %lu", txn->mt_txnid, env, txn->mt_root);
+	DPRINTF("abort transaction %lu on mdbenv %p, root page %lu",
+		txn->mt_txnid, (void *) env, txn->mt_root);
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
 		txn->mt_u.reader->mr_txnid = 0;
@@ -581,7 +583,7 @@ mdb_txn_commit(MDB_txn *txn)
 		goto done;
 
 	DPRINTF("committing transaction %lu on mdbenv %p, root page %lu",
-	    txn->mt_txnid, env, txn->mt_root);
+	    txn->mt_txnid, (void *) env, txn->mt_root);
 
 	/* Commit up to MDB_COMMIT_PAGES dirty pages to disk until done.
 	 */
@@ -1008,7 +1010,7 @@ mdbenv_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 		env->me_fd = -1;
 	} else {
 		env->me_path = strdup(path);
-		DPRINTF("opened dbenv %p", env);
+		DPRINTF("opened dbenv %p", (void *) env);
 	}
 
 	pthread_key_create(&env->me_txkey, mdbenv_reader_dest);
@@ -1112,7 +1114,7 @@ cursor_pop_page(MDB_cursor *cursor)
 	top = CURSOR_TOP(cursor);
 	CURSOR_POP(cursor);
 
-	DPRINTF("popped page %lu off cursor %p", top->mp_page->mp_pgno, cursor);
+	DPRINTF("popped page %lu off cursor %p", top->mp_page->mp_pgno, (void *) cursor);
 
 	free(top);
 }
@@ -1122,7 +1124,7 @@ cursor_push_page(MDB_cursor *cursor, MDB_page *mp)
 {
 	MDB_ppage	*ppage;
 
-	DPRINTF("pushing page %lu on cursor %p", mp->mp_pgno, cursor);
+	DPRINTF("pushing page %lu on cursor %p", mp->mp_pgno, (void *) cursor);
 
 	if ((ppage = calloc(1, sizeof(*ppage))) == NULL)
 		return NULL;
@@ -1422,7 +1424,7 @@ mdb_cursor_next(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 	top = CURSOR_TOP(cursor);
 	mp = top->mp_page;
 
-	DPRINTF("cursor_next: top page is %lu in cursor %p", mp->mp_pgno, cursor);
+	DPRINTF("cursor_next: top page is %lu in cursor %p", mp->mp_pgno, (void *) cursor);
 
 	if (top->mp_ki + 1 >= NUMKEYS(mp)) {
 		DPRINTF("=====> move to next sibling page");
