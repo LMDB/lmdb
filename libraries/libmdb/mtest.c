@@ -49,7 +49,8 @@ int main(int argc,char * argv[])
 		rc = mdb_cursor_open(db, NULL, &cursor);
 		while (rc = mdb_cursor_get(cursor, &key, &data, MDB_NEXT) == 0) {
 			printf("key: %p %.*s, data: %p %.*s\n",
-				key.mv_data, key.mv_size, key.mv_data, data.mv_data, data.mv_size, data.mv_data);
+				key.mv_data,  (int) key.mv_size,  (char *) key.mv_data,
+				data.mv_data, (int) data.mv_size, (char *) data.mv_data);
 		}
 		mdb_cursor_close(cursor);
 
@@ -75,7 +76,8 @@ int main(int argc,char * argv[])
 		rc = mdb_cursor_open(db, NULL, &cursor);
 		while (rc = mdb_cursor_get(cursor, &key, &data, MDB_NEXT) == 0) {
 			printf("key: %.*s, data: %.*s\n",
-				key.mv_size, key.mv_data, data.mv_size, data.mv_data);
+				(int) key.mv_size,  (char *) key.mv_data,
+				(int) data.mv_size, (char *) data.mv_data);
 		}
 #if 0
 		/* write ops aren't coordinated with cursors,
@@ -87,18 +89,21 @@ int main(int argc,char * argv[])
 		for (i=0; i<50; i++) {
 			rc = mdb_cursor_get(cur2, &key, &data, MDB_NEXT);
 			printf("key: %p %.*s, data: %p %.*s\n",
-				key.mv_data, key.mv_size, key.mv_data, data.mv_data, data.mv_size, data.mv_data);
+				key.mv_data,  (int) key.mv_size,  (char *) key.mv_data,
+				data.mv_data, (int) data.mv_size, (char *) data.mv_data);
 			rc = mdb_del(db, txn, &key, NULL);
 		}
 
 		printf("Restarting cursor in txn\n");
 		rc = mdb_cursor_get(cur2, &key, &data, MDB_FIRST);
 		printf("key: %p %.*s, data: %p %.*s\n",
-			key.mv_data, key.mv_size, key.mv_data, data.mv_data, data.mv_size, data.mv_data);
+			key.mv_data,  (int) key.mv_size,  (char *) key.mv_data,
+			data.mv_data, (int) data.mv_size, (char *) data.mv_data);
 		for (i=0; i<32; i++) {
 			rc = mdb_cursor_get(cur2, &key, &data, MDB_NEXT);
 			printf("key: %p %.*s, data: %p %.*s\n",
-				key.mv_data, key.mv_size, key.mv_data, data.mv_data, data.mv_size, data.mv_data);
+				key.mv_data,  (int) key.mv_size,  (char *) key.mv_data,
+				data.mv_data, (int) data.mv_size, (char *) data.mv_data);
 		}
 		mdb_cursor_close(cur2);
 		rc = mdb_txn_commit(txn);
@@ -107,11 +112,13 @@ int main(int argc,char * argv[])
 		rc = mdb_cursor_open(db, NULL, &cursor);
 		rc = mdb_cursor_get(cursor, &key, &data, MDB_FIRST);
 		printf("key: %p %.*s, data: %p %.*s\n",
-			key.mv_data, key.mv_size, key.mv_data, data.mv_data, data.mv_size, data.mv_data);
+			key.mv_data,  (int) key.mv_size,  (char *) key.mv_data,
+			data.mv_data, (int) data.mv_size, (char *) data.mv_data);
 		for (i=0; i<32; i++) {
 			rc = mdb_cursor_get(cursor, &key, &data, MDB_NEXT);
 			printf("key: %p %.*s, data: %p %.*s\n",
-				key.mv_data, key.mv_size, key.mv_data, data.mv_data, data.mv_size, data.mv_data);
+				key.mv_data,  (int) key.mv_size,  (char *) key.mv_data,
+				data.mv_data, (int) data.mv_size, (char *) data.mv_data);
 		}
 #endif
 		mdb_cursor_close(cursor);

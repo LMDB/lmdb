@@ -115,11 +115,11 @@ typedef struct MDB_page {		/* represents a page of storage */
 	indx_t		mp_ptrs[1];		/* dynamic size */
 } MDB_page;
 
-#define PAGEHDRSZ	 offsetof(MDB_page, mp_ptrs)
+#define PAGEHDRSZ	 ((unsigned) offsetof(MDB_page, mp_ptrs))
 
 #define NUMKEYS(p)	 (((p)->mp_lower - PAGEHDRSZ) >> 1)
 #define SIZELEFT(p)	 (indx_t)((p)->mp_upper - (p)->mp_lower)
-#define PAGEFILL(env, p) (1000 * ((env)->me_head.mh_psize - PAGEHDRSZ - SIZELEFT(p)) / \
+#define PAGEFILL(env, p) (1000L * ((env)->me_head.mh_psize - PAGEHDRSZ - SIZELEFT(p)) / \
 				((env)->me_head.mh_psize - PAGEHDRSZ))
 #define IS_LEAF(p)	 F_ISSET((p)->mp_flags, P_LEAF)
 #define IS_BRANCH(p)	 F_ISSET((p)->mp_flags, P_BRANCH)
@@ -1051,7 +1051,7 @@ mdb_search_node(MDB_db *bt, MDB_page *mp, MDB_val *key,
 	MDB_node	*node;
 	MDB_val	 nodekey;
 
-	DPRINTF("searching %lu keys in %s page %lu",
+	DPRINTF("searching %u keys in %s page %lu",
 	    NUMKEYS(mp),
 	    IS_LEAF(mp) ? "leaf" : "branch",
 	    mp->mp_pgno);
@@ -1166,7 +1166,7 @@ mdb_search_page_root(MDB_db *bt, MDB_val *key,
 		unsigned int	 i = 0;
 		MDB_node	*node;
 
-		DPRINTF("branch page %lu has %lu keys", mp->mp_pgno, NUMKEYS(mp));
+		DPRINTF("branch page %lu has %u keys", mp->mp_pgno, NUMKEYS(mp));
 		assert(NUMKEYS(mp) > 1);
 		DPRINTF("found index 0 to page %lu", NODEPGNO(NODEPTR(mp, 0)));
 
@@ -1436,7 +1436,7 @@ mdb_cursor_next(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 	} else
 		top->mp_ki++;
 
-	DPRINTF("==> cursor points to page %lu with %lu keys, key index %u",
+	DPRINTF("==> cursor points to page %lu with %u keys, key index %u",
 	    mp->mp_pgno, NUMKEYS(mp), top->mp_ki);
 
 	assert(IS_LEAF(mp));
@@ -1664,7 +1664,7 @@ mdb_add_node(MDB_db *db, MDB_page *mp, indx_t indx,
 	}
 
 	if (node_size + sizeof(indx_t) > SIZELEFT(mp)) {
-		DPRINTF("not enough room in page %lu, got %lu ptrs",
+		DPRINTF("not enough room in page %lu, got %u ptrs",
 		    mp->mp_pgno, NUMKEYS(mp));
 		DPRINTF("upper - lower = %u - %u = %u", mp->mp_upper, mp->mp_lower,
 		    mp->mp_upper - mp->mp_lower);
@@ -1940,7 +1940,7 @@ mdb_merge(MDB_db *bt, MDB_pageparent *src, MDB_pageparent *dst)
 			return rc;
 	}
 
-	DPRINTF("dst page %lu now has %lu keys (%.1f%% filled)",
+	DPRINTF("dst page %lu now has %u keys (%.1f%% filled)",
 	    dst->mp_page->mp_pgno, NUMKEYS(dst->mp_page), (float)PAGEFILL(bt->md_env, dst->mp_page) / 10);
 
 	/* Unlink the src page from parent.
@@ -1980,7 +1980,7 @@ mdb_rebalance(MDB_db *db, MDB_pageparent *mpp)
 	assert(db->md_env->me_txn != NULL);
 	assert(mpp != NULL);
 
-	DPRINTF("rebalancing %s page %lu (has %lu keys, %.1f%% full)",
+	DPRINTF("rebalancing %s page %lu (has %u keys, %.1f%% full)",
 	    IS_LEAF(mpp->mp_page) ? "leaf" : "branch",
 	    mpp->mp_page->mp_pgno, NUMKEYS(mpp->mp_page), (float)PAGEFILL(db->md_env, mpp->mp_page) / 10);
 
@@ -2043,7 +2043,7 @@ mdb_rebalance(MDB_db *db, MDB_pageparent *mpp)
 	}
 	npp.mp_parent = mpp->mp_parent;
 
-	DPRINTF("found neighbor page %lu (%lu keys, %.1f%% full)",
+	DPRINTF("found neighbor page %lu (%u keys, %.1f%% full)",
 	    npp.mp_page->mp_pgno, NUMKEYS(npp.mp_page), (float)PAGEFILL(db->md_env, npp.mp_page) / 10);
 
 	/* If the neighbor page is above threshold and has at least two
@@ -2329,7 +2329,7 @@ mdb_put(MDB_db *bt, MDB_txn *txn,
 		goto done;
 
 	assert(IS_LEAF(mpp.mp_page));
-	DPRINTF("there are %lu keys, should insert new key at index %i",
+	DPRINTF("there are %u keys, should insert new key at index %i",
 		NUMKEYS(mpp.mp_page), ki);
 
 	if (SIZELEFT(mpp.mp_page) < mdb_leaf_size(bt, key, data)) {
