@@ -1203,7 +1203,7 @@ mdb_search_page_root(MDB_db *bt, MDB_val *key,
 
 		if (modify) {
 			MDB_dhead *dh = ((MDB_dhead *)mp)-1;
-			if (rc = mdb_touch(bt->md_env->me_txn, mpp))
+			if ((rc = mdb_touch(bt->md_env->me_txn, mpp)) != 0)
 				return rc;
 			dh = ((MDB_dhead *)mpp->mp_page)-1;
 			dh->md_parent = mpp->mp_parent;
