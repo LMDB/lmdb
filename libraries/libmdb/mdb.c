@@ -144,7 +144,7 @@ typedef struct MDB_meta {			/* meta (footer) page content */
 typedef struct MDB_dhead {					/* a dirty page */
 	SIMPLEQ_ENTRY(MDB_dpage)	 md_next;	/* queue of dirty pages */
 	MDB_page	*md_parent;
-	int			md_pi;				/* parent index */
+	unsigned	md_pi;				/* parent index */
 	int			md_num;
 } MDB_dhead;
 
@@ -158,10 +158,10 @@ SIMPLEQ_HEAD(dirty_queue, MDB_dpage);
 typedef struct MDB_pageparent {
 	MDB_page *mp_page;
 	MDB_page *mp_parent;
-	int		mp_pi;
+	unsigned mp_pi;
 } MDB_pageparent;
 
-static MDB_dpage *mdb_newpage(MDB_txn *txn, MDB_page *parent, int parent_idx, int num);
+static MDB_dpage *mdb_newpage(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num);
 static int 		mdb_touch(MDB_txn *txn, MDB_pageparent *mp);
 
 typedef struct MDB_ppage {					/* ordered list of pages */
@@ -380,7 +380,7 @@ _mdb_cmp(MDB_db *db, const MDB_val *key1, const MDB_val *key2)
 
 /* Allocate new page(s) for writing */
 static MDB_dpage *
-mdb_newpage(MDB_txn *txn, MDB_page *parent, int parent_idx, int num)
+mdb_newpage(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num)
 {
 	MDB_dpage *dp;
 
