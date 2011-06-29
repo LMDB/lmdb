@@ -1,0 +1,11 @@
+mtest
+testdb
+mdb_stat
+*.[ao]
+*[~#]
+*.bak
+*.orig
+*.rej
+core
+core.*
+valgrind.*
