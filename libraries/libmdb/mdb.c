@@ -346,25 +346,19 @@ memncmp(const void *s1, size_t n1, const void *s2, size_t n2)
 static int
 memnrcmp(const void *s1, size_t n1, const void *s2, size_t n2)
 {
-	const unsigned char	*p1;
-	const unsigned char	*p2;
-
-	if (n1 == 0)
-		return n2 == 0 ? 0 : -1;
+	const unsigned char	*p1, *p2, *p1_lim;
 
 	if (n2 == 0)
-		return n1 == 0 ? 0 : 1;
+		return n1 != 0;
+	if (n1 == 0)
+		return -1;
 
 	p1 = (const unsigned char *)s1 + n1 - 1;
 	p2 = (const unsigned char *)s2 + n2 - 1;
 
-	while (*p1 == *p2) {
-		if (p1 == s1)
-			return (p2 == s2) ? 0 : -1;
-		if (p2 == s2)
-			return (p1 == p2) ? 0 : 1;
-		p1--;
-		p2--;
+	for (p1_lim = (n1 <= n2 ? s1 : s2);  *p1 == *p2;  p1--, p2--) {
+		if (p1 == p1_lim)
+			return (p1 != s1) ? (p1 != p2) : (p2 != s2) ? -1 : 0;
 	}
 	return *p1 - *p2;
 }
