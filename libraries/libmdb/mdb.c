@@ -504,7 +504,7 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 	txn->mt_next_pgno = env->me_meta.mm_last_pg+1;
 	txn->mt_first_pgno = txn->mt_next_pgno;
 	txn->mt_root = env->me_meta.mm_root;
-	DPRINTF("begin transaction on mdbenv %p, root page %lu", env, txn->mt_root);
+	DPRINTF("begin transaction %lu on mdbenv %p, root page %lu", txn->mt_txnid, env, txn->mt_root);
 
 	*ret = txn;
 	return MDB_SUCCESS;
@@ -520,7 +520,7 @@ mdb_txn_abort(MDB_txn *txn)
 		return;
 
 	env = txn->mt_env;
-	DPRINTF("abort transaction on mdbenv %p, root page %lu", env, txn->mt_root);
+	DPRINTF("abort transaction %lu on mdbenv %p, root page %lu", txn->mt_txnid, env, txn->mt_root);
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
 		txn->mt_u.reader->mr_txnid = 0;
@@ -586,8 +586,8 @@ mdb_txn_commit(MDB_txn *txn)
 	if (SIMPLEQ_EMPTY(txn->mt_u.dirty_queue))
 		goto done;
 
-	DPRINTF("committing transaction on mdbenv %p, root page %lu",
-	    env, txn->mt_root);
+	DPRINTF("committing transaction %lu on mdbenv %p, root page %lu",
+	    txn->mt_txnid, env, txn->mt_root);
 
 	/* Commit up to MDB_COMMIT_PAGES dirty pages to disk until done.
 	 */
@@ -843,8 +843,10 @@ mdbenv_read_meta(MDB_env *env)
 	if (meta[0]->mm_txnid < meta[1]->mm_txnid)
 		toggle = 1;
 
-	bcopy(meta[toggle], &env->me_meta, sizeof(env->me_meta));
-	env->me_metatoggle = toggle;
+	if (meta[toggle]->mm_txnid > env->me_meta.mm_txnid) {
+		bcopy(meta[toggle], &env->me_meta, sizeof(env->me_meta));
+		env->me_metatoggle = toggle;
+	}
 
 	DPRINTF("Using meta page %d", toggle);
 
