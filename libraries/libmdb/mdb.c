@@ -333,15 +333,14 @@ static int		 memnrcmp(const void *s1, size_t n1,
 static int
 memncmp(const void *s1, size_t n1, const void *s2, size_t n2)
 {
-	if (n1 < n2) {
-		if (memcmp(s1, s2, n1) == 0)
-			return -1;
+	int diff, len_diff = -1;
+
+	if (n1 >= n2) {
+		len_diff = (n1 > n2);
+		n1 = n2;
 	}
-	else if (n1 > n2) {
-		if (memcmp(s1, s2, n2) == 0)
-			return 1;
-	}
-	return memcmp(s1, s2, n1);
+	diff = memcmp(s1, s2, n1);
+	return diff ? diff : len_diff;
 }
 
 static int
