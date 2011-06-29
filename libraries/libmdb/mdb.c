@@ -1186,7 +1186,7 @@ mdb_search_page_root(MDB_db *bt, MDB_val *key,
 		if (key)
 			DPRINTF("following index %u for key %.*s",
 			    i, (int)key->mv_size, (char *)key->mv_data);
-		assert(i >= 0 && i < NUMKEYS(mp));
+		assert(i < NUMKEYS(mp));
 		node = NODEPTR(mp, i);
 
 		if (cursor)
