@@ -401,7 +401,6 @@ mdb_newpage(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num)
 static int
 mdb_touch(MDB_txn *txn, MDB_pageparent *pp)
 {
-	int rc;
 	MDB_page *mp = pp->mp_page;
 	pgno_t	pgno;
 	assert(txn != NULL);
@@ -659,7 +658,6 @@ done:
 static int
 mdbenv_write_header(MDB_env *env)
 {
-	struct stat	 sb;
 	MDB_head	*h;
 	MDB_page	*p;
 	ssize_t		 rc;
@@ -1285,9 +1283,7 @@ mdb_read_data(MDB_db *db, MDB_page *mp, MDB_node *leaf,
     MDB_val *data)
 {
 	MDB_page	*omp;		/* overflow mpage */
-	size_t		 psz;
 	size_t		 max;
-	size_t		 sz = 0;
 	pgno_t		 pgno;
 
 	bzero(data, sizeof(*data));
@@ -2126,7 +2122,6 @@ mdb_split(MDB_db *bt, MDB_page **mpp, unsigned int *newindxp,
 	pgno_t		 pgno = 0;
 	unsigned int	 i, j, split_indx;
 	MDB_node	*node;
-	MDB_page	*pright, *p;
 	MDB_val	 sepkey, rkey, rdata;
 	MDB_page	*copy;
 	MDB_dpage	*mdp, *rdp, *pdp;

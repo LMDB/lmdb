@@ -5,7 +5,7 @@
 
 int main(int argc,char * argv[])
 {
-	int i = 0, rc;
+	int rc;
 	MDB_env *env;
 	MDB_db *db;
 	MDB_stat *mst;
