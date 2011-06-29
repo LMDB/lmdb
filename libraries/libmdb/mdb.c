@@ -25,14 +25,15 @@
 
 #include "mdb.h"
 
-#define DEBUG
+#ifndef DEBUG
+#define DEBUG 1
+#endif
 
-#ifdef DEBUG
-# define DPRINTF(...)	do { fprintf(stderr, "%s:%d: ", __func__, __LINE__); \
-			     fprintf(stderr, __VA_ARGS__); \
-			     fprintf(stderr, "\n"); } while(0)
+#if (DEBUG +0) && defined(__GNUC__)
+# define DPRINTF(fmt, ...) \
+	fprintf(stderr, "%s:%d: " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
 #else
-# define DPRINTF(...)
+# define DPRINTF(...)	((void) 0)
 #endif
 
 #define PAGESIZE	 4096
