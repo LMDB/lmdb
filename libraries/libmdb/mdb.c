@@ -99,8 +99,7 @@ typedef struct MDB_page {		/* represents a page of storage */
 #define	P_LEAF		 0x02		/* leaf page */
 #define	P_OVERFLOW	 0x04		/* overflow page */
 #define	P_META		 0x08		/* meta page */
-#define	P_HEAD		 0x10		/* header page */
-#define	P_DIRTY		 0x20		/* dirty page */
+#define	P_DIRTY		 0x10		/* dirty page */
 	uint32_t	mp_flags;
 #define mp_lower	mp_pb.pb.pb_lower
 #define mp_upper	mp_pb.pb.pb_upper
@@ -119,26 +118,21 @@ typedef struct MDB_page {		/* represents a page of storage */
 
 #define NUMKEYS(p)	 (((p)->mp_lower - PAGEHDRSZ) >> 1)
 #define SIZELEFT(p)	 (indx_t)((p)->mp_upper - (p)->mp_lower)
-#define PAGEFILL(env, p) (1000L * ((env)->me_head.mh_psize - PAGEHDRSZ - SIZELEFT(p)) / \
-				((env)->me_head.mh_psize - PAGEHDRSZ))
+#define PAGEFILL(env, p) (1000L * ((env)->me_meta.mm_stat.ms_psize - PAGEHDRSZ - SIZELEFT(p)) / \
+				((env)->me_meta.mm_stat.ms_psize - PAGEHDRSZ))
 #define IS_LEAF(p)	 F_ISSET((p)->mp_flags, P_LEAF)
 #define IS_BRANCH(p)	 F_ISSET((p)->mp_flags, P_BRANCH)
 #define IS_OVERFLOW(p)	 F_ISSET((p)->mp_flags, P_OVERFLOW)
 
-typedef struct MDB_head {			/* header page content */
-	uint32_t	mh_magic;
-	uint32_t	mh_version;
-	uint32_t	mh_flags;
-	uint32_t	mh_psize;			/* page size */
-	void		*mh_address;		/* address for fixed mapping */
-	size_t		mh_mapsize;			/* size of mmap region */
-} MDB_head;
-
 typedef struct MDB_meta {			/* meta (footer) page content */
-	MDB_stat	mm_stat;
-	pgno_t		mm_root;			/* page number of root page */
+	uint32_t	mm_magic;
+	uint32_t	mm_version;
+	void		*mm_address;		/* address for fixed mapping */
+	size_t		mm_mapsize;			/* size of mmap region */
 	pgno_t		mm_last_pg;			/* last used page in file */
 	ulong		mm_txnid;			/* txnid that committed this page */
+	MDB_stat	mm_stat;
+	pgno_t		mm_root;			/* page number of root page */
 } MDB_meta;
 
 typedef struct MDB_dhead {					/* a dirty page */
@@ -243,7 +237,6 @@ struct MDB_env {
 	char		*me_path;
 	char *me_map;
 	MDB_txninfo	*me_txns;
-	MDB_head	me_head;
 	MDB_db0		me_db;		/* first DB, overlaps with meta */
 	MDB_meta	me_meta;
 	MDB_txn	*me_txn;		/* current write transaction */
@@ -274,7 +267,6 @@ static int  mdb_search_page(MDB_db *db,
 			    MDB_cursor *cursor, int modify,
 			    MDB_pageparent *mpp);
 
-static int  mdbenv_write_header(MDB_env *env);
 static int  mdbenv_read_header(MDB_env *env);
 static int  mdb_check_meta_page(MDB_page *p);
 static int  mdbenv_read_meta(MDB_env *env);
@@ -384,7 +376,7 @@ mdb_newpage(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num)
 {
 	MDB_dpage *dp;
 
-	if ((dp = malloc(txn->mt_env->me_head.mh_psize * num + sizeof(MDB_dhead))) == NULL)
+	if ((dp = malloc(txn->mt_env->me_meta.mm_stat.ms_psize * num + sizeof(MDB_dhead))) == NULL)
 		return NULL;
 	dp->h.md_num = num;
 	dp->h.md_parent = parent;
@@ -412,7 +404,7 @@ mdb_touch(MDB_txn *txn, MDB_pageparent *pp)
 		if ((dp = mdb_newpage(txn, pp->mp_parent, pp->mp_pi, 1)) == NULL)
 			return ENOMEM;
 		pgno = dp->p.mp_pgno;
-		bcopy(mp, &dp->p, txn->mt_env->me_head.mh_psize);
+		bcopy(mp, &dp->p, txn->mt_env->me_meta.mm_stat.ms_psize);
 		mp = &dp->p;
 		mp->mp_pgno = pgno;
 		mp->mp_flags |= P_DIRTY;
@@ -593,13 +585,13 @@ mdb_txn_commit(MDB_txn *txn)
 		size = 0;
 		SIMPLEQ_FOREACH(dp, txn->mt_u.dirty_queue, h.md_next) {
 			if (dp->p.mp_pgno != next) {
-				lseek(env->me_fd, dp->p.mp_pgno * env->me_head.mh_psize, SEEK_SET);
+				lseek(env->me_fd, dp->p.mp_pgno * env->me_meta.mm_stat.ms_psize, SEEK_SET);
 				next = dp->p.mp_pgno;
 				if (n)
 					break;
 			}
 			DPRINTF("committing page %lu", dp->p.mp_pgno);
-			iov[n].iov_len = env->me_head.mh_psize * dp->h.md_num;
+			iov[n].iov_len = env->me_meta.mm_stat.ms_psize * dp->h.md_num;
 			iov[n].iov_base = &dp->p;
 			size += iov[n].iov_len;
 			next = dp->p.mp_pgno + dp->h.md_num;
@@ -656,46 +648,11 @@ done:
 }
 
 static int
-mdbenv_write_header(MDB_env *env)
-{
-	MDB_head	*h;
-	MDB_page	*p;
-	ssize_t		 rc;
-	unsigned int	 psize;
-
-	DPRINTF("writing header page");
-	assert(env != NULL);
-
-	psize = sysconf(_SC_PAGE_SIZE);
-
-	if ((p = calloc(1, psize)) == NULL)
-		return ENOMEM;
-	p->mp_flags = P_HEAD;
-
-	env->me_head.mh_psize = psize;
-	env->me_head.mh_flags = env->me_flags & 0xffff;
-
-	h = METADATA(p);
-	bcopy(&env->me_head, h, sizeof(*h));
-
-	rc = write(env->me_fd, p, env->me_head.mh_psize);
-	free(p);
-	if (rc != (ssize_t)env->me_head.mh_psize) {
-		int err = errno;
-		if (rc > 0)
-			DPRINTF("short write, filesystem full?");
-		return err;
-	}
-
-	return MDB_SUCCESS;
-}
-
-static int
 mdbenv_read_header(MDB_env *env)
 {
 	char		 page[PAGESIZE];
 	MDB_page	*p;
-	MDB_head	*h;
+	MDB_meta	*m;
 	int		 rc;
 
 	assert(env != NULL);
@@ -714,24 +671,24 @@ mdbenv_read_header(MDB_env *env)
 
 	p = (MDB_page *)page;
 
-	if (!F_ISSET(p->mp_flags, P_HEAD)) {
-		DPRINTF("page %lu not a header page", p->mp_pgno);
+	if (!F_ISSET(p->mp_flags, P_META)) {
+		DPRINTF("page %lu not a meta page", p->mp_pgno);
 		return EINVAL;
 	}
 
-	h = METADATA(p);
-	if (h->mh_magic != MDB_MAGIC) {
-		DPRINTF("header has invalid magic");
+	m = METADATA(p);
+	if (m->mm_magic != MDB_MAGIC) {
+		DPRINTF("meta has invalid magic");
 		return EINVAL;
 	}
 
-	if (h->mh_version != MDB_VERSION) {
+	if (m->mm_version != MDB_VERSION) {
 		DPRINTF("database is version %u, expected version %u",
-		    h->mh_version, MDB_VERSION);
+		    m->mm_version, MDB_VERSION);
 		return EINVAL;
 	}
 
-	bcopy(h, &env->me_head, sizeof(*h));
+	bcopy(m, &env->me_meta, sizeof(*m));
 	return 0;
 }
 
@@ -741,27 +698,36 @@ mdbenv_init_meta(MDB_env *env)
 	MDB_page *p, *q;
 	MDB_meta *meta;
 	int rc;
+	unsigned int	 psize;
 
-	p = calloc(2, env->me_head.mh_psize);
-	p->mp_pgno = 1;
+	DPRINTF("writing new meta page");
+	psize = sysconf(_SC_PAGE_SIZE);
+
+	env->me_meta.mm_magic = MDB_MAGIC;
+	env->me_meta.mm_version = MDB_VERSION;
+	env->me_meta.mm_stat.ms_psize = psize;
+	env->me_meta.mm_stat.ms_flags = env->me_flags & 0xffff;
+	env->me_meta.mm_root = P_INVALID;
+	env->me_meta.mm_last_pg = 1;
+
+	p = calloc(2, psize);
+	p->mp_pgno = 0;
 	p->mp_flags = P_META;
 
 	meta = METADATA(p);
-	meta->mm_root = P_INVALID;
-	meta->mm_last_pg = 2;
+	bcopy(&env->me_meta, meta, sizeof(*meta));
 
-	q = (MDB_page *)((char *)p + env->me_head.mh_psize);
+	q = (MDB_page *)((char *)p + psize);
 
-	q->mp_pgno = 2;
+	q->mp_pgno = 1;
 	q->mp_flags = P_META;
 
 	meta = METADATA(q);
-	meta->mm_root = P_INVALID;
-	meta->mm_last_pg = 2;
+	bcopy(&env->me_meta, meta, sizeof(*meta));
 
-	rc = write(env->me_fd, p, env->me_head.mh_psize * 2);
+	rc = write(env->me_fd, p, psize * 2);
 	free(p);
-	return (rc == env->me_head.mh_psize * 2) ? MDB_SUCCESS : errno;
+	return (rc == psize * 2) ? MDB_SUCCESS : errno;
 }
 
 static int
@@ -784,9 +750,9 @@ mdbenv_write_meta(MDB_txn *txn)
 	meta.mm_last_pg = txn->mt_next_pgno - 1;
 	meta.mm_txnid = txn->mt_txnid;
 
-	off = env->me_head.mh_psize;
-	if (!env->me_metatoggle)
-		off *= 2;
+	off = 0;
+	if (env->me_metatoggle)
+		off = env->me_meta.mm_stat.ms_psize;
 	off += PAGEHDRSZ;
 
 	lseek(env->me_fd, off, SEEK_SET);
@@ -821,8 +787,8 @@ mdbenv_read_meta(MDB_env *env)
 
 	assert(env != NULL);
 
-	if ((mp0 = mdbenv_get_page(env, 1)) == NULL ||
-		(mp1 = mdbenv_get_page(env, 2)) == NULL)
+	if ((mp0 = mdbenv_get_page(env, 0)) == NULL ||
+		(mp1 = mdbenv_get_page(env, 1)) == NULL)
 		return EIO;
 
 	rc = mdb_check_meta_page(mp0);
@@ -855,9 +821,7 @@ mdbenv_create(MDB_env **env)
 	e = calloc(1, sizeof(*e));
 	if (!e) return ENOMEM;
 
-	e->me_head.mh_magic = MDB_MAGIC;
-	e->me_head.mh_version = MDB_VERSION;
-	e->me_head.mh_mapsize = DEFAULT_MAPSIZE;
+	e->me_meta.mm_mapsize = DEFAULT_MAPSIZE;
 	e->me_maxreaders = DEFAULT_READERS;
 	e->me_db.md_env = e;
 	*env = e;
@@ -869,7 +833,7 @@ mdbenv_set_mapsize(MDB_env *env, size_t size)
 {
 	if (env->me_map)
 		return EINVAL;
-	env->me_mapsize = env->me_head.mh_mapsize = size;
+	env->me_mapsize = env->me_meta.mm_mapsize = size;
 	return MDB_SUCCESS;
 }
 
@@ -895,8 +859,6 @@ mdbenv_open2(MDB_env *env, unsigned int flags)
 	int i, newenv = 0;
 
 	env->me_flags = flags;
-	env->me_meta.mm_root = P_INVALID;
-	env->me_meta.mm_last_pg = 2;
 
 	if ((i = mdbenv_read_header(env)) != 0) {
 		if (i != ENOENT)
@@ -906,25 +868,20 @@ mdbenv_open2(MDB_env *env, unsigned int flags)
 	}
 
 	if (!env->me_mapsize)
-		env->me_mapsize = env->me_head.mh_mapsize;
+		env->me_mapsize = env->me_meta.mm_mapsize;
 
 	i = MAP_SHARED;
-	if (env->me_head.mh_address && (flags & MDB_FIXEDMAP))
+	if (env->me_meta.mm_address && (flags & MDB_FIXEDMAP))
 		i |= MAP_FIXED;
-	env->me_map = mmap(env->me_head.mh_address, env->me_mapsize, PROT_READ, i,
+	env->me_map = mmap(env->me_meta.mm_address, env->me_mapsize, PROT_READ, i,
 		env->me_fd, 0);
 	if (env->me_map == MAP_FAILED)
 		return errno;
 
 	if (newenv) {
-		env->me_head.mh_mapsize = env->me_mapsize;
+		env->me_meta.mm_mapsize = env->me_mapsize;
 		if (flags & MDB_FIXEDMAP)
-			env->me_head.mh_address = env->me_map;
-		i = mdbenv_write_header(env);
-		if (i != MDB_SUCCESS) {
-			munmap(env->me_map, env->me_mapsize);
-			return i;
-		}
+			env->me_meta.mm_address = env->me_map;
 		i = mdbenv_init_meta(env);
 		if (i != MDB_SUCCESS) {
 			munmap(env->me_map, env->me_mapsize);
@@ -936,7 +893,7 @@ mdbenv_open2(MDB_env *env, unsigned int flags)
 		return i;
 
 	DPRINTF("opened database version %u, pagesize %u",
-	    env->me_head.mh_version, env->me_head.mh_psize);
+	    env->me_meta.mm_version, env->me_meta.mm_stat.ms_psize);
 	DPRINTF("depth: %u", env->me_meta.mm_stat.ms_depth);
 	DPRINTF("entries: %lu", env->me_meta.mm_stat.ms_entries);
 	DPRINTF("branch pages: %lu", env->me_meta.mm_stat.ms_branch_pages);
@@ -1147,7 +1104,7 @@ mdbenv_get_page(MDB_env *env, pgno_t pgno)
 			}
 		}
 	} else {
-		p = (MDB_page *)(env->me_map + env->me_head.mh_psize * pgno);
+		p = (MDB_page *)(env->me_map + env->me_meta.mm_stat.ms_psize * pgno);
 	}
 	return p;
 }
@@ -1287,7 +1244,7 @@ mdb_read_data(MDB_db *db, MDB_page *mp, MDB_node *leaf,
 	pgno_t		 pgno;
 
 	bzero(data, sizeof(*data));
-	max = db->md_env->me_head.mh_psize - PAGEHDRSZ;
+	max = db->md_env->me_meta.mm_stat.ms_psize - PAGEHDRSZ;
 
 	if (!F_ISSET(leaf->mn_flags, F_BIGDATA)) {
 		data->mv_size = leaf->mn_dsize;
@@ -1572,12 +1529,12 @@ mdbenv_new_page(MDB_env *env, uint32_t flags, int num)
 	assert(env->me_txn != NULL);
 
 	DPRINTF("allocating new mpage %lu, page size %u",
-	    env->me_txn->mt_next_pgno, env->me_head.mh_psize);
+	    env->me_txn->mt_next_pgno, env->me_meta.mm_stat.ms_psize);
 	if ((dp = mdb_newpage(env->me_txn, NULL, 0, num)) == NULL)
 		return NULL;
 	dp->p.mp_flags = flags | P_DIRTY;
 	dp->p.mp_lower = PAGEHDRSZ;
-	dp->p.mp_upper = env->me_head.mh_psize;
+	dp->p.mp_upper = env->me_meta.mm_stat.ms_psize;
 
 	if (IS_BRANCH(&dp->p))
 		env->me_meta.mm_stat.ms_branch_pages++;
@@ -1597,7 +1554,7 @@ mdb_leaf_size(MDB_db *db, MDB_val *key, MDB_val *data)
 	size_t		 sz;
 
 	sz = LEAFSIZE(key, data);
-	if (data->mv_size >= db->md_env->me_head.mh_psize / MDB_MINKEYS) {
+	if (data->mv_size >= db->md_env->me_meta.mm_stat.ms_psize / MDB_MINKEYS) {
 		/* put on overflow page */
 		sz -= data->mv_size - sizeof(pgno_t);
 	}
@@ -1611,7 +1568,7 @@ mdb_branch_size(MDB_db *db, MDB_val *key)
 	size_t		 sz;
 
 	sz = INDXSIZE(key);
-	if (sz >= db->md_env->me_head.mh_psize / MDB_MINKEYS) {
+	if (sz >= db->md_env->me_meta.mm_stat.ms_psize / MDB_MINKEYS) {
 		/* put on overflow page */
 		/* not implemented */
 		/* sz -= key->size - sizeof(pgno_t); */
@@ -1645,9 +1602,9 @@ mdb_add_node(MDB_db *db, MDB_page *mp, indx_t indx,
 		if (F_ISSET(flags, F_BIGDATA)) {
 			/* Data already on overflow page. */
 			node_size += sizeof(pgno_t);
-		} else if (data->mv_size >= db->md_env->me_head.mh_psize / MDB_MINKEYS) {
-			int ovpages = PAGEHDRSZ + data->mv_size + db->md_env->me_head.mh_psize - 1;
-			ovpages /= db->md_env->me_head.mh_psize;
+		} else if (data->mv_size >= db->md_env->me_meta.mm_stat.ms_psize / MDB_MINKEYS) {
+			int ovpages = PAGEHDRSZ + data->mv_size + db->md_env->me_meta.mm_stat.ms_psize - 1;
+			ovpages /= db->md_env->me_meta.mm_stat.ms_psize;
 			/* Put data on overflow page. */
 			DPRINTF("data size is %zu, put on overflow page",
 			    data->mv_size);
@@ -2163,12 +2120,12 @@ mdb_split(MDB_db *bt, MDB_page **mpp, unsigned int *newindxp,
 	DPRINTF("new right sibling: page %lu", rdp->p.mp_pgno);
 
 	/* Move half of the keys to the right sibling. */
-	if ((copy = malloc(bt->md_env->me_head.mh_psize)) == NULL)
+	if ((copy = malloc(bt->md_env->me_meta.mm_stat.ms_psize)) == NULL)
 		return MDB_FAIL;
-	bcopy(&mdp->p, copy, bt->md_env->me_head.mh_psize);
-	bzero(&mdp->p.mp_ptrs, bt->md_env->me_head.mh_psize - PAGEHDRSZ);
+	bcopy(&mdp->p, copy, bt->md_env->me_meta.mm_stat.ms_psize);
+	bzero(&mdp->p.mp_ptrs, bt->md_env->me_meta.mm_stat.ms_psize - PAGEHDRSZ);
 	mdp->p.mp_lower = PAGEHDRSZ;
-	mdp->p.mp_upper = bt->md_env->me_head.mh_psize;
+	mdp->p.mp_upper = bt->md_env->me_meta.mm_stat.ms_psize;
 
 	split_indx = NUMKEYS(copy) / 2 + 1;
 

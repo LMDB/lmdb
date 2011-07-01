@@ -40,13 +40,15 @@ typedef enum MDB_cursor_op {		/* cursor operations */
 #define MDB_REVERSEKEY	0x02		/* use reverse string keys */
 #define MDB_NOSYNC		0x10000		/* don't fsync after commit */
 #define MDB_RDONLY		0x20000		/* read only */
+#define MDB_CREATE		0x40000		/* create if not present */
 
 /* environment flags */
 #define MDB_FIXEDMAP	0x01		/* mmap at a fixed address */
 
 typedef struct MDB_stat {
 	unsigned int	ms_psize;
-	unsigned int	ms_depth;
+	unsigned short	ms_depth;
+	unsigned short	ms_flags;
 	unsigned long	ms_branch_pages;
 	unsigned long	ms_leaf_pages;
 	unsigned long	ms_overflow_pages;
