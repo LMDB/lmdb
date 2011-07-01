@@ -24,6 +24,9 @@
 #include <pthread.h>
 
 #include "mdb.h"
+
+typedef ulong		 pgno_t;
+
 #include "idl.h"
 
 #ifndef DEBUG
@@ -47,7 +50,6 @@
 
 #define F_ISSET(w, f)	 (((w) & (f)) == (f))
 
-typedef ulong		 pgno_t;
 typedef uint16_t	 indx_t;
 
 #define DEFAULT_READERS	126
@@ -206,7 +208,6 @@ typedef struct MDB_node {
 struct MDB_txn {
 	pgno_t		mt_root;		/* current / new root page */
 	pgno_t		mt_next_pgno;	/* next unallocated page */
-	pgno_t		mt_first_pgno;
 	ulong		mt_txnid;
 	ulong		mt_oldest;
 	MDB_env		*mt_env;	
@@ -327,9 +328,6 @@ static size_t		 mdb_leaf_size(MDB_db *bt, MDB_val *key,
 			    MDB_val *data);
 static size_t		 mdb_branch_size(MDB_db *bt, MDB_val *key);
 
-static pgno_t		 mdbenv_compact_tree(MDB_env *env, pgno_t pgno,
-			    MDB_env *envc);
-
 static int		 memncmp(const void *s1, size_t n1,
 				 const void *s2, size_t n2);
 static int		 memnrcmp(const void *s1, size_t n1,
@@ -392,7 +390,7 @@ mdb_newpage(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num)
 
 	if (txn->mt_env->me_pghead) {
 		ulong oldest = txn->mt_txnid - 2;
-		int i;
+		unsigned int i;
 		for (i=0; i<txn->mt_env->me_txns->mt_numreaders; i++) {
 			if (txn->mt_env->me_txns->mt_readers[i].mr_txnid < oldest)
 				oldest = txn->mt_env->me_txns->mt_readers[i].mr_txnid;
@@ -546,7 +544,6 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 	}
 
 	txn->mt_next_pgno = env->me_meta.mm_last_pg+1;
-	txn->mt_first_pgno = txn->mt_next_pgno;
 	txn->mt_root = env->me_meta.mm_root;
 	DPRINTF("begin transaction %lu on mdbenv %p, root page %lu",
 		txn->mt_txnid, (void *) env, txn->mt_root);
@@ -599,6 +596,7 @@ mdb_txn_abort(MDB_txn *txn)
 		free(txn->mt_free_pgs);
 		free(txn->mt_u.dirty_queue);
 		env->me_txn = NULL;
+		env->me_txns->mt_txnid--;
 		pthread_mutex_unlock(&env->me_txns->mt_wmutex);
 	}
 
@@ -654,10 +652,23 @@ mdb_txn_commit(MDB_txn *txn)
 		size = 0;
 		SIMPLEQ_FOREACH(dp, txn->mt_u.dirty_queue, h.md_next) {
 			if (dp->p.mp_pgno != next) {
+				if (n) {
+					DPRINTF("committing %u dirty pages", n);
+					rc = writev(env->me_fd, iov, n);
+					if (rc != size) {
+						n = errno;
+						if (rc > 0)
+							DPRINTF("short write, filesystem full?");
+						else
+							DPRINTF("writev: %s", strerror(errno));
+						mdb_txn_abort(txn);
+						return n;
+					}
+					n = 0;
+					size = 0;
+				}
 				lseek(env->me_fd, dp->p.mp_pgno * env->me_meta.mm_stat.ms_psize, SEEK_SET);
 				next = dp->p.mp_pgno;
-				if (n)
-					break;
 			}
 			DPRINTF("committing page %lu", dp->p.mp_pgno);
 			iov[n].iov_len = env->me_meta.mm_stat.ms_psize * dp->h.md_num;
@@ -687,16 +698,15 @@ mdb_txn_commit(MDB_txn *txn)
 			return n;
 		}
 
-		/* Drop the dirty pages.
-		 */
-		while (!SIMPLEQ_EMPTY(txn->mt_u.dirty_queue)) {
-			dp = SIMPLEQ_FIRST(txn->mt_u.dirty_queue);
-			SIMPLEQ_REMOVE_HEAD(txn->mt_u.dirty_queue, h.md_next);
-			free(dp);
-			if (--n == 0)
-				break;
-		}
 	} while (!done);
+
+	/* Drop the dirty pages.
+	 */
+	while (!SIMPLEQ_EMPTY(txn->mt_u.dirty_queue)) {
+		dp = SIMPLEQ_FIRST(txn->mt_u.dirty_queue);
+		SIMPLEQ_REMOVE_HEAD(txn->mt_u.dirty_queue, h.md_next);
+		free(dp);
+	}
 
 	if ((n = mdbenv_sync(env)) != 0 ||
 	    (n = mdbenv_write_meta(txn)) != MDB_SUCCESS ||
@@ -814,7 +824,7 @@ mdbenv_init_meta(MDB_env *env)
 
 	rc = write(env->me_fd, p, psize * 2);
 	free(p);
-	return (rc == psize * 2) ? MDB_SUCCESS : errno;
+	return (rc == (int)psize * 2) ? MDB_SUCCESS : errno;
 }
 
 static int
