@@ -221,15 +221,6 @@ struct MDB_txn {
 	unsigned int		 mt_flags;
 };
 
-/* Must be same as MDB_db, minus md_root/md_stat */
-typedef struct MDB_db0 {
-	unsigned int	md_flags;
-	MDB_cmp_func	*md_cmp;		/* user compare function */
-	MDB_rel_func	*md_rel;		/* user relocate function */
-	MDB_db			*md_parent;		/* parent tree */
-	MDB_env 		*md_env;
-} MDB_db0;
-
 struct MDB_db {
 	unsigned int	md_flags;
 	MDB_cmp_func	*md_cmp;		/* user compare function */
@@ -249,7 +240,7 @@ struct MDB_env {
 	char		*me_path;
 	char *me_map;
 	MDB_txninfo	*me_txns;
-	MDB_db0		me_db;		/* first DB, overlaps with meta */
+	MDB_db		me_db;		/* first DB */
 	MDB_meta	me_meta;
 	MDB_txn	*me_txn;		/* current write transaction */
 	size_t		me_mapsize;
@@ -2456,6 +2447,9 @@ int mdb_stat(MDB_db *db, MDB_stat **arg)
 {
 	if (db == NULL || arg == NULL)
 		return EINVAL;
+
+	if (!db->md_parent)
+		bcopy(&db->md_env->me_meta.mm_stat, &db->md_stat, sizeof(db->md_stat));
 
 	*arg = &db->md_stat;
 
