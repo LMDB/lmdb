@@ -24,6 +24,7 @@
 #include <pthread.h>
 
 #include "mdb.h"
+#include "idl.h"
 
 #ifndef DEBUG
 #define DEBUG 1
@@ -124,6 +125,8 @@ typedef struct MDB_page {		/* represents a page of storage */
 #define IS_BRANCH(p)	 F_ISSET((p)->mp_flags, P_BRANCH)
 #define IS_OVERFLOW(p)	 F_ISSET((p)->mp_flags, P_OVERFLOW)
 
+#define OVPAGES(size, psize)	(PAGEHDRSZ + size + psize - 1) / psize;
+
 typedef struct MDB_meta {			/* meta (footer) page content */
 	uint32_t	mm_magic;
 	uint32_t	mm_version;
@@ -148,6 +151,12 @@ typedef struct MDB_dpage {
 } MDB_dpage;
 
 SIMPLEQ_HEAD(dirty_queue, MDB_dpage);
+
+typedef struct MDB_oldpages {
+	struct MDB_oldpages *mo_next;
+	ulong		mo_txnid;
+	pgno_t		mo_pages[1];	/* dynamic */
+} MDB_oldpages;
 
 typedef struct MDB_pageparent {
 	MDB_page *mp_page;
@@ -199,7 +208,9 @@ struct MDB_txn {
 	pgno_t		mt_next_pgno;	/* next unallocated page */
 	pgno_t		mt_first_pgno;
 	ulong		mt_txnid;
+	ulong		mt_oldest;
 	MDB_env		*mt_env;	
+	pgno_t		*mt_free_pgs;	/* this is an IDL */
 	union {
 		struct dirty_queue	*dirty_queue;	/* modified pages */
 		MDB_reader	*reader;
@@ -243,6 +254,8 @@ struct MDB_env {
 	size_t		me_mapsize;
 	off_t		me_size;		/* current file size */
 	pthread_key_t	me_txkey;	/* thread-key for readers */
+	MDB_oldpages *me_pghead;
+	MDB_oldpages *me_pgtail;
 };
 
 #define NODESIZE	 offsetof(MDB_node, mn_data)
@@ -375,6 +388,40 @@ static MDB_dpage *
 mdb_newpage(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num)
 {
 	MDB_dpage *dp;
+	pgno_t pgno = P_INVALID;
+
+	if (txn->mt_env->me_pghead) {
+		ulong oldest = txn->mt_txnid - 2;
+		int i;
+		for (i=0; i<txn->mt_env->me_txns->mt_numreaders; i++) {
+			if (txn->mt_env->me_txns->mt_readers[i].mr_txnid < oldest)
+				oldest = txn->mt_env->me_txns->mt_readers[i].mr_txnid;
+		}
+		if (oldest > txn->mt_env->me_pghead->mo_txnid) {
+			MDB_oldpages *mop = txn->mt_env->me_pghead;
+			txn->mt_oldest = oldest;
+			if (num > 1) {
+				/* FIXME */
+				;
+			} else {
+				/* peel pages off tail, so we only have to truncate the list */
+				pgno = MDB_IDL_LAST(mop->mo_pages);
+				if (MDB_IDL_IS_RANGE(mop->mo_pages)) {
+					mop->mo_pages[2]++;
+					if (mop->mo_pages[2] > mop->mo_pages[1])
+						mop->mo_pages[0] = 0;
+				} else {
+					mop->mo_pages[0]--;
+				}
+				if (MDB_IDL_IS_ZERO(mop->mo_pages)) {
+					txn->mt_env->me_pghead = mop->mo_next;
+					if (!txn->mt_env->me_pghead)
+						txn->mt_env->me_pgtail = NULL;
+					free(mop);
+				}
+			}
+		}
+	}
 
 	if ((dp = malloc(txn->mt_env->me_meta.mm_stat.ms_psize * num + sizeof(MDB_dhead))) == NULL)
 		return NULL;
@@ -382,8 +429,12 @@ mdb_newpage(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num)
 	dp->h.md_parent = parent;
 	dp->h.md_pi = parent_idx;
 	SIMPLEQ_INSERT_TAIL(txn->mt_u.dirty_queue, dp, h.md_next);
-	dp->p.mp_pgno = txn->mt_next_pgno;
-	txn->mt_next_pgno += num;
+	if (pgno == P_INVALID) {
+		dp->p.mp_pgno = txn->mt_next_pgno;
+		txn->mt_next_pgno += num;
+	} else {
+		dp->p.mp_pgno = pgno;
+	}
 
 	return dp;
 }
@@ -400,9 +451,10 @@ mdb_touch(MDB_txn *txn, MDB_pageparent *pp)
 
 	if (!F_ISSET(mp->mp_flags, P_DIRTY)) {
 		MDB_dpage *dp;
-		DPRINTF("touching page %lu -> %lu", mp->mp_pgno, txn->mt_next_pgno);
 		if ((dp = mdb_newpage(txn, pp->mp_parent, pp->mp_pi, 1)) == NULL)
 			return ENOMEM;
+		DPRINTF("touched page %lu -> %lu", mp->mp_pgno, dp->p.mp_pgno);
+		mdb_idl_insert(txn->mt_free_pgs, mp->mp_pgno);
 		pgno = dp->p.mp_pgno;
 		bcopy(mp, &dp->p, txn->mt_env->me_meta.mm_stat.ms_psize);
 		mp = &dp->p;
@@ -451,6 +503,13 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 
 		pthread_mutex_lock(&env->me_txns->mt_wmutex);
 		env->me_txns->mt_txnid++;
+		txn->mt_free_pgs = malloc(MDB_IDL_UM_SIZEOF);
+		if (txn->mt_free_pgs == NULL) {
+			free(txn->mt_u.dirty_queue);
+			free(txn);
+			return ENOMEM;
+		}
+		txn->mt_free_pgs[0] = 0;
 	}
 	txn->mt_txnid = env->me_txns->mt_txnid;
 	if (rdonly) {
@@ -512,22 +571,32 @@ mdb_txn_abort(MDB_txn *txn)
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
 		txn->mt_u.reader->mr_txnid = 0;
 	} else {
-		/* Discard all dirty pages.
+		/* Discard all dirty pages. Return any re-used pages
+		 * to the free list.
 		 */
+		MDB_IDL_ZERO(txn->mt_free_pgs);
 		while (!SIMPLEQ_EMPTY(txn->mt_u.dirty_queue)) {
 			dp = SIMPLEQ_FIRST(txn->mt_u.dirty_queue);
 			SIMPLEQ_REMOVE_HEAD(txn->mt_u.dirty_queue, h.md_next);
+			if (dp->p.mp_pgno <= env->me_meta.mm_last_pg)
+				mdb_idl_insert(txn->mt_free_pgs, dp->p.mp_pgno);
 			free(dp);
 		}
+		/* put back to head of free list */
+		if (!MDB_IDL_IS_ZERO(txn->mt_free_pgs)) {
+			MDB_oldpages *mop;
 
-#if 0
-		DPRINTF("releasing write lock on txn %p", txn);
-		txn->bt->txn = NULL;
-		if (flock(txn->bt->fd, LOCK_UN) != 0) {
-			DPRINTF("failed to unlock fd %d: %s",
-			    txn->bt->fd, strerror(errno));
+			mop = malloc(sizeof(MDB_oldpages) + MDB_IDL_SIZEOF(txn->mt_free_pgs) - sizeof(pgno_t));
+			mop->mo_next = env->me_pghead;
+			mop->mo_txnid = txn->mt_oldest - 1;
+			if (!env->me_pghead) {
+				env->me_pgtail = mop;
+			}
+			env->me_pghead = mop;
+			bcopy(txn->mt_free_pgs, mop->mo_pages, MDB_IDL_SIZEOF(txn->mt_free_pgs));
 		}
-#endif
+
+		free(txn->mt_free_pgs);
 		free(txn->mt_u.dirty_queue);
 		env->me_txn = NULL;
 		pthread_mutex_unlock(&env->me_txns->mt_wmutex);
@@ -636,7 +705,25 @@ mdb_txn_commit(MDB_txn *txn)
 		return n;
 	}
 	env->me_txn = NULL;
+
+	/* add to tail of free list */
+	if (!MDB_IDL_IS_ZERO(txn->mt_free_pgs)) {
+		MDB_oldpages *mop;
+
+		mop = malloc(sizeof(MDB_oldpages) + MDB_IDL_SIZEOF(txn->mt_free_pgs) - sizeof(pgno_t));
+		mop->mo_next = NULL;
+		if (env->me_pghead) {
+			env->me_pgtail->mo_next = mop;
+		} else {
+			env->me_pghead = mop;
+		}
+		env->me_pgtail = mop;
+		bcopy(txn->mt_free_pgs, mop->mo_pages, MDB_IDL_SIZEOF(txn->mt_free_pgs));
+		mop->mo_txnid = txn->mt_txnid;
+	}
+
 	pthread_mutex_unlock(&env->me_txns->mt_wmutex);
+	free(txn->mt_free_pgs);
 	free(txn->mt_u.dirty_queue);
 	free(txn);
 	txn = NULL;
@@ -751,7 +838,7 @@ mdbenv_write_meta(MDB_txn *txn)
 	meta.mm_txnid = txn->mt_txnid;
 
 	off = 0;
-	if (env->me_metatoggle)
+	if (!env->me_metatoggle)
 		off = env->me_meta.mm_stat.ms_psize;
 	off += PAGEHDRSZ;
 
@@ -1093,17 +1180,19 @@ mdbenv_get_page(MDB_env *env, pgno_t pgno)
 {
 	MDB_page *p = NULL;
 	MDB_txn *txn = env->me_txn;
+	int found = 0;
 
-	if (txn && pgno >= txn->mt_first_pgno &&
-		!SIMPLEQ_EMPTY(txn->mt_u.dirty_queue)) {
+	if (txn && !SIMPLEQ_EMPTY(txn->mt_u.dirty_queue)) {
 		MDB_dpage *dp;
 		SIMPLEQ_FOREACH(dp, txn->mt_u.dirty_queue, h.md_next) {
 			if (dp->p.mp_pgno == pgno) {
 				p = &dp->p;
+				found = 1;
 				break;
 			}
 		}
-	} else {
+	}
+	if (!found) {
 		p = (MDB_page *)(env->me_map + env->me_meta.mm_stat.ms_psize * pgno);
 	}
 	return p;
@@ -1528,10 +1617,10 @@ mdbenv_new_page(MDB_env *env, uint32_t flags, int num)
 	assert(env != NULL);
 	assert(env->me_txn != NULL);
 
-	DPRINTF("allocating new mpage %lu, page size %u",
-	    env->me_txn->mt_next_pgno, env->me_meta.mm_stat.ms_psize);
 	if ((dp = mdb_newpage(env->me_txn, NULL, 0, num)) == NULL)
 		return NULL;
+	DPRINTF("allocated new mpage %lu, page size %u",
+	    dp->p.mp_pgno, env->me_meta.mm_stat.ms_psize);
 	dp->p.mp_flags = flags | P_DIRTY;
 	dp->p.mp_lower = PAGEHDRSZ;
 	dp->p.mp_upper = env->me_meta.mm_stat.ms_psize;
@@ -1603,8 +1692,7 @@ mdb_add_node(MDB_db *db, MDB_page *mp, indx_t indx,
 			/* Data already on overflow page. */
 			node_size += sizeof(pgno_t);
 		} else if (data->mv_size >= db->md_env->me_meta.mm_stat.ms_psize / MDB_MINKEYS) {
-			int ovpages = PAGEHDRSZ + data->mv_size + db->md_env->me_meta.mm_stat.ms_psize - 1;
-			ovpages /= db->md_env->me_meta.mm_stat.ms_psize;
+			int ovpages = OVPAGES(data->mv_size, db->md_env->me_meta.mm_stat.ms_psize);
 			/* Put data on overflow page. */
 			DPRINTF("data size is %zu, put on overflow page",
 			    data->mv_size);
@@ -2056,6 +2144,18 @@ mdb_del(MDB_db *bt, MDB_txn *txn,
 		return rc;
 
 	mdb_del_node(bt, mpp.mp_page, ki);
+	/* add overflow pages to free list */
+	if (F_ISSET(leaf->mn_flags, F_BIGDATA)) {
+		int i, ovpages;
+		pgno_t pg;
+
+		bcopy(NODEDATA(leaf), &pg, sizeof(pg));
+		ovpages = OVPAGES(NODEDSZ(leaf), bt->md_env->me_meta.mm_stat.ms_psize);
+		for (i=0; i<ovpages; i++) {
+			mdb_idl_insert(txn->mt_free_pgs, pg);
+			pg++;
+		}
+	}
 	bt->md_env->me_meta.mm_stat.ms_entries--;
 	rc = mdb_rebalance(bt, &mpp);
 	if (rc != MDB_SUCCESS)
