@@ -389,7 +389,10 @@ mdb_newpage(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num)
 			MDB_oldpages *mop = txn->mt_env->me_pghead;
 			txn->mt_oldest = oldest;
 			if (num > 1) {
-				/* FIXME */
+				/* FIXME: For now, always use fresh pages. We
+				 * really ought to search the free list for a
+				 * contiguous range.
+				 */
 				;
 			} else {
 				/* peel pages off tail, so we only have to truncate the list */
