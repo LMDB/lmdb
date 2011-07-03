@@ -47,8 +47,7 @@ typedef enum MDB_cursor_op {		/* cursor operations */
 
 typedef struct MDB_stat {
 	unsigned int	ms_psize;
-	unsigned short	ms_depth;
-	unsigned short	ms_flags;
+	unsigned int	ms_depth;
 	unsigned long	ms_branch_pages;
 	unsigned long	ms_leaf_pages;
 	unsigned long	ms_overflow_pages;
@@ -57,7 +56,7 @@ typedef struct MDB_stat {
 
 int  mdbenv_create(MDB_env **env);
 int  mdbenv_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode);
-int  mdbenv_stat(MDB_env *env, MDB_stat **stat);
+int  mdbenv_stat(MDB_env *env, MDB_stat *stat);
 void mdbenv_close(MDB_env *env);
 int  mdbenv_get_flags(MDB_env *env, unsigned int *flags);
 int  mdbenv_get_path(MDB_env *env, const char **path);
@@ -72,7 +71,7 @@ int  mdb_txn_commit(MDB_txn *txn);
 void mdb_txn_abort(MDB_txn *txn);
 
 int  mdb_open(MDB_env *env, MDB_txn *txn, const char *name, unsigned int flags, MDB_db **db);
-int  mdb_stat(MDB_db *db, MDB_stat **stat);
+int  mdb_stat(MDB_db *db, MDB_stat *stat);
 void mdb_close(MDB_db *db);
 
 int  mdb_get(MDB_db *db, MDB_txn *txn, MDB_val *key, MDB_val *data);

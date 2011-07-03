@@ -120,8 +120,8 @@ typedef struct MDB_page {		/* represents a page of storage */
 
 #define NUMKEYS(p)	 (((p)->mp_lower - PAGEHDRSZ) >> 1)
 #define SIZELEFT(p)	 (indx_t)((p)->mp_upper - (p)->mp_lower)
-#define PAGEFILL(env, p) (1000L * ((env)->me_meta.mm_stat.ms_psize - PAGEHDRSZ - SIZELEFT(p)) / \
-				((env)->me_meta.mm_stat.ms_psize - PAGEHDRSZ))
+#define PAGEFILL(env, p) (1000L * ((env)->me_meta.mm_psize - PAGEHDRSZ - SIZELEFT(p)) / \
+				((env)->me_meta.mm_psize - PAGEHDRSZ))
 #define IS_LEAF(p)	 F_ISSET((p)->mp_flags, P_LEAF)
 #define IS_BRANCH(p)	 F_ISSET((p)->mp_flags, P_BRANCH)
 #define IS_OVERFLOW(p)	 F_ISSET((p)->mp_flags, P_OVERFLOW)
@@ -133,10 +133,16 @@ typedef struct MDB_meta {			/* meta (footer) page content */
 	uint32_t	mm_version;
 	void		*mm_address;		/* address for fixed mapping */
 	size_t		mm_mapsize;			/* size of mmap region */
+	uint32_t	mm_psize;
+	uint16_t	mm_flags;
+	uint16_t	mm_depth;
+	ulong		mm_branch_pages;
+	ulong		mm_leaf_pages;
+	ulong		mm_overflow_pages;
+	ulong		mm_entries;
+	pgno_t		mm_root;
 	pgno_t		mm_last_pg;			/* last used page in file */
 	ulong		mm_txnid;			/* txnid that committed this page */
-	MDB_stat	mm_stat;
-	pgno_t		mm_root;			/* page number of root page */
 } MDB_meta;
 
 typedef struct MDB_dhead {					/* a dirty page */
@@ -165,7 +171,7 @@ typedef struct MDB_pageparent {
 	unsigned mp_pi;
 } MDB_pageparent;
 
-static MDB_dpage *mdb_newpage(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num);
+static MDB_dpage *mdb_alloc_page(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num);
 static int 		mdb_touch(MDB_txn *txn, MDB_pageparent *mp);
 
 typedef struct MDB_ppage {					/* ordered list of pages */
@@ -222,13 +228,19 @@ struct MDB_txn {
 };
 
 struct MDB_db {
-	unsigned int	md_flags;
+	MDB_db		*md_next;
+	char		*md_name;
 	MDB_cmp_func	*md_cmp;		/* user compare function */
 	MDB_rel_func	*md_rel;		/* user relocate function */
 	MDB_db			*md_parent;		/* parent tree */
 	MDB_env 		*md_env;
-	MDB_stat		md_stat;
-	pgno_t			md_root;		/* page number of root page */
+	ulong		md_branch_pages;
+	ulong		md_leaf_pages;
+	ulong		md_overflow_pages;
+	ulong		md_entries;
+	pgno_t		md_root;
+	uint16_t	md_flags;
+	uint16_t	md_depth;
 };
 
 struct MDB_env {
@@ -237,11 +249,11 @@ struct MDB_env {
 	uint32_t	me_flags;
 	unsigned int			me_maxreaders;
 	char		*me_path;
-	char *me_map;
+	char		*me_map;
 	MDB_txninfo	*me_txns;
 	MDB_db		me_db;		/* first DB */
 	MDB_meta	me_meta;
-	MDB_txn	*me_txn;		/* current write transaction */
+	MDB_txn		*me_txn;		/* current write transaction */
 	size_t		me_mapsize;
 	off_t		me_size;		/* current file size */
 	pthread_key_t	me_txkey;	/* thread-key for readers */
@@ -298,7 +310,7 @@ static int		 mdb_merge(MDB_db *bt, MDB_pageparent *src,
 static int		 mdb_split(MDB_db *bt, MDB_page **mpp,
 			    unsigned int *newindxp, MDB_val *newkey,
 			    MDB_val *newdata, pgno_t newpgno);
-static MDB_dpage *mdbenv_new_page(MDB_env *env, uint32_t flags, int num);
+static MDB_dpage *mdb_new_page(MDB_db *db, uint32_t flags, int num);
 
 static void		 cursor_pop_page(MDB_cursor *cursor);
 static MDB_ppage *cursor_push_page(MDB_cursor *cursor,
@@ -373,7 +385,7 @@ _mdb_cmp(MDB_db *db, const MDB_val *key1, const MDB_val *key2)
 
 /* Allocate new page(s) for writing */
 static MDB_dpage *
-mdb_newpage(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num)
+mdb_alloc_page(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num)
 {
 	MDB_dpage *dp;
 	pgno_t pgno = P_INVALID;
@@ -414,7 +426,7 @@ mdb_newpage(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num)
 		}
 	}
 
-	if ((dp = malloc(txn->mt_env->me_meta.mm_stat.ms_psize * num + sizeof(MDB_dhead))) == NULL)
+	if ((dp = malloc(txn->mt_env->me_meta.mm_psize * num + sizeof(MDB_dhead))) == NULL)
 		return NULL;
 	dp->h.md_num = num;
 	dp->h.md_parent = parent;
@@ -442,12 +454,12 @@ mdb_touch(MDB_txn *txn, MDB_pageparent *pp)
 
 	if (!F_ISSET(mp->mp_flags, P_DIRTY)) {
 		MDB_dpage *dp;
-		if ((dp = mdb_newpage(txn, pp->mp_parent, pp->mp_pi, 1)) == NULL)
+		if ((dp = mdb_alloc_page(txn, pp->mp_parent, pp->mp_pi, 1)) == NULL)
 			return ENOMEM;
 		DPRINTF("touched page %lu -> %lu", mp->mp_pgno, dp->p.mp_pgno);
 		mdb_idl_insert(txn->mt_free_pgs, mp->mp_pgno);
 		pgno = dp->p.mp_pgno;
-		bcopy(mp, &dp->p, txn->mt_env->me_meta.mm_stat.ms_psize);
+		bcopy(mp, &dp->p, txn->mt_env->me_meta.mm_psize);
 		mp = &dp->p;
 		mp->mp_pgno = pgno;
 		mp->mp_flags |= P_DIRTY;
@@ -663,11 +675,11 @@ mdb_txn_commit(MDB_txn *txn)
 					n = 0;
 					size = 0;
 				}
-				lseek(env->me_fd, dp->p.mp_pgno * env->me_meta.mm_stat.ms_psize, SEEK_SET);
+				lseek(env->me_fd, dp->p.mp_pgno * env->me_meta.mm_psize, SEEK_SET);
 				next = dp->p.mp_pgno;
 			}
 			DPRINTF("committing page %lu", dp->p.mp_pgno);
-			iov[n].iov_len = env->me_meta.mm_stat.ms_psize * dp->h.md_num;
+			iov[n].iov_len = env->me_meta.mm_psize * dp->h.md_num;
 			iov[n].iov_base = &dp->p;
 			size += iov[n].iov_len;
 			next = dp->p.mp_pgno + dp->h.md_num;
@@ -798,8 +810,8 @@ mdbenv_init_meta(MDB_env *env)
 
 	env->me_meta.mm_magic = MDB_MAGIC;
 	env->me_meta.mm_version = MDB_VERSION;
-	env->me_meta.mm_stat.ms_psize = psize;
-	env->me_meta.mm_stat.ms_flags = env->me_flags & 0xffff;
+	env->me_meta.mm_psize = psize;
+	env->me_meta.mm_flags = env->me_flags & 0xffff;
 	env->me_meta.mm_root = P_INVALID;
 	env->me_meta.mm_last_pg = 1;
 
@@ -829,7 +841,8 @@ mdbenv_write_meta(MDB_txn *txn)
 	MDB_env *env;
 	MDB_meta	meta;
 	off_t off;
-	int rc;
+	int rc, len;
+	char *ptr;
 
 	assert(txn != NULL);
 	assert(txn->mt_env != NULL);
@@ -838,19 +851,27 @@ mdbenv_write_meta(MDB_txn *txn)
 
 	env = txn->mt_env;
 
-	bcopy(&env->me_meta, &meta, sizeof(meta));
+	ptr = (char *)&meta;
+	off = offsetof(MDB_meta, mm_depth);
+	len = sizeof(MDB_meta) - off;
+
+	ptr += off;
+	meta.mm_depth = env->me_db.md_depth;
+	meta.mm_branch_pages = env->me_db.md_branch_pages;
+	meta.mm_leaf_pages = env->me_db.md_leaf_pages;
+	meta.mm_overflow_pages = env->me_db.md_overflow_pages;
+	meta.mm_entries = env->me_db.md_entries;
 	meta.mm_root = txn->mt_root;
 	meta.mm_last_pg = txn->mt_next_pgno - 1;
 	meta.mm_txnid = txn->mt_txnid;
 
-	off = 0;
 	if (!F_ISSET(txn->mt_flags, MDB_TXN_METOGGLE))
-		off = env->me_meta.mm_stat.ms_psize;
+		off += env->me_meta.mm_psize;
 	off += PAGEHDRSZ;
 
 	lseek(env->me_fd, off, SEEK_SET);
-	rc = write(env->me_fd, &meta, sizeof(meta));
-	if (rc != sizeof(meta)) {
+	rc = write(env->me_fd, ptr, len);
+	if (rc != len) {
 		DPRINTF("write failed, disk error?");
 		return errno;
 	}
@@ -989,12 +1010,12 @@ mdbenv_open2(MDB_env *env, unsigned int flags)
 		return i;
 
 	DPRINTF("opened database version %u, pagesize %u",
-	    env->me_meta.mm_version, env->me_meta.mm_stat.ms_psize);
-	DPRINTF("depth: %u", env->me_meta.mm_stat.ms_depth);
-	DPRINTF("entries: %lu", env->me_meta.mm_stat.ms_entries);
-	DPRINTF("branch pages: %lu", env->me_meta.mm_stat.ms_branch_pages);
-	DPRINTF("leaf pages: %lu", env->me_meta.mm_stat.ms_leaf_pages);
-	DPRINTF("overflow pages: %lu", env->me_meta.mm_stat.ms_overflow_pages);
+	    env->me_meta.mm_version, env->me_meta.mm_psize);
+	DPRINTF("depth: %u", env->me_meta.mm_depth);
+	DPRINTF("entries: %lu", env->me_meta.mm_entries);
+	DPRINTF("branch pages: %lu", env->me_meta.mm_branch_pages);
+	DPRINTF("leaf pages: %lu", env->me_meta.mm_leaf_pages);
+	DPRINTF("overflow pages: %lu", env->me_meta.mm_overflow_pages);
 	DPRINTF("root: %lu", env->me_meta.mm_root);
 
 	return MDB_SUCCESS;
@@ -1288,7 +1309,7 @@ mdbenv_get_page(MDB_env *env, pgno_t pgno)
 		}
 	}
 	if (!found) {
-		p = (MDB_page *)(env->me_map + env->me_meta.mm_stat.ms_psize * pgno);
+		p = (MDB_page *)(env->me_map + env->me_meta.mm_psize * pgno);
 	}
 	return p;
 }
@@ -1428,7 +1449,7 @@ mdb_read_data(MDB_db *db, MDB_page *mp, MDB_node *leaf,
 	pgno_t		 pgno;
 
 	bzero(data, sizeof(*data));
-	max = db->md_env->me_meta.mm_stat.ms_psize - PAGEHDRSZ;
+	max = db->md_env->me_meta.mm_psize - PAGEHDRSZ;
 
 	if (!F_ISSET(leaf->mn_flags, F_BIGDATA)) {
 		data->mv_size = leaf->mn_dsize;
@@ -1705,27 +1726,28 @@ mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 /* Allocate a page and initialize it
  */
 static MDB_dpage *
-mdbenv_new_page(MDB_env *env, uint32_t flags, int num)
+mdb_new_page(MDB_db *db, uint32_t flags, int num)
 {
 	MDB_dpage	*dp;
 
-	assert(env != NULL);
-	assert(env->me_txn != NULL);
+	assert(db != NULL);
+	assert(db->md_env != NULL);
+	assert(db->md_env->me_txn != NULL);
 
-	if ((dp = mdb_newpage(env->me_txn, NULL, 0, num)) == NULL)
+	if ((dp = mdb_alloc_page(db->md_env->me_txn, NULL, 0, num)) == NULL)
 		return NULL;
 	DPRINTF("allocated new mpage %lu, page size %u",
-	    dp->p.mp_pgno, env->me_meta.mm_stat.ms_psize);
+	    dp->p.mp_pgno, db->md_env->me_meta.mm_psize);
 	dp->p.mp_flags = flags | P_DIRTY;
 	dp->p.mp_lower = PAGEHDRSZ;
-	dp->p.mp_upper = env->me_meta.mm_stat.ms_psize;
+	dp->p.mp_upper = db->md_env->me_meta.mm_psize;
 
 	if (IS_BRANCH(&dp->p))
-		env->me_meta.mm_stat.ms_branch_pages++;
+		db->md_branch_pages++;
 	else if (IS_LEAF(&dp->p))
-		env->me_meta.mm_stat.ms_leaf_pages++;
+		db->md_leaf_pages++;
 	else if (IS_OVERFLOW(&dp->p)) {
-		env->me_meta.mm_stat.ms_overflow_pages += num;
+		db->md_overflow_pages += num;
 		dp->p.mp_pages = num;
 	}
 
@@ -1738,7 +1760,7 @@ mdb_leaf_size(MDB_db *db, MDB_val *key, MDB_val *data)
 	size_t		 sz;
 
 	sz = LEAFSIZE(key, data);
-	if (data->mv_size >= db->md_env->me_meta.mm_stat.ms_psize / MDB_MINKEYS) {
+	if (data->mv_size >= db->md_env->me_meta.mm_psize / MDB_MINKEYS) {
 		/* put on overflow page */
 		sz -= data->mv_size - sizeof(pgno_t);
 	}
@@ -1752,7 +1774,7 @@ mdb_branch_size(MDB_db *db, MDB_val *key)
 	size_t		 sz;
 
 	sz = INDXSIZE(key);
-	if (sz >= db->md_env->me_meta.mm_stat.ms_psize / MDB_MINKEYS) {
+	if (sz >= db->md_env->me_meta.mm_psize / MDB_MINKEYS) {
 		/* put on overflow page */
 		/* not implemented */
 		/* sz -= key->size - sizeof(pgno_t); */
@@ -1786,13 +1808,13 @@ mdb_add_node(MDB_db *db, MDB_page *mp, indx_t indx,
 		if (F_ISSET(flags, F_BIGDATA)) {
 			/* Data already on overflow page. */
 			node_size += sizeof(pgno_t);
-		} else if (data->mv_size >= db->md_env->me_meta.mm_stat.ms_psize / MDB_MINKEYS) {
-			int ovpages = OVPAGES(data->mv_size, db->md_env->me_meta.mm_stat.ms_psize);
+		} else if (data->mv_size >= db->md_env->me_meta.mm_psize / MDB_MINKEYS) {
+			int ovpages = OVPAGES(data->mv_size, db->md_env->me_meta.mm_psize);
 			/* Put data on overflow page. */
 			DPRINTF("data size is %zu, put on overflow page",
 			    data->mv_size);
 			node_size += sizeof(pgno_t);
-			if ((ofp = mdbenv_new_page(db->md_env, P_OVERFLOW, ovpages)) == NULL)
+			if ((ofp = mdb_new_page(db, P_OVERFLOW, ovpages)) == NULL)
 				return MDB_FAIL;
 			DPRINTF("allocated overflow page %lu", ofp->p.mp_pgno);
 			flags |= F_BIGDATA;
@@ -2091,9 +2113,9 @@ mdb_merge(MDB_db *bt, MDB_pageparent *src, MDB_pageparent *dst)
 	}
 
 	if (IS_LEAF(src->mp_page))
-		bt->md_env->me_meta.mm_stat.ms_leaf_pages--;
+		bt->md_leaf_pages--;
 	else
-		bt->md_env->me_meta.mm_stat.ms_branch_pages--;
+		bt->md_branch_pages--;
 
 	mpp.mp_page = src->mp_parent;
 	dh = (MDB_dhead *)src->mp_parent;
@@ -2131,16 +2153,16 @@ mdb_rebalance(MDB_db *db, MDB_pageparent *mpp)
 	if (mpp->mp_parent == NULL) {
 		if (NUMKEYS(mpp->mp_page) == 0) {
 			DPRINTF("tree is completely empty");
-			db->md_env->me_txn->mt_root = P_INVALID;
-			db->md_env->me_meta.mm_stat.ms_depth--;
-			db->md_env->me_meta.mm_stat.ms_leaf_pages--;
+			db->md_root = P_INVALID;
+			db->md_depth--;
+			db->md_leaf_pages--;
 		} else if (IS_BRANCH(mpp->mp_page) && NUMKEYS(mpp->mp_page) == 1) {
 			DPRINTF("collapsing root page!");
-			db->md_env->me_txn->mt_root = NODEPGNO(NODEPTR(mpp->mp_page, 0));
-			if ((root = mdbenv_get_page(db->md_env, db->md_env->me_txn->mt_root)) == NULL)
+			db->md_root = NODEPGNO(NODEPTR(mpp->mp_page, 0));
+			if ((root = mdbenv_get_page(db->md_env, db->md_root)) == NULL)
 				return MDB_FAIL;
-			db->md_env->me_meta.mm_stat.ms_depth--;
-			db->md_env->me_meta.mm_stat.ms_branch_pages--;
+			db->md_depth--;
+			db->md_branch_pages--;
 		} else
 			DPRINTF("root page doesn't need rebalancing");
 		return MDB_SUCCESS;
@@ -2245,13 +2267,13 @@ mdb_del(MDB_db *bt, MDB_txn *txn,
 		pgno_t pg;
 
 		bcopy(NODEDATA(leaf), &pg, sizeof(pg));
-		ovpages = OVPAGES(NODEDSZ(leaf), bt->md_env->me_meta.mm_stat.ms_psize);
+		ovpages = OVPAGES(NODEDSZ(leaf), bt->md_env->me_meta.mm_psize);
 		for (i=0; i<ovpages; i++) {
 			mdb_idl_insert(txn->mt_free_pgs, pg);
 			pg++;
 		}
 	}
-	bt->md_env->me_meta.mm_stat.ms_entries--;
+	bt->md_entries--;
 	rc = mdb_rebalance(bt, &mpp);
 	if (rc != MDB_SUCCESS)
 		txn->mt_flags |= MDB_TXN_ERROR;
@@ -2291,13 +2313,13 @@ mdb_split(MDB_db *bt, MDB_page **mpp, unsigned int *newindxp,
 	    (int)newkey->mv_size, (char *)newkey->mv_data, *newindxp);
 
 	if (mdp->h.md_parent == NULL) {
-		if ((pdp = mdbenv_new_page(bt->md_env, P_BRANCH, 1)) == NULL)
+		if ((pdp = mdb_new_page(bt, P_BRANCH, 1)) == NULL)
 			return MDB_FAIL;
 		mdp->h.md_pi = 0;
 		mdp->h.md_parent = &pdp->p;
 		bt->md_env->me_txn->mt_root = pdp->p.mp_pgno;
 		DPRINTF("root split! new root = %lu", pdp->p.mp_pgno);
-		bt->md_env->me_meta.mm_stat.ms_depth++;
+		bt->md_depth++;
 
 		/* Add left (implicit) pointer. */
 		if (mdb_add_node(bt, &pdp->p, 0, NULL, NULL,
@@ -2308,19 +2330,19 @@ mdb_split(MDB_db *bt, MDB_page **mpp, unsigned int *newindxp,
 	}
 
 	/* Create a right sibling. */
-	if ((rdp = mdbenv_new_page(bt->md_env, mdp->p.mp_flags, 1)) == NULL)
+	if ((rdp = mdb_new_page(bt, mdp->p.mp_flags, 1)) == NULL)
 		return MDB_FAIL;
 	rdp->h.md_parent = mdp->h.md_parent;
 	rdp->h.md_pi = mdp->h.md_pi + 1;
 	DPRINTF("new right sibling: page %lu", rdp->p.mp_pgno);
 
 	/* Move half of the keys to the right sibling. */
-	if ((copy = malloc(bt->md_env->me_meta.mm_stat.ms_psize)) == NULL)
+	if ((copy = malloc(bt->md_env->me_meta.mm_psize)) == NULL)
 		return MDB_FAIL;
-	bcopy(&mdp->p, copy, bt->md_env->me_meta.mm_stat.ms_psize);
-	bzero(&mdp->p.mp_ptrs, bt->md_env->me_meta.mm_stat.ms_psize - PAGEHDRSZ);
+	bcopy(&mdp->p, copy, bt->md_env->me_meta.mm_psize);
+	bzero(&mdp->p.mp_ptrs, bt->md_env->me_meta.mm_psize - PAGEHDRSZ);
 	mdp->p.mp_lower = PAGEHDRSZ;
-	mdp->p.mp_upper = bt->md_env->me_meta.mm_stat.ms_psize;
+	mdp->p.mp_upper = bt->md_env->me_meta.mm_psize;
 
 	split_indx = NUMKEYS(copy) / 2 + 1;
 
@@ -2466,12 +2488,12 @@ mdb_put(MDB_db *bt, MDB_txn *txn,
 		MDB_dpage *dp;
 		/* new file, just write a root leaf page */
 		DPRINTF("allocating new root leaf page");
-		if ((dp = mdbenv_new_page(bt->md_env, P_LEAF, 1)) == NULL) {
+		if ((dp = mdb_new_page(bt, P_LEAF, 1)) == NULL) {
 			return ENOMEM;
 		}
 		mpp.mp_page = &dp->p;
 		txn->mt_root = mpp.mp_page->mp_pgno;
-		bt->md_env->me_meta.mm_stat.ms_depth++;
+		bt->md_depth++;
 		ki = 0;
 	}
 	else
@@ -2491,7 +2513,7 @@ mdb_put(MDB_db *bt, MDB_txn *txn,
 	if (rc != MDB_SUCCESS)
 		txn->mt_flags |= MDB_TXN_ERROR;
 	else
-		bt->md_env->me_meta.mm_stat.ms_entries++;
+		bt->md_entries++;
 
 done:
 	return rc;
@@ -2518,12 +2540,17 @@ mdbenv_get_path(MDB_env *env, const char **arg)
 }
 
 int
-mdbenv_stat(MDB_env *env, MDB_stat **arg)
+mdbenv_stat(MDB_env *env, MDB_stat *arg)
 {
 	if (env == NULL || arg == NULL)
 		return EINVAL;
 
-	*arg = &env->me_meta.mm_stat;
+	arg->ms_psize = env->me_meta.mm_psize;
+	arg->ms_depth = env->me_meta.mm_depth;
+	arg->ms_branch_pages = env->me_meta.mm_branch_pages;
+	arg->ms_leaf_pages = env->me_meta.mm_leaf_pages;
+	arg->ms_overflow_pages = env->me_meta.mm_overflow_pages;
+	arg->ms_entries = env->me_meta.mm_entries;
 
 	return MDB_SUCCESS;
 }
@@ -2537,15 +2564,25 @@ int mdb_open(MDB_env *env, MDB_txn *txn, const char *name, unsigned int flags, M
 	return EINVAL;
 }
 
-int mdb_stat(MDB_db *db, MDB_stat **arg)
+int mdb_stat(MDB_db *db, MDB_stat *arg)
 {
 	if (db == NULL || arg == NULL)
 		return EINVAL;
 
-	if (!db->md_parent)
-		bcopy(&db->md_env->me_meta.mm_stat, &db->md_stat, sizeof(db->md_stat));
-
-	*arg = &db->md_stat;
+	arg->ms_psize = db->md_env->me_meta.mm_psize;
+	if (!db->md_parent) {
+		arg->ms_depth = db->md_env->me_meta.mm_depth;
+		arg->ms_branch_pages = db->md_env->me_meta.mm_branch_pages;
+		arg->ms_leaf_pages = db->md_env->me_meta.mm_leaf_pages;
+		arg->ms_overflow_pages = db->md_env->me_meta.mm_overflow_pages;
+		arg->ms_entries = db->md_env->me_meta.mm_entries;
+	} else {
+		arg->ms_depth = db->md_depth;
+		arg->ms_branch_pages = db->md_branch_pages;
+		arg->ms_leaf_pages = db->md_leaf_pages;
+		arg->ms_overflow_pages = db->md_overflow_pages;
+		arg->ms_entries = db->md_entries;
+	}
 
 	return MDB_SUCCESS;
 }

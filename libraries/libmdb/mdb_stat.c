@@ -8,7 +8,7 @@ int main(int argc,char * argv[])
 	int rc;
 	MDB_env *env;
 	MDB_db *db;
-	MDB_stat *mst;
+	MDB_stat mst;
 	char *envname = argv[1];
 	char *subname = NULL;
 
@@ -28,12 +28,12 @@ int main(int argc,char * argv[])
 	}
    
 	rc = mdb_stat(db, &mst);
-	printf("Page size: %u\n", mst->ms_psize);
-	printf("Tree depth: %u\n", mst->ms_depth);
-	printf("Branch pages: %lu\n", mst->ms_branch_pages);
-	printf("Leaf pages: %lu\n", mst->ms_leaf_pages);
-	printf("Overflow pages: %lu\n", mst->ms_overflow_pages);
-	printf("Entries: %lu\n", mst->ms_entries);
+	printf("Page size: %u\n", mst.ms_psize);
+	printf("Tree depth: %u\n", mst.ms_depth);
+	printf("Branch pages: %lu\n", mst.ms_branch_pages);
+	printf("Leaf pages: %lu\n", mst.ms_leaf_pages);
+	printf("Overflow pages: %lu\n", mst.ms_overflow_pages);
+	printf("Entries: %lu\n", mst.ms_entries);
 	mdb_close(db);
 	mdbenv_close(env);
 

@@ -11,7 +11,7 @@ int main(int argc,char * argv[])
 	MDB_db *db;
 	MDB_val key, data;
 	MDB_txn *txn;
-	MDB_stat *mst;
+	MDB_stat mst;
 	MDB_cursor *cursor, *cur2;
 	int count;
 	int *values;
