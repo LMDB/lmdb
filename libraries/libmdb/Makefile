@@ -7,9 +7,10 @@ LDLIBS	=
 all:	mtest mdb_stat
 
 clean:
-	rm -f mtest mdb_stat *.[ao] *~ testdb
+	rm -rf mtest mdb_stat *.[ao] *~ testdb
 
 test:	all
+	mkdir testdb
 	./mtest && ./mdb_stat testdb
 
 mdb_stat: mdb_stat.o mdb.o idl.o

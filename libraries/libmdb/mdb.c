@@ -7,8 +7,7 @@
 #ifdef HAVE_SYS_FILE_H
 #include <sys/file.h>
 #endif
-#include <sys/ipc.h>
-#include <sys/shm.h>
+#include <fcntl.h>
 
 #include <assert.h>
 #include <err.h>
@@ -218,6 +217,7 @@ struct MDB_txn {
 	} mt_u;
 #define MDB_TXN_RDONLY		 0x01		/* read-only transaction */
 #define MDB_TXN_ERROR		 0x02		/* an error has occurred */
+#define MDB_TXN_METOGGLE	0x04		/* used meta page 1 */
 	unsigned int		 mt_flags;
 };
 
@@ -233,10 +233,9 @@ struct MDB_db {
 
 struct MDB_env {
 	int			me_fd;
-	key_t		me_shmkey;
+	int			me_lfd;
 	uint32_t	me_flags;
-	int			me_maxreaders;
-	int			me_metatoggle;
+	unsigned int			me_maxreaders;
 	char		*me_path;
 	char *me_map;
 	MDB_txninfo	*me_txns;
@@ -274,7 +273,7 @@ static int  mdb_search_page(MDB_db *db,
 
 static int  mdbenv_read_header(MDB_env *env);
 static int  mdb_check_meta_page(MDB_page *p);
-static int  mdbenv_read_meta(MDB_env *env);
+static int  mdbenv_read_meta(MDB_env *env, int *which);
 static int  mdbenv_write_meta(MDB_txn *txn);
 static MDB_page *mdbenv_get_page(MDB_env *env, pgno_t pgno);
 
@@ -473,7 +472,7 @@ int
 mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 {
 	MDB_txn	*txn;
-	int rc;
+	int rc, toggle;
 
 	if ((txn = calloc(1, sizeof(*txn))) == NULL) {
 		DPRINTF("calloc: %s", strerror(errno));
@@ -504,7 +503,7 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 	if (rdonly) {
 		MDB_reader *r = pthread_getspecific(env->me_txkey);
 		if (!r) {
-			int i;
+			unsigned int i;
 			pthread_mutex_lock(&env->me_txns->mt_mutex);
 			for (i=0; i<env->me_maxreaders; i++) {
 				if (env->me_txns->mt_readers[i].mr_pid == 0) {
@@ -529,10 +528,13 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 
 	txn->mt_env = env;
 
-	if ((rc = mdbenv_read_meta(env)) != MDB_SUCCESS) {
+	if ((rc = mdbenv_read_meta(env, &toggle)) != MDB_SUCCESS) {
 		mdb_txn_abort(txn);
 		return rc;
 	}
+
+	if (toggle)
+		txn->mt_flags |= MDB_TXN_METOGGLE;
 
 	txn->mt_next_pgno = env->me_meta.mm_last_pg+1;
 	txn->mt_root = env->me_meta.mm_root;
@@ -839,7 +841,7 @@ mdbenv_write_meta(MDB_txn *txn)
 	meta.mm_txnid = txn->mt_txnid;
 
 	off = 0;
-	if (!env->me_metatoggle)
+	if (!F_ISSET(txn->mt_flags, MDB_TXN_METOGGLE))
 		off = env->me_meta.mm_stat.ms_psize;
 	off += PAGEHDRSZ;
 
@@ -867,7 +869,7 @@ mdb_check_meta_page(MDB_page *p)
 }
 
 static int
-mdbenv_read_meta(MDB_env *env)
+mdbenv_read_meta(MDB_env *env, int *which)
 {
 	MDB_page	*mp0, *mp1;
 	MDB_meta	*meta[2];
@@ -893,7 +895,8 @@ mdbenv_read_meta(MDB_env *env)
 
 	if (meta[toggle]->mm_txnid > env->me_meta.mm_txnid) {
 		bcopy(meta[toggle], &env->me_meta, sizeof(env->me_meta));
-		env->me_metatoggle = toggle;
+		if (which)
+			*which = toggle;
 	}
 
 	DPRINTF("Using meta page %d", toggle);
@@ -912,6 +915,8 @@ mdbenv_create(MDB_env **env)
 	e->me_meta.mm_mapsize = DEFAULT_MAPSIZE;
 	e->me_maxreaders = DEFAULT_READERS;
 	e->me_db.md_env = e;
+	e->me_fd = -1;
+	e->me_lfd = -1;
 	*env = e;
 	return MDB_SUCCESS;
 }
@@ -977,7 +982,7 @@ mdbenv_open2(MDB_env *env, unsigned int flags)
 		}
 	}
 
-	if ((i = mdbenv_read_meta(env)) != 0)
+	if ((i = mdbenv_read_meta(env, NULL)) != 0)
 		return i;
 
 	DPRINTF("opened database version %u, pagesize %u",
@@ -1002,51 +1007,131 @@ mdbenv_reader_dest(void *ptr)
 	reader->mr_tid = 0;
 }
 
-int
-mdbenv_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
+static void
+mdbenv_share_locks(MDB_env *env)
 {
-	int		oflags, rc, shmid;
-	off_t	size;
+	struct flock lock_info;
 
+	env->me_txns->mt_txnid = env->me_meta.mm_txnid;
 
-	if (F_ISSET(flags, MDB_RDONLY))
-		oflags = O_RDONLY;
-	else
-		oflags = O_RDWR | O_CREAT;
+	memset((void *)&lock_info, 0, sizeof(lock_info));
+	lock_info.l_type = F_RDLCK;
+	lock_info.l_whence = SEEK_SET;
+	lock_info.l_start = 0;
+	lock_info.l_len = 1;
+	fcntl(env->me_lfd, F_SETLK, &lock_info);
+}
 
-	if ((env->me_fd = open(path, oflags, mode)) == -1)
-		return errno;
+static int
+mdbenv_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
+{
+	int rc;
+	off_t size, rsize;
+	struct flock lock_info;
 
-	env->me_shmkey = ftok(path, 'm');
-	size = (env->me_maxreaders-1) * sizeof(MDB_reader) + sizeof(MDB_txninfo);
-	shmid = shmget(env->me_shmkey, size, IPC_CREAT|IPC_EXCL|mode);
-	if (shmid == -1) {
-		if (errno == EEXIST) {
-			shmid = shmget(env->me_shmkey, size, IPC_CREAT|mode);
-			if (shmid == -1)
-				return errno;
-			env->me_txns = shmat(shmid, NULL, 0);
-			if (env->me_txns->mt_magic != MDB_MAGIC ||
-				env->me_txns->mt_version != MDB_VERSION) {
-					DPRINTF("invalid lock region %d", shmid);
-					shmdt(env->me_txns);
-					env->me_txns = NULL;
-					return EIO;
-				}
-		} else {
-			return errno;
+	*excl = 0;
+
+	if ((env->me_lfd = open(lpath, O_RDWR|O_CREAT, mode)) == -1) {
+		rc = errno;
+		return rc;
+	}
+	/* Try to get exclusive lock. If we succeed, then
+	 * nobody is using the lock region and we should initialize it.
+	 */
+	memset((void *)&lock_info, 0, sizeof(lock_info));
+	lock_info.l_type = F_WRLCK;
+	lock_info.l_whence = SEEK_SET;
+	lock_info.l_start = 0;
+	lock_info.l_len = 1;
+	rc = fcntl(env->me_lfd, F_SETLK, &lock_info);
+	if (rc == 0) {
+		*excl = 1;
+	} else {
+		lock_info.l_type = F_RDLCK;
+		rc = fcntl(env->me_lfd, F_SETLK, &lock_info);
+		if (rc) {
+			rc = errno;
+			goto fail;
+		}
+	}
+	size = lseek(env->me_lfd, 0, SEEK_END);
+	rsize = (env->me_maxreaders-1) * sizeof(MDB_reader) + sizeof(MDB_txninfo);
+	if (size < rsize && *excl) {
+		if (ftruncate(env->me_lfd, rsize) != 0) {
+			rc = errno;
+			goto fail;
 		}
 	} else {
+		rsize = size;
+		size = rsize - sizeof(MDB_txninfo);
+		env->me_maxreaders = size/sizeof(MDB_reader) + 1;
+	}
+	env->me_txns = mmap(0, rsize, PROT_READ|PROT_WRITE, MAP_SHARED,
+		env->me_lfd, 0);
+	if (env->me_txns == MAP_FAILED) {
+		rc = errno;
+		goto fail;
+	}
+	if (*excl) {
 		pthread_mutexattr_t mattr;
 
-		env->me_txns = shmat(shmid, NULL, 0);
 		pthread_mutexattr_init(&mattr);
 		pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
 		pthread_mutex_init(&env->me_txns->mt_mutex, &mattr);
 		pthread_mutex_init(&env->me_txns->mt_wmutex, &mattr);
 		env->me_txns->mt_version = MDB_VERSION;
 		env->me_txns->mt_magic = MDB_MAGIC;
+		env->me_txns->mt_txnid = 0;
+		env->me_txns->mt_numreaders = 0;
+
+	} else {
+		if (env->me_txns->mt_magic != MDB_MAGIC) {
+			DPRINTF("lock region has invalid magic");
+			errno = EINVAL;
+		}
+		if (env->me_txns->mt_version != MDB_VERSION) {
+			DPRINTF("lock region is version %u, expected version %u",
+				env->me_txns->mt_version, MDB_VERSION);
+			errno = EINVAL;
+		}
+		if (errno != EACCES && errno != EAGAIN) {
+			rc = errno;
+			goto fail;
+		}
 	}
+	return MDB_SUCCESS;
+
+fail:
+	close(env->me_lfd);
+	return rc;
+
+}
+
+int
+mdbenv_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
+{
+	int		oflags, rc, len, excl;
+	char *lpath, *dpath;
+
+	len = strlen(path);
+	lpath = malloc(len + sizeof("/lock.mdb") + len + sizeof("/data.db"));
+	if (!lpath)
+		return ENOMEM;
+	dpath = lpath + len + sizeof("/lock.mdb");
+	sprintf(lpath, "%s/lock.mdb", path);
+	sprintf(dpath, "%s/data.mdb", path);
+
+	rc = mdbenv_setup_locks(env, lpath, mode, &excl);
+	if (rc)
+		goto leave;
+
+	if (F_ISSET(flags, MDB_RDONLY))
+		oflags = O_RDONLY;
+	else
+		oflags = O_RDWR | O_CREAT;
+
+	if ((env->me_fd = open(dpath, oflags, mode)) == -1)
+		return errno;
 
 	if ((rc = mdbenv_open2(env, flags)) != MDB_SUCCESS) {
 		close(env->me_fd);
@@ -1054,10 +1139,14 @@ mdbenv_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 	} else {
 		env->me_path = strdup(path);
 		DPRINTF("opened dbenv %p", (void *) env);
+		pthread_key_create(&env->me_txkey, mdbenv_reader_dest);
+		if (excl)
+			mdbenv_share_locks(env);
 	}
 
-	pthread_key_create(&env->me_txkey, mdbenv_reader_dest);
 
+leave:
+	free(lpath);
 	return rc;
 }
 
@@ -1074,8 +1163,10 @@ mdbenv_close(MDB_env *env)
 	}
 	close(env->me_fd);
 	if (env->me_txns) {
-		shmdt(env->me_txns);
+		size_t size = (env->me_maxreaders-1) * sizeof(MDB_reader) + sizeof(MDB_txninfo);
+		munmap(env->me_txns, size);
 	}
+	close(env->me_lfd);
 	free(env);
 }
 
@@ -1295,7 +1386,7 @@ mdb_search_page(MDB_db *db, MDB_txn *txn, MDB_val *key,
 	 * committed root page.
 	 */
 	if (txn == NULL) {
-		if ((rc = mdbenv_read_meta(db->md_env)) != MDB_SUCCESS)
+		if ((rc = mdbenv_read_meta(db->md_env, NULL)) != MDB_SUCCESS)
 			return rc;
 		root = db->md_env->me_meta.mm_root;
 	} else if (F_ISSET(txn->mt_flags, MDB_TXN_ERROR)) {
