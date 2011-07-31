@@ -24,7 +24,8 @@
 
 #include "mdb.h"
 
-typedef ulong		 pgno_t;
+#define ULONG		unsigned long
+typedef ULONG		pgno_t;
 
 #include "idl.h"
 
@@ -56,7 +57,7 @@ typedef uint16_t	 indx_t;
 
 /* Lock descriptor stuff */
 #define RXBODY	\
-	ulong		mr_txnid; \
+	ULONG		mr_txnid; \
 	pid_t		mr_pid; \
 	pthread_t	mr_tid
 typedef struct MDB_rxbody {
@@ -77,7 +78,7 @@ typedef struct MDB_reader {
 	uint32_t	mt_magic;	\
 	uint32_t	mt_version;	\
 	pthread_mutex_t	mt_mutex;	\
-	ulong		mt_txnid;	\
+	ULONG		mt_txnid;	\
 	uint32_t	mt_numreaders
 typedef struct MDB_txbody {
 	TXBODY;
@@ -133,16 +134,16 @@ typedef struct MDB_meta {			/* meta (footer) page content */
 	uint32_t	mm_version;
 	void		*mm_address;		/* address for fixed mapping */
 	size_t		mm_mapsize;			/* size of mmap region */
+	pgno_t		mm_last_pg;			/* last used page in file */
+	ULONG		mm_txnid;			/* txnid that committed this page */
 	uint32_t	mm_psize;
 	uint16_t	mm_flags;
 	uint16_t	mm_depth;
-	ulong		mm_branch_pages;
-	ulong		mm_leaf_pages;
-	ulong		mm_overflow_pages;
-	ulong		mm_entries;
+	ULONG		mm_branch_pages;
+	ULONG		mm_leaf_pages;
+	ULONG		mm_overflow_pages;
+	ULONG		mm_entries;
 	pgno_t		mm_root;
-	pgno_t		mm_last_pg;			/* last used page in file */
-	ulong		mm_txnid;			/* txnid that committed this page */
 } MDB_meta;
 
 typedef struct MDB_dhead {					/* a dirty page */
@@ -161,7 +162,7 @@ SIMPLEQ_HEAD(dirty_queue, MDB_dpage);
 
 typedef struct MDB_oldpages {
 	struct MDB_oldpages *mo_next;
-	ulong		mo_txnid;
+	ULONG		mo_txnid;
 	pgno_t		mo_pages[1];	/* dynamic */
 } MDB_oldpages;
 
@@ -213,8 +214,8 @@ typedef struct MDB_node {
 struct MDB_txn {
 	pgno_t		mt_root;		/* current / new root page */
 	pgno_t		mt_next_pgno;	/* next unallocated page */
-	ulong		mt_txnid;
-	ulong		mt_oldest;
+	ULONG		mt_txnid;
+	ULONG		mt_oldest;
 	MDB_env		*mt_env;	
 	pgno_t		*mt_free_pgs;	/* this is an IDL */
 	union {
@@ -234,13 +235,14 @@ struct MDB_db {
 	MDB_rel_func	*md_rel;		/* user relocate function */
 	MDB_db			*md_parent;		/* parent tree */
 	MDB_env 		*md_env;
-	ulong		md_branch_pages;
-	ulong		md_leaf_pages;
-	ulong		md_overflow_pages;
-	ulong		md_entries;
-	pgno_t		md_root;
+	uint32_t	md_pad;
 	uint16_t	md_flags;
 	uint16_t	md_depth;
+	ULONG		md_branch_pages;
+	ULONG		md_leaf_pages;
+	ULONG		md_overflow_pages;
+	ULONG		md_entries;
+	pgno_t		md_root;
 };
 
 struct MDB_env {
@@ -391,7 +393,7 @@ mdb_alloc_page(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num)
 	pgno_t pgno = P_INVALID;
 
 	if (txn->mt_env->me_pghead) {
-		ulong oldest = txn->mt_txnid - 2;
+		ULONG oldest = txn->mt_txnid - 2;
 		unsigned int i;
 		for (i=0; i<txn->mt_env->me_txns->mt_numreaders; i++) {
 			if (txn->mt_env->me_txns->mt_readers[i].mr_txnid < oldest)
@@ -2555,10 +2557,10 @@ mdbenv_stat(MDB_env *env, MDB_stat *arg)
 	return MDB_SUCCESS;
 }
 
-int mdb_open(MDB_env *env, MDB_txn *txn, const char *name, unsigned int flags, MDB_db **db)
+int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_db **db)
 {
 	if (!name) {
-		*db = (MDB_db *)&env->me_db;
+		*db = (MDB_db *)&txn->mt_env->me_db;
 		return MDB_SUCCESS;
 	}
 	return EINVAL;

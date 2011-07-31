@@ -5,7 +5,7 @@
 #include <assert.h>
 #include "idl.h"
 
-typedef ulong pgno_t;
+typedef unsigned long pgno_t;
 
 /* Sort the IDLs from highest to lowest */
 #define IDL_CMP(x,y)	 ( x > y ? -1 : ( x < y ? 1 : 0 ) )
