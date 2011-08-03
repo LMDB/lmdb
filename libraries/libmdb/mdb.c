@@ -229,7 +229,6 @@ typedef struct MDB_db {
 } MDB_db;
 
 struct MDB_txn {
-	pgno_t		mt_root;		/* current / new root page */
 	pgno_t		mt_next_pgno;	/* next unallocated page */
 	ULONG		mt_txnid;
 	ULONG		mt_oldest;
@@ -241,6 +240,7 @@ struct MDB_txn {
 	} mt_u;
 	MDB_dbx		*mt_dbxs;		/* array */
 	MDB_db		**mt_dbs;		/* array of ptrs */
+	MDB_db		mt_db0;			/* just for write txns */
 	unsigned int	mt_numdbs;
 
 #define MDB_TXN_RDONLY		 0x01		/* read-only transaction */
@@ -520,13 +520,6 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 		}
 		txn->mt_free_pgs[0] = 0;
 	}
-	/* Copy the DB arrays */
-	txn->mt_numdbs = env->me_numdbs;
-	rc = (txn->mt_numdbs % DBX_CHUNK) + 1;
-	txn->mt_dbxs = malloc(rc * DBX_CHUNK * sizeof(MDB_dbx));
-	txn->mt_dbs = malloc(rc * DBX_CHUNK * sizeof(MDB_db *));
-	memcpy(txn->mt_dbxs, env->me_dbxs, txn->mt_numdbs * sizeof(MDB_dbx));
-	memcpy(txn->mt_dbs, env->me_dbs, txn->mt_numdbs * sizeof(MDB_db *));
 
 	txn->mt_txnid = env->me_txns->mt_txnid;
 	if (rdonly) {
@@ -563,13 +556,24 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 		return rc;
 	}
 
-	if (toggle)
-		txn->mt_flags |= MDB_TXN_METOGGLE;
+	/* Copy the DB arrays */
+	txn->mt_numdbs = env->me_numdbs;
+	rc = (txn->mt_numdbs % DBX_CHUNK) + 1;
+	txn->mt_dbxs = malloc(rc * DBX_CHUNK * sizeof(MDB_dbx));
+	txn->mt_dbs = malloc(rc * DBX_CHUNK * sizeof(MDB_db *));
+	memcpy(txn->mt_dbxs, env->me_dbxs, txn->mt_numdbs * sizeof(MDB_dbx));
+	memcpy(txn->mt_dbs, env->me_dbs, txn->mt_numdbs * sizeof(MDB_db *));
 
-	txn->mt_next_pgno = env->me_meta.mm_last_pg+1;
-	txn->mt_root = env->me_meta.mm_root;
+	if (!rdonly) {
+		memcpy(&txn->mt_db0, txn->mt_dbs[0], sizeof(txn->mt_db0));
+		txn->mt_dbs[0] = &txn->mt_db0;
+		if (toggle)
+			txn->mt_flags |= MDB_TXN_METOGGLE;
+		txn->mt_next_pgno = env->me_meta.mm_last_pg+1;
+	}
+
 	DPRINTF("begin transaction %lu on mdbenv %p, root page %lu",
-		txn->mt_txnid, (void *) env, txn->mt_root);
+		txn->mt_txnid, (void *) env, txn->mt_dbs[0]->md_root);
 
 	*ret = txn;
 	return MDB_SUCCESS;
@@ -586,7 +590,7 @@ mdb_txn_abort(MDB_txn *txn)
 
 	env = txn->mt_env;
 	DPRINTF("abort transaction %lu on mdbenv %p, root page %lu",
-		txn->mt_txnid, (void *) env, txn->mt_root);
+		txn->mt_txnid, (void *) env, txn->mt_dbs[0]->md_root);
 
 	free(txn->mt_dbs);
 	free(txn->mt_dbxs);
@@ -667,7 +671,7 @@ mdb_txn_commit(MDB_txn *txn)
 		goto done;
 
 	DPRINTF("committing transaction %lu on mdbenv %p, root page %lu",
-	    txn->mt_txnid, (void *) env, txn->mt_root);
+	    txn->mt_txnid, (void *) env, txn->mt_dbs[0]->md_root);
 
 	/* Commit up to MDB_COMMIT_PAGES dirty pages to disk until done.
 	 */
@@ -746,8 +750,10 @@ mdb_txn_commit(MDB_txn *txn)
 		MDB_dbx *p1 = env->me_dbxs;
 		MDB_db **p2 = env->me_dbs;
 
+		txn->mt_dbs[0] = env->me_dbs[0];
 		env->me_dbxs = txn->mt_dbxs;
 		env->me_dbs = txn->mt_dbs;
+		env->me_numdbs = txn->mt_numdbs;
 
 		free(p2);
 		free(p1);
@@ -876,23 +882,25 @@ mdbenv_write_meta(MDB_txn *txn)
 	assert(txn != NULL);
 	assert(txn->mt_env != NULL);
 
-	DPRINTF("writing meta page for root page %lu", txn->mt_root);
+	DPRINTF("writing meta page for root page %lu", txn->mt_dbs[0]->md_root);
 
 	env = txn->mt_env;
 
 	ptr = (char *)&meta;
-	off = offsetof(MDB_meta, mm_depth);
+	off = offsetof(MDB_meta, mm_last_pg);
 	len = sizeof(MDB_meta) - off;
 
 	ptr += off;
+	meta.mm_last_pg = txn->mt_next_pgno - 1;
+	meta.mm_txnid = txn->mt_txnid;
+	meta.mm_psize = env->me_meta.mm_psize;
+	meta.mm_flags = env->me_meta.mm_flags;
 	meta.mm_depth = txn->mt_dbs[0]->md_depth;
 	meta.mm_branch_pages = txn->mt_dbs[0]->md_branch_pages;
 	meta.mm_leaf_pages = txn->mt_dbs[0]->md_leaf_pages;
 	meta.mm_overflow_pages = txn->mt_dbs[0]->md_overflow_pages;
 	meta.mm_entries = txn->mt_dbs[0]->md_entries;
-	meta.mm_root = txn->mt_root;
-	meta.mm_last_pg = txn->mt_next_pgno - 1;
-	meta.mm_txnid = txn->mt_txnid;
+	meta.mm_root = txn->mt_dbs[0]->md_root;
 
 	if (!F_ISSET(txn->mt_flags, MDB_TXN_METOGGLE))
 		off += env->me_meta.mm_psize;
@@ -1212,6 +1220,8 @@ mdbenv_close(MDB_env *env)
 	if (env == NULL)
 		return;
 
+	free(env->me_dbs);
+	free(env->me_dbxs);
 	free(env->me_path);
 
 	if (env->me_map) {
@@ -1440,7 +1450,7 @@ mdb_search_page(MDB_txn *txn, MDB_dbi dbi, MDB_val *key,
 		DPRINTF("transaction has failed, must abort");
 		return EINVAL;
 	} else
-		root = txn->mt_root;
+		root = txn->mt_dbs[dbi]->md_root;
 
 	if (root == P_INVALID) {		/* Tree is empty. */
 		DPRINTF("tree is empty");
@@ -1457,7 +1467,7 @@ mdb_search_page(MDB_txn *txn, MDB_dbi dbi, MDB_val *key,
 		mpp->mp_pi = 0;
 		if ((rc = mdb_touch(txn, mpp)))
 			return rc;
-		txn->mt_root = mpp->mp_page->mp_pgno;
+		txn->mt_dbs[dbi]->md_root = mpp->mp_page->mp_pgno;
 	}
 
 	return mdb_search_page_root(txn, dbi, key, cursor, modify, mpp);
@@ -2313,8 +2323,6 @@ mdb_split(MDB_txn *txn, MDB_dbi dbi, MDB_page **mpp, unsigned int *newindxp,
 		mdp->h.md_pi = 0;
 		mdp->h.md_parent = &pdp->p;
 		txn->mt_dbs[dbi]->md_root = pdp->p.mp_pgno;
-		if (!dbi)
-			txn->mt_root = pdp->p.mp_pgno;
 		DPRINTF("root split! new root = %lu", pdp->p.mp_pgno);
 		txn->mt_dbs[dbi]->md_depth++;
 
@@ -2490,8 +2498,6 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 		}
 		mpp.mp_page = &dp->p;
 		txn->mt_dbs[dbi]->md_root = mpp.mp_page->mp_pgno;
-		if (!dbi)
-			txn->mt_root = mpp.mp_page->mp_pgno;
 		txn->mt_dbs[dbi]->md_depth++;
 		ki = 0;
 	}
