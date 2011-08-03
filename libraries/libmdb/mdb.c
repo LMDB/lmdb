@@ -223,13 +223,12 @@ typedef struct MDB_db {
 } MDB_db;
 
 typedef struct MDB_dbx {
-	char		*md_name;
+	MDB_val		md_name;
 	MDB_cmp_func	*md_cmp;		/* user compare function */
 	MDB_cmp_func	*md_dcmp;		/* user dupsort function */
 	MDB_rel_func	*md_rel;		/* user relocate function */
 	MDB_db		*md_db;
 	MDB_page	*md_page;
-	unsigned int	md_ki;			/* cursor index on parent page */
 } MDB_dbx;
 
 struct MDB_txn {
@@ -330,6 +329,8 @@ static int		 mdb_cursor_next(MDB_cursor *cursor,
 static int		 mdb_cursor_set(MDB_cursor *cursor,
 			    MDB_val *key, MDB_val *data, int *exactp);
 static int		 mdb_cursor_first(MDB_cursor *cursor,
+			    MDB_val *key, MDB_val *data);
+static int		 mdb_cursor_last(MDB_cursor *cursor,
 			    MDB_val *key, MDB_val *data);
 
 static size_t		 mdb_leaf_size(MDB_env *env, MDB_val *key,
@@ -1372,7 +1373,10 @@ mdb_search_page_root(MDB_txn *txn, MDB_dbi dbi, MDB_val *key,
 
 		if (key == NULL)	/* Initialize cursor to first page. */
 			i = 0;
-		else {
+		else if (key->mv_size > MAXKEYSIZE && key->mv_data == NULL) {
+							/* cursor to last page */
+			i = NUMKEYS(mp)-1;
+		} else {
 			int	 exact;
 			node = mdb_search_node(txn, dbi, mp, key, &exact, &i);
 			if (node == NULL)
@@ -1458,12 +1462,22 @@ mdb_search_page(MDB_txn *txn, MDB_dbi dbi, MDB_val *key,
 
 	DPRINTF("root page has flags 0x%X", mpp->mp_page->mp_flags);
 
-	if (modify && !F_ISSET(mpp->mp_page->mp_flags, P_DIRTY)) {
-		mpp->mp_parent = NULL;
-		mpp->mp_pi = 0;
-		if ((rc = mdb_touch(txn, mpp)))
-			return rc;
-		txn->mt_dbxs[dbi].md_db->md_root = mpp->mp_page->mp_pgno;
+	if (modify) {
+		/* For sub-databases, update main root first */
+		if (dbi && !F_ISSET(txn->mt_dbxs[dbi].md_page->mp_flags, P_DIRTY)) {
+			MDB_pageparent mp2;
+			rc = mdb_search_page(txn, 0, &txn->mt_dbxs[dbi].md_name,
+				NULL, 1, &mp2);
+			if (rc)
+				return rc;
+		}
+		if (!F_ISSET(mpp->mp_page->mp_flags, P_DIRTY)) {
+			mpp->mp_parent = NULL;
+			mpp->mp_pi = 0;
+			if ((rc = mdb_touch(txn, mpp)))
+				return rc;
+			txn->mt_dbxs[dbi].md_db->md_root = mpp->mp_page->mp_pgno;
+		}
 	}
 
 	return mdb_search_page_root(txn, dbi, key, cursor, modify, mpp);
@@ -1698,6 +1712,32 @@ mdb_cursor_first(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 	return mdb_set_key(leaf, key);
 }
 
+static int
+mdb_cursor_last(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
+{
+	int		 rc;
+	MDB_pageparent	mpp;
+	MDB_node	*leaf;
+	MDB_val	lkey;
+
+	lkey.mv_size = MAXKEYSIZE+1;
+	lkey.mv_data = NULL;
+
+	rc = mdb_search_page(cursor->mc_txn, cursor->mc_dbi, &lkey, cursor, 0, &mpp);
+	if (rc != MDB_SUCCESS)
+		return rc;
+	assert(IS_LEAF(mpp.mp_page));
+
+	leaf = NODEPTR(mpp.mp_page, NUMKEYS(mpp.mp_page)-1);
+	cursor->mc_initialized = 1;
+	cursor->mc_eof = 1;
+
+	if (data && (rc = mdb_read_data(cursor->mc_txn->mt_env, leaf, data)) != MDB_SUCCESS)
+		return rc;
+
+	return mdb_set_key(leaf, key);
+}
+
 int
 mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
     MDB_cursor_op op)
@@ -1729,6 +1769,11 @@ mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 		while (CURSOR_TOP(cursor) != NULL)
 			cursor_pop_page(cursor);
 		rc = mdb_cursor_first(cursor, key, data);
+		break;
+	case MDB_LAST:
+		while (CURSOR_TOP(cursor) != NULL)
+			cursor_pop_page(cursor);
+		rc = mdb_cursor_last(cursor, key, data);
 		break;
 	default:
 		DPRINTF("unhandled/unimplemented cursor operation %u", op);
@@ -2561,6 +2606,7 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 	MDB_val key, data;
 	MDB_dbi i;
 	int rc;
+	size_t len;
 
 	/* main DB? */
 	if (!name) {
@@ -2569,15 +2615,17 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 	}
 
 	/* Is the DB already open? */
+	len = strlen(name);
 	for (i=0; i<txn->mt_numdbs; i++) {
-		if (!strcmp(name, txn->mt_dbxs[i].md_name)) {
+		if (len == txn->mt_dbxs[i].md_name.mv_size &&
+			!strcmp(name, txn->mt_dbxs[i].md_name.mv_data)) {
 			*dbi = i;
 			return MDB_SUCCESS;
 		}
 	}
 
 	/* Find the DB info */
-	key.mv_size = strlen(name);
+	key.mv_size = len;
 	key.mv_data = (void *)name;
 	rc = mdb_get(txn, 0, &key, &data);
 
@@ -2606,7 +2654,8 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 				return ENOMEM;
 			txn->mt_dbxs = p1;
 		}
-		txn->mt_dbxs[txn->mt_numdbs].md_name = strdup(name);
+		txn->mt_dbxs[txn->mt_numdbs].md_name.mv_data = strdup(name);
+		txn->mt_dbxs[txn->mt_numdbs].md_name.mv_size = len;
 		txn->mt_dbxs[txn->mt_numdbs].md_cmp = NULL;
 		txn->mt_dbxs[txn->mt_numdbs].md_dcmp = NULL;
 		txn->mt_dbxs[txn->mt_numdbs].md_rel = NULL;
@@ -2637,6 +2686,7 @@ void mdb_close(MDB_txn *txn, MDB_dbi dbi)
 {
 	if (dbi >= txn->mt_numdbs)
 		return;
-	free(txn->mt_dbxs[dbi].md_name);
-	txn->mt_dbxs[dbi].md_name = NULL;
+	free(txn->mt_dbxs[dbi].md_name.mv_data);
+	txn->mt_dbxs[dbi].md_name.mv_data = NULL;
+	txn->mt_dbxs[dbi].md_name.mv_size = 0;
 }
