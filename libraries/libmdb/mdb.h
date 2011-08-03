@@ -38,6 +38,7 @@ typedef enum MDB_cursor_op {		/* cursor operations */
 
 /* DB flags */
 #define MDB_REVERSEKEY	0x02		/* use reverse string keys */
+#define MDB_DUPSORT		0x04		/* use sorted duplicates */
 #define MDB_NOSYNC		0x10000		/* don't fsync after commit */
 #define MDB_RDONLY		0x20000		/* read only */
 #define MDB_CREATE		0x40000		/* create if not present */
@@ -72,6 +73,10 @@ void mdb_txn_abort(MDB_txn *txn);
 int  mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi);
 int  mdb_stat(MDB_txn *txn, MDB_dbi dbi, MDB_stat *stat);
 void mdb_close(MDB_txn *txn, MDB_dbi dbi);
+
+int  mdb_set_compare(MDB_txn *txn, MDB_dbi dbi, MDB_cmp_func *cmp);
+int  mdb_set_dupsort(MDB_txn *txn, MDB_dbi dbi, MDB_cmp_func *cmp);
+int  mdb_set_relfunc(MDB_txn *txn, MDB_dbi dbi, MDB_rel_func *rel);
 
 int  mdb_get(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data);
 int  mdb_put(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data,
