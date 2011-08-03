@@ -398,7 +398,9 @@ mdb_alloc_page(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num)
 		ULONG oldest = txn->mt_txnid - 2;
 		unsigned int i;
 		for (i=0; i<txn->mt_env->me_txns->mt_numreaders; i++) {
-			if (txn->mt_env->me_txns->mt_readers[i].mr_txnid < oldest)
+			ULONG mr = txn->mt_env->me_txns->mt_readers[i].mr_txnid;
+			if (!mr) continue;
+			if (mr < oldest)
 				oldest = txn->mt_env->me_txns->mt_readers[i].mr_txnid;
 		}
 		if (oldest > txn->mt_env->me_pghead->mo_txnid) {
