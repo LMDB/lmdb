@@ -188,9 +188,9 @@ SLIST_HEAD(page_stack, MDB_ppage);
 #define CURSOR_PUSH(c,p)	 SLIST_INSERT_HEAD(&(c)->mc_stack, p, mp_entry)
 
 struct MDB_cursor {
-	MDB_db		*mc_db;
 	MDB_txn		*mc_txn;
 	struct page_stack	 mc_stack;		/* stack of parent pages */
+	MDB_dbi		mc_dbi;
 	short		mc_initialized;	/* 1 if initialized */
 	short		mc_eof;		/* 1 if end is reached */
 };
@@ -211,6 +211,24 @@ typedef struct MDB_node {
 	char		mn_data[1];
 } MDB_node;
 
+typedef struct MDB_dbx {
+	char		*md_name;
+	MDB_cmp_func	*md_cmp;		/* user compare function */
+	MDB_rel_func	*md_rel;		/* user relocate function */
+	MDB_db			*md_parent;		/* parent tree */
+} MDB_dbx;
+
+typedef struct MDB_db {
+	uint32_t	md_pad;
+	uint16_t	md_flags;
+	uint16_t	md_depth;
+	ULONG		md_branch_pages;
+	ULONG		md_leaf_pages;
+	ULONG		md_overflow_pages;
+	ULONG		md_entries;
+	pgno_t		md_root;
+} MDB_db;
+
 struct MDB_txn {
 	pgno_t		mt_root;		/* current / new root page */
 	pgno_t		mt_next_pgno;	/* next unallocated page */
@@ -222,27 +240,14 @@ struct MDB_txn {
 		struct dirty_queue	*dirty_queue;	/* modified pages */
 		MDB_reader	*reader;
 	} mt_u;
+	MDB_dbx		*mt_dbxs;		/* array */
+	MDB_db		**mt_dbs;		/* array of ptrs */
+	unsigned int	mt_numdbs;
+
 #define MDB_TXN_RDONLY		 0x01		/* read-only transaction */
 #define MDB_TXN_ERROR		 0x02		/* an error has occurred */
 #define MDB_TXN_METOGGLE	0x04		/* used meta page 1 */
 	unsigned int		 mt_flags;
-};
-
-struct MDB_db {
-	MDB_db		*md_next;
-	char		*md_name;
-	MDB_cmp_func	*md_cmp;		/* user compare function */
-	MDB_rel_func	*md_rel;		/* user relocate function */
-	MDB_db			*md_parent;		/* parent tree */
-	MDB_env 		*md_env;
-	uint32_t	md_pad;
-	uint16_t	md_flags;
-	uint16_t	md_depth;
-	ULONG		md_branch_pages;
-	ULONG		md_leaf_pages;
-	ULONG		md_overflow_pages;
-	ULONG		md_entries;
-	pgno_t		md_root;
 };
 
 struct MDB_env {
@@ -253,7 +258,6 @@ struct MDB_env {
 	char		*me_path;
 	char		*me_map;
 	MDB_txninfo	*me_txns;
-	MDB_db		me_db;		/* first DB */
 	MDB_meta	me_meta;
 	MDB_txn		*me_txn;		/* current write transaction */
 	size_t		me_mapsize;
@@ -261,6 +265,9 @@ struct MDB_env {
 	pthread_key_t	me_txkey;	/* thread-key for readers */
 	MDB_oldpages *me_pghead;
 	MDB_oldpages *me_pgtail;
+	MDB_dbx		*me_dbxs;		/* array */
+	MDB_db		**me_dbs;		/* array of ptrs */
+	unsigned int	me_numdbs;
 };
 
 #define NODESIZE	 offsetof(MDB_node, mn_data)
@@ -2557,10 +2564,10 @@ mdbenv_stat(MDB_env *env, MDB_stat *arg)
 	return MDB_SUCCESS;
 }
 
-int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_db **db)
+int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 {
 	if (!name) {
-		*db = (MDB_db *)&txn->mt_env->me_db;
+		*dbi = 0;
 		return MDB_SUCCESS;
 	}
 	return EINVAL;
