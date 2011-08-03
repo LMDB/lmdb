@@ -8,7 +8,7 @@ int main(int argc,char * argv[])
 {
 	int i = 0, j = 0, rc;
 	MDB_env *env;
-	MDB_db *db;
+	MDB_dbi dbi;
 	MDB_val key, data;
 	MDB_txn *txn;
 	MDB_stat mst;
@@ -30,7 +30,7 @@ int main(int argc,char * argv[])
 		rc = mdbenv_set_mapsize(env, 10485760);
 		rc = mdbenv_open(env, "./testdb", MDB_FIXEDMAP|MDB_NOSYNC, 0664);
 		rc = mdb_txn_begin(env, 0, &txn);
-		rc = mdb_open(env, txn, NULL, 0, &db);
+		rc = mdb_open(txn, NULL, 0, &dbi);
    
 		key.mv_size = sizeof(int);
 		key.mv_data = sval;
@@ -40,20 +40,22 @@ int main(int argc,char * argv[])
 		printf("Adding %d values\n", count);
 	    for (i=0;i<count;i++) {	
 			sprintf(sval, "%03x %d foo bar", values[i], values[i]);
-			rc = mdb_put(db, txn, &key, &data, MDB_NOOVERWRITE);
+			rc = mdb_put(txn, dbi, &key, &data, MDB_NOOVERWRITE);
 			if (rc) j++;
 	    }
 		if (j) printf("%d duplicates skipped\n", j);
 		rc = mdb_txn_commit(txn);
 		rc = mdbenv_stat(env, &mst);
 
-		rc = mdb_cursor_open(db, NULL, &cursor);
+		rc = mdb_txn_begin(env, 1, &txn);
+		rc = mdb_cursor_open(txn, dbi, &cursor);
 		while ((rc = mdb_cursor_get(cursor, &key, &data, MDB_NEXT)) == 0) {
 			printf("key: %p %.*s, data: %p %.*s\n",
 				key.mv_data,  (int) key.mv_size,  (char *) key.mv_data,
 				data.mv_data, (int) data.mv_size, (char *) data.mv_data);
 		}
 		mdb_cursor_close(cursor);
+		mdb_txn_abort(txn);
 
 		j=0;
 		key.mv_data = sval;
@@ -62,7 +64,7 @@ int main(int argc,char * argv[])
 			txn=NULL;
 			rc = mdb_txn_begin(env, 0, &txn);
 			sprintf(sval, "%03x ", values[i]);
-			rc = mdb_del(db, txn, &key, NULL);
+			rc = mdb_del(txn, dbi, &key, NULL);
 			if (rc) {
 				j--;
 				mdb_txn_abort(txn);
@@ -74,7 +76,8 @@ int main(int argc,char * argv[])
 		printf("Deleted %d values\n", j);
 
 		rc = mdbenv_stat(env, &mst);
-		rc = mdb_cursor_open(db, NULL, &cursor);
+		rc = mdb_txn_begin(env, 1, &txn);
+		rc = mdb_cursor_open(txn, dbi, &cursor);
 		while ((rc = mdb_cursor_get(cursor, &key, &data, MDB_NEXT)) == 0) {
 			printf("key: %.*s, data: %.*s\n",
 				(int) key.mv_size,  (char *) key.mv_data,
@@ -123,8 +126,9 @@ int main(int argc,char * argv[])
 		}
 #endif
 		mdb_cursor_close(cursor);
+		mdb_txn_abort(txn);
 
-		mdb_close(db);
+		mdb_close(env, dbi);
 		mdbenv_close(env);
 
 	return 0;

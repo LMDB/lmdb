@@ -71,7 +71,7 @@ void mdb_txn_abort(MDB_txn *txn);
 
 int  mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi);
 int  mdb_stat(MDB_txn *txn, MDB_dbi dbi, MDB_stat *stat);
-void mdb_close(MDB_txn *txn, MDB_dbi dbi);
+void mdb_close(MDB_env *env, MDB_dbi dbi);
 
 int  mdb_get(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data);
 int  mdb_put(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data,
