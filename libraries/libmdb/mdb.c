@@ -147,7 +147,7 @@ typedef struct MDB_meta {			/* meta (footer) page content */
 } MDB_meta;
 
 typedef struct MDB_dhead {					/* a dirty page */
-	SIMPLEQ_ENTRY(MDB_dpage)	 md_next;	/* queue of dirty pages */
+	STAILQ_ENTRY(MDB_dpage)	 md_next;	/* queue of dirty pages */
 	MDB_page	*md_parent;
 	unsigned	md_pi;				/* parent index */
 	int			md_num;
@@ -158,7 +158,7 @@ typedef struct MDB_dpage {
 	MDB_page	p;
 } MDB_dpage;
 
-SIMPLEQ_HEAD(dirty_queue, MDB_dpage);
+STAILQ_HEAD(dirty_queue, MDB_dpage);
 
 typedef struct MDB_oldpages {
 	struct MDB_oldpages *mo_next;
@@ -440,7 +440,7 @@ mdb_alloc_page(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num)
 	dp->h.md_num = num;
 	dp->h.md_parent = parent;
 	dp->h.md_pi = parent_idx;
-	SIMPLEQ_INSERT_TAIL(txn->mt_u.dirty_queue, dp, h.md_next);
+	STAILQ_INSERT_TAIL(txn->mt_u.dirty_queue, dp, h.md_next);
 	if (pgno == P_INVALID) {
 		dp->p.mp_pgno = txn->mt_next_pgno;
 		txn->mt_next_pgno += num;
@@ -513,7 +513,7 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 			free(txn);
 			return ENOMEM;
 		}
-		SIMPLEQ_INIT(txn->mt_u.dirty_queue);
+		STAILQ_INIT(txn->mt_u.dirty_queue);
 
 		pthread_mutex_lock(&env->me_txns->mt_wmutex);
 		env->me_txns->mt_txnid++;
@@ -604,9 +604,9 @@ mdb_txn_abort(MDB_txn *txn)
 		 * to the free list.
 		 */
 		MDB_IDL_ZERO(txn->mt_free_pgs);
-		while (!SIMPLEQ_EMPTY(txn->mt_u.dirty_queue)) {
-			dp = SIMPLEQ_FIRST(txn->mt_u.dirty_queue);
-			SIMPLEQ_REMOVE_HEAD(txn->mt_u.dirty_queue, h.md_next);
+		while (!STAILQ_EMPTY(txn->mt_u.dirty_queue)) {
+			dp = STAILQ_FIRST(txn->mt_u.dirty_queue);
+			STAILQ_REMOVE_HEAD(txn->mt_u.dirty_queue, h.md_next);
 			if (dp->p.mp_pgno <= env->me_meta.mm_last_pg)
 				mdb_idl_insert(txn->mt_free_pgs, dp->p.mp_pgno);
 			free(dp);
@@ -669,7 +669,7 @@ mdb_txn_commit(MDB_txn *txn)
 		return EINVAL;
 	}
 
-	if (SIMPLEQ_EMPTY(txn->mt_u.dirty_queue))
+	if (STAILQ_EMPTY(txn->mt_u.dirty_queue))
 		goto done;
 
 	DPRINTF("committing transaction %lu on mdbenv %p, root page %lu",
@@ -682,7 +682,7 @@ mdb_txn_commit(MDB_txn *txn)
 		n = 0;
 		done = 1;
 		size = 0;
-		SIMPLEQ_FOREACH(dp, txn->mt_u.dirty_queue, h.md_next) {
+		STAILQ_FOREACH(dp, txn->mt_u.dirty_queue, h.md_next) {
 			if (dp->p.mp_pgno != next) {
 				if (n) {
 					DPRINTF("committing %u dirty pages", n);
@@ -734,9 +734,9 @@ mdb_txn_commit(MDB_txn *txn)
 
 	/* Drop the dirty pages.
 	 */
-	while (!SIMPLEQ_EMPTY(txn->mt_u.dirty_queue)) {
-		dp = SIMPLEQ_FIRST(txn->mt_u.dirty_queue);
-		SIMPLEQ_REMOVE_HEAD(txn->mt_u.dirty_queue, h.md_next);
+	while (!STAILQ_EMPTY(txn->mt_u.dirty_queue)) {
+		dp = STAILQ_FIRST(txn->mt_u.dirty_queue);
+		STAILQ_REMOVE_HEAD(txn->mt_u.dirty_queue, h.md_next);
 		free(dp);
 	}
 
@@ -1337,9 +1337,9 @@ mdbenv_get_page(MDB_env *env, pgno_t pgno)
 	MDB_txn *txn = env->me_txn;
 	int found = 0;
 
-	if (txn && !SIMPLEQ_EMPTY(txn->mt_u.dirty_queue)) {
+	if (txn && !STAILQ_EMPTY(txn->mt_u.dirty_queue)) {
 		MDB_dpage *dp;
-		SIMPLEQ_FOREACH(dp, txn->mt_u.dirty_queue, h.md_next) {
+		STAILQ_FOREACH(dp, txn->mt_u.dirty_queue, h.md_next) {
 			if (dp->p.mp_pgno == pgno) {
 				p = &dp->p;
 				found = 1;
