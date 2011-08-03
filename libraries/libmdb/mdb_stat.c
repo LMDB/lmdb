@@ -40,8 +40,8 @@ int main(int argc,char * argv[])
 	printf("Leaf pages: %lu\n", mst.ms_leaf_pages);
 	printf("Overflow pages: %lu\n", mst.ms_overflow_pages);
 	printf("Entries: %lu\n", mst.ms_entries);
+	mdb_close(txn, dbi);
 	mdb_txn_abort(txn);
-	mdb_close(env, dbi);
 	mdbenv_close(env);
 
 	return 0;

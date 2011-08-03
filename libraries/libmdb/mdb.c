@@ -463,7 +463,7 @@ mdb_touch(MDB_txn *txn, MDB_pageparent *pp)
 		DPRINTF("touched page %lu -> %lu", mp->mp_pgno, dp->p.mp_pgno);
 		mdb_idl_insert(txn->mt_free_pgs, mp->mp_pgno);
 		pgno = dp->p.mp_pgno;
-		bcopy(mp, &dp->p, txn->mt_env->me_meta.mm_psize);
+		memcpy(&dp->p, mp, txn->mt_env->me_meta.mm_psize);
 		mp = &dp->p;
 		mp->mp_pgno = pgno;
 		mp->mp_flags |= P_DIRTY;
@@ -538,7 +538,8 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 				if (env->me_txns->mt_readers[i].mr_pid == 0) {
 					env->me_txns->mt_readers[i].mr_pid = getpid();
 					env->me_txns->mt_readers[i].mr_tid = pthread_self();
-					pthread_setspecific(env->me_txkey, &env->me_txns->mt_readers[i]);
+					r = &env->me_txns->mt_readers[i];
+					pthread_setspecific(env->me_txkey, r);
 					if (i >= env->me_txns->mt_numreaders)
 						env->me_txns->mt_numreaders = i+1;
 					break;
@@ -587,6 +588,9 @@ mdb_txn_abort(MDB_txn *txn)
 	DPRINTF("abort transaction %lu on mdbenv %p, root page %lu",
 		txn->mt_txnid, (void *) env, txn->mt_root);
 
+	free(txn->mt_dbs);
+	free(txn->mt_dbxs);
+
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
 		txn->mt_u.reader->mr_txnid = 0;
 	} else {
@@ -612,7 +616,7 @@ mdb_txn_abort(MDB_txn *txn)
 				env->me_pgtail = mop;
 			}
 			env->me_pghead = mop;
-			bcopy(txn->mt_free_pgs, mop->mo_pages, MDB_IDL_SIZEOF(txn->mt_free_pgs));
+			memcpy(mop->mo_pages, txn->mt_free_pgs, MDB_IDL_SIZEOF(txn->mt_free_pgs));
 		}
 
 		free(txn->mt_free_pgs);
@@ -738,6 +742,17 @@ mdb_txn_commit(MDB_txn *txn)
 	}
 	env->me_txn = NULL;
 
+	{
+		MDB_dbx *p1 = env->me_dbxs;
+		MDB_db **p2 = env->me_dbs;
+
+		env->me_dbxs = txn->mt_dbxs;
+		env->me_dbs = txn->mt_dbs;
+
+		free(p2);
+		free(p1);
+	}
+
 	/* add to tail of free list */
 	if (!MDB_IDL_IS_ZERO(txn->mt_free_pgs)) {
 		MDB_oldpages *mop;
@@ -750,7 +765,7 @@ mdb_txn_commit(MDB_txn *txn)
 			env->me_pghead = mop;
 		}
 		env->me_pgtail = mop;
-		bcopy(txn->mt_free_pgs, mop->mo_pages, MDB_IDL_SIZEOF(txn->mt_free_pgs));
+		memcpy(mop->mo_pages, txn->mt_free_pgs, MDB_IDL_SIZEOF(txn->mt_free_pgs));
 		mop->mo_txnid = txn->mt_txnid;
 	}
 
@@ -807,7 +822,7 @@ mdbenv_read_header(MDB_env *env)
 		return EINVAL;
 	}
 
-	bcopy(m, &env->me_meta, sizeof(*m));
+	memcpy(&env->me_meta, m, sizeof(*m));
 	return 0;
 }
 
@@ -834,7 +849,7 @@ mdbenv_init_meta(MDB_env *env)
 	p->mp_flags = P_META;
 
 	meta = METADATA(p);
-	bcopy(&env->me_meta, meta, sizeof(*meta));
+	memcpy(meta, &env->me_meta, sizeof(*meta));
 
 	q = (MDB_page *)((char *)p + psize);
 
@@ -842,7 +857,7 @@ mdbenv_init_meta(MDB_env *env)
 	q->mp_flags = P_META;
 
 	meta = METADATA(q);
-	bcopy(&env->me_meta, meta, sizeof(*meta));
+	memcpy(meta, &env->me_meta, sizeof(*meta));
 
 	rc = write(env->me_fd, p, psize * 2);
 	free(p);
@@ -932,7 +947,7 @@ mdbenv_read_meta(MDB_env *env, int *which)
 		toggle = 1;
 
 	if (meta[toggle]->mm_txnid > env->me_meta.mm_txnid) {
-		bcopy(meta[toggle], &env->me_meta, sizeof(env->me_meta));
+		memcpy(&env->me_meta, meta[toggle], sizeof(env->me_meta));
 		if (which)
 			*which = toggle;
 	}
@@ -1844,21 +1859,21 @@ mdb_add_node(MDB_txn *txn, MDB_dbi dbi, MDB_page *mp, indx_t indx,
 		node->mn_pgno = pgno;
 
 	if (key)
-		bcopy(key->mv_data, NODEKEY(node), key->mv_size);
+		memcpy(NODEKEY(node), key->mv_data, key->mv_size);
 
 	if (IS_LEAF(mp)) {
 		assert(key);
 		if (ofp == NULL) {
 			if (F_ISSET(flags, F_BIGDATA))
-				bcopy(data->mv_data, node->mn_data + key->mv_size,
+				memcpy(node->mn_data + key->mv_size, data->mv_data,
 				    sizeof(pgno_t));
 			else
-				bcopy(data->mv_data, node->mn_data + key->mv_size,
+				memcpy(node->mn_data + key->mv_size, data->mv_data,
 				    data->mv_size);
 		} else {
-			bcopy(&ofp->p.mp_pgno, node->mn_data + key->mv_size,
+			memcpy(node->mn_data + key->mv_size, &ofp->p.mp_pgno,
 			    sizeof(pgno_t));
-			bcopy(data->mv_data, METADATA(&ofp->p), data->mv_size);
+			memcpy(METADATA(&ofp->p), data->mv_data, data->mv_size);
 		}
 	}
 
@@ -1898,7 +1913,7 @@ mdb_del_node(MDB_page *mp, indx_t indx)
 	}
 
 	base = (char *)mp + mp->mp_upper;
-	bcopy(base, base + sz, ptr - mp->mp_upper);
+	memmove(base + sz, base, ptr - mp->mp_upper);
 
 	mp->mp_lower -= sizeof(indx_t);
 	mp->mp_upper += sz;
@@ -1967,14 +1982,14 @@ mdb_update_key(MDB_page *mp, indx_t indx, MDB_val *key)
 
 		base = (char *)mp + mp->mp_upper;
 		len = ptr - mp->mp_upper + NODESIZE;
-		bcopy(base, base - delta, len);
+		memmove(base - delta, base, len);
 		mp->mp_upper -= delta;
 
 		node = NODEPTR(mp, indx);
 		node->mn_ksize = key->mv_size;
 	}
 
-	bcopy(key->mv_data, NODEKEY(node), key->mv_size);
+	memcpy(NODEKEY(node), key->mv_data, key->mv_size);
 
 	return MDB_SUCCESS;
 }
@@ -2247,7 +2262,7 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 		int i, ovpages;
 		pgno_t pg;
 
-		bcopy(NODEDATA(leaf), &pg, sizeof(pg));
+		memcpy(&pg, NODEDATA(leaf), sizeof(pg));
 		ovpages = OVPAGES(NODEDSZ(leaf), txn->mt_env->me_meta.mm_psize);
 		for (i=0; i<ovpages; i++) {
 			mdb_idl_insert(txn->mt_free_pgs, pg);
@@ -2619,10 +2634,10 @@ int mdb_stat(MDB_txn *txn, MDB_dbi dbi, MDB_stat *arg)
 	return MDB_SUCCESS;
 }
 
-void mdb_close(MDB_env *env, MDB_dbi dbi)
+void mdb_close(MDB_txn *txn, MDB_dbi dbi)
 {
-	if (dbi >= env->me_numdbs)
+	if (dbi >= txn->mt_numdbs)
 		return;
-	free(env->me_dbxs[dbi].md_name);
-	env->me_dbxs[dbi].md_name = NULL;
+	free(txn->mt_dbxs[dbi].md_name);
+	txn->mt_dbxs[dbi].md_name = NULL;
 }
