@@ -39,12 +39,14 @@ typedef enum MDB_cursor_op {		/* cursor operations */
 /* DB flags */
 #define MDB_REVERSEKEY	0x02		/* use reverse string keys */
 #define MDB_DUPSORT		0x04		/* use sorted duplicates */
-#define MDB_NOSYNC		0x10000		/* don't fsync after commit */
-#define MDB_RDONLY		0x20000		/* read only */
-#define MDB_CREATE		0x40000		/* create if not present */
 
 /* environment flags */
 #define MDB_FIXEDMAP	0x01		/* mmap at a fixed address */
+#define MDB_NOSYNC		0x10000		/* don't fsync after commit */
+#define MDB_RDONLY		0x20000		/* read only */
+
+/* DB or env flags */
+#define MDB_CREATE		0x40000		/* create if not present */
 
 typedef struct MDB_stat {
 	unsigned int	ms_psize;
@@ -64,6 +66,7 @@ int  mdbenv_get_path(MDB_env *env, const char **path);
 int  mdbenv_set_mapsize(MDB_env *env, size_t size);
 int  mdbenv_set_maxreaders(MDB_env *env, int readers);
 int  mdbenv_get_maxreaders(MDB_env *env, int *readers);
+int  mdbenv_set_maxdbs(MDB_env *env, int dbs);
 int  mdbenv_sync(MDB_env *env);
 
 int  mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **txn);
