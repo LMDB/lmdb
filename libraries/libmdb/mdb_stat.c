@@ -1,3 +1,16 @@
+/* mdb_stat.c - memory-mapped database status tool */
+/*
+ * Copyright 2011 Howard Chu, Symas Corp.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted only as authorized by the OpenLDAP
+ * Public License.
+ *
+ * A copy of this license is available in the file LICENSE in the
+ * top-level directory of the distribution or, alternatively, at
+ * <http://www.OpenLDAP.org/license.html>.
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
