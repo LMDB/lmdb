@@ -58,7 +58,7 @@ typedef enum MDB_cursor_op {		/* cursor operations */
 	MDB_FIRST,
 	MDB_NEXT,
 	MDB_LAST,
-	MDB_PREV,				/* not implemented */
+	MDB_PREV,
 	MDB_GET_BOTH,			/* position at key/data */
 	MDB_GET_BOTH_RANGE		/* position at key, nearest data */
 } MDB_cursor_op;

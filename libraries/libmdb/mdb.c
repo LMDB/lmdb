@@ -362,6 +362,8 @@ static int		 mdb_set_key(MDB_node *node, MDB_val *key);
 static int		 mdb_sibling(MDB_cursor *cursor, int move_right);
 static int		 mdb_cursor_next(MDB_cursor *cursor,
 			    MDB_val *key, MDB_val *data);
+static int		 mdb_cursor_prev(MDB_cursor *cursor,
+			    MDB_val *key, MDB_val *data);
 static int		 mdb_cursor_set(MDB_cursor *cursor,
 			    MDB_val *key, MDB_val *data, int *exactp);
 static int		 mdb_cursor_first(MDB_cursor *cursor,
@@ -1754,6 +1756,46 @@ mdb_cursor_next(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 }
 
 static int
+mdb_cursor_prev(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
+{
+	MDB_ppage	*top;
+	MDB_page	*mp;
+	MDB_node	*leaf;
+
+	assert(cursor->mc_initialized);
+
+	top = CURSOR_TOP(cursor);
+	mp = top->mp_page;
+
+	DPRINTF("cursor_prev: top page is %lu in cursor %p", mp->mp_pgno, (void *) cursor);
+
+	if (top->mp_ki == 0)  {
+		DPRINTF("=====> move to prev sibling page");
+		if (mdb_sibling(cursor, 0) != MDB_SUCCESS) {
+			return ENOENT;
+		}
+		top = CURSOR_TOP(cursor);
+		mp = top->mp_page;
+		top->mp_ki = NUMKEYS(mp) - 1;
+		DPRINTF("prev page is %lu, key index %u", mp->mp_pgno, top->mp_ki);
+	} else
+		top->mp_ki--;
+
+	cursor->mc_eof = 0;
+
+	DPRINTF("==> cursor points to page %lu with %u keys, key index %u",
+	    mp->mp_pgno, NUMKEYS(mp), top->mp_ki);
+
+	assert(IS_LEAF(mp));
+	leaf = NODEPTR(mp, top->mp_ki);
+
+	if (data && mdb_read_data(cursor->mc_txn->mt_env, leaf, data) != MDB_SUCCESS)
+		return MDB_FAIL;
+
+	return mdb_set_key(leaf, key);
+}
+
+static int
 mdb_cursor_set(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
     int *exactp)
 {
@@ -1831,6 +1873,7 @@ static int
 mdb_cursor_last(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 {
 	int		 rc;
+	MDB_ppage	*top;
 	MDB_pageparent	mpp;
 	MDB_node	*leaf;
 	MDB_val	lkey;
@@ -1845,7 +1888,10 @@ mdb_cursor_last(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 
 	leaf = NODEPTR(mpp.mp_page, NUMKEYS(mpp.mp_page)-1);
 	cursor->mc_initialized = 1;
-	cursor->mc_eof = 1;
+	cursor->mc_eof = 0;
+
+	top = CURSOR_TOP(cursor);
+	top->mp_ki = NUMKEYS(top->mp_page) - 1;
 
 	if (data && (rc = mdb_read_data(cursor->mc_txn->mt_env, leaf, data)) != MDB_SUCCESS)
 		return rc;
@@ -1879,6 +1925,14 @@ mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 			rc = mdb_cursor_first(cursor, key, data);
 		else
 			rc = mdb_cursor_next(cursor, key, data);
+		break;
+	case MDB_PREV:
+		if (!cursor->mc_initialized || cursor->mc_eof) {
+			while (CURSOR_TOP(cursor) != NULL)
+				cursor_pop_page(cursor);
+			rc = mdb_cursor_last(cursor, key, data);
+		} else
+			rc = mdb_cursor_prev(cursor, key, data);
 		break;
 	case MDB_FIRST:
 		while (CURSOR_TOP(cursor) != NULL)
