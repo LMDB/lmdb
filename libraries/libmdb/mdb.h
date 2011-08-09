@@ -53,12 +53,14 @@ typedef void (MDB_rel_func)(void *ptr, void *oldptr);
 #define MDB_NOOVERWRITE	 1
 
 typedef enum MDB_cursor_op {		/* cursor operations */
-	MDB_CURSOR,				/* position at given key */
-	MDB_CURSOR_EXACT,		/* position at key, or fail */
+	MDB_SET,				/* position at key, or fail */
+	MDB_SET_RANGE,			/* position at given key */
 	MDB_FIRST,
 	MDB_NEXT,
-	MDB_LAST,				/* not implemented */
-	MDB_PREV				/* not implemented */
+	MDB_LAST,
+	MDB_PREV,				/* not implemented */
+	MDB_GET_BOTH,			/* position at key/data */
+	MDB_GET_BOTH_RANGE		/* position at key, nearest data */
 } MDB_cursor_op;
 
 /* return codes */

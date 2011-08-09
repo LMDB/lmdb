@@ -1774,7 +1774,7 @@ mdb_cursor_set(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	top = CURSOR_TOP(cursor);
 	leaf = mdb_search_node(cursor->mc_txn, cursor->mc_dbi, mpp.mp_page, key, exactp, &top->mp_ki);
 	if (exactp != NULL && !*exactp) {
-		/* MDB_CURSOR_EXACT specified and not an exact match. */
+		/* MDB_SET specified and not an exact match. */
 		return ENOENT;
 	}
 
@@ -1863,13 +1863,13 @@ mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	assert(cursor);
 
 	switch (op) {
-	case MDB_CURSOR:
-	case MDB_CURSOR_EXACT:
+	case MDB_SET:
+	case MDB_SET_RANGE:
 		while (CURSOR_TOP(cursor) != NULL)
 			cursor_pop_page(cursor);
 		if (key == NULL || key->mv_size == 0 || key->mv_size > MAXKEYSIZE) {
 			rc = EINVAL;
-		} else if (op == MDB_CURSOR_EXACT)
+		} else if (op == MDB_SET)
 			rc = mdb_cursor_set(cursor, key, data, &exact);
 		else
 			rc = mdb_cursor_set(cursor, key, data, NULL);
