@@ -433,6 +433,16 @@ mdb_alloc_page(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num)
 			txn->mt_env->me_pghead = mop;
 			memcpy(mop->mo_pages, idl, MDB_IDL_SIZEOF(idl));
 
+#if DEBUG > 1
+			{
+				unsigned int i;
+				DPRINTF("IDL read txn %lu root %lu num %lu",
+					mop->mo_txnid, txn->mt_dbs[FREE_DBI].md_root, idl[0]);
+				for (i=0; i<idl[0]; i++) {
+					DPRINTF("IDL %lu", idl[i+1]);
+				}
+			}
+#endif
 			/* drop this IDL from the DB */
 			mpp.mp_parent = NULL;
 			mpp.mp_pi = 0;
@@ -640,6 +650,7 @@ mdb_txn_abort(MDB_txn *txn)
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
 		txn->mt_u.reader->mr_txnid = 0;
 	} else {
+		MDB_oldpages *mop;
 		/* Discard all dirty pages. */
 		while (!STAILQ_EMPTY(txn->mt_u.dirty_queue)) {
 			dp = STAILQ_FIRST(txn->mt_u.dirty_queue);
@@ -648,6 +659,12 @@ mdb_txn_abort(MDB_txn *txn)
 		}
 		free(txn->mt_free_pgs);
 		free(txn->mt_u.dirty_queue);
+
+		while ((mop = txn->mt_env->me_pghead)) {
+			txn->mt_env->me_pghead = mop->mo_next;
+			free(mop);
+		}
+
 		env->me_txn = NULL;
 		env->me_txns->mt_txnid--;
 		pthread_mutex_unlock(&env->me_txns->mt_wmutex);
@@ -723,6 +740,17 @@ mdb_txn_commit(MDB_txn *txn)
 		mpp.mp_pi = 0;
 		mdb_search_page(txn, FREE_DBI, &key, NULL, 1, &mpp);
 
+#if DEBUG > 1
+		{
+			unsigned int i;
+			ULONG *idl = txn->mt_free_pgs;
+			DPRINTF("IDL write txn %lu root %lu num %lu",
+				txn->mt_txnid, txn->mt_dbs[FREE_DBI].md_root, idl[0]);
+			for (i=0; i<idl[0]; i++) {
+				DPRINTF("IDL %lu", idl[i+1]);
+			}
+		}
+#endif
 		/* write to last page of freeDB */
 		key.mv_size = sizeof(pgno_t);
 		key.mv_data = (char *)&txn->mt_txnid;
@@ -2335,7 +2363,6 @@ mdb_del0(MDB_txn *txn, MDB_dbi dbi, unsigned int ki, MDB_pageparent *mpp, MDB_no
 {
 	int rc;
 
-	mdb_del_node(mpp->mp_page, ki);
 	/* add overflow pages to free list */
 	if (F_ISSET(leaf->mn_flags, F_BIGDATA)) {
 		int i, ovpages;
@@ -2344,10 +2371,12 @@ mdb_del0(MDB_txn *txn, MDB_dbi dbi, unsigned int ki, MDB_pageparent *mpp, MDB_no
 		memcpy(&pg, NODEDATA(leaf), sizeof(pg));
 		ovpages = OVPAGES(NODEDSZ(leaf), txn->mt_env->me_psize);
 		for (i=0; i<ovpages; i++) {
+			DPRINTF("freed ov page %lu", pg);
 			mdb_idl_insert(txn->mt_free_pgs, pg);
 			pg++;
 		}
 	}
+	mdb_del_node(mpp->mp_page, ki);
 	txn->mt_dbs[dbi].md_entries--;
 	rc = mdb_rebalance(txn, dbi, mpp);
 	if (rc != MDB_SUCCESS)
