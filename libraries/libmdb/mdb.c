@@ -230,8 +230,7 @@ SLIST_HEAD(page_stack, MDB_ppage);
 #define CURSOR_POP(c)		 SLIST_REMOVE_HEAD(&(c)->mc_stack, mp_entry)
 #define CURSOR_PUSH(c,p)	 SLIST_INSERT_HEAD(&(c)->mc_stack, p, mp_entry)
 
-struct MDB_fakeenv {
-};
+struct MDB_xcursor;
 
 struct MDB_cursor {
 	MDB_txn		*mc_txn;
@@ -239,6 +238,7 @@ struct MDB_cursor {
 	MDB_dbi		mc_dbi;
 	short		mc_initialized;	/* 1 if initialized */
 	short		mc_eof;		/* 1 if end is reached */
+	struct MDB_xcursor	*mc_xcursor;
 };
 
 #define METAHASHLEN	 offsetof(MDB_meta, mm_hash)
@@ -284,8 +284,16 @@ struct MDB_txn {
 #define MDB_TXN_RDONLY		 0x01		/* read-only transaction */
 #define MDB_TXN_ERROR		 0x02		/* an error has occurred */
 #define MDB_TXN_METOGGLE	0x04		/* used meta page 1 */
-	unsigned int		 mt_flags;
+	unsigned int	mt_flags;
 };
+
+/* Context for sorted-dup records */
+typedef struct MDB_xcursor {
+	MDB_cursor mx_cursor;
+	MDB_txn mx_txn;
+	MDB_dbx	mx_dbxs[4];
+	MDB_db	mx_dbs[4];
+} MDB_xcursor;
 
 struct MDB_env {
 	int			me_fd;
@@ -335,7 +343,7 @@ static int  mdb_search_page(MDB_txn *txn,
 static int  mdbenv_read_header(MDB_env *env, MDB_meta *meta);
 static int  mdbenv_read_meta(MDB_env *env, int *which);
 static int  mdbenv_write_meta(MDB_txn *txn);
-static MDB_page *mdbenv_get_page(MDB_env *env, pgno_t pgno);
+static MDB_page *mdb_get_page(MDB_txn *txn, pgno_t pgno);
 
 static MDB_node *mdb_search_node(MDB_txn *txn, MDB_dbi dbi, MDB_page *mp,
 			    MDB_val *key, int *exactp, unsigned int *kip);
@@ -345,7 +353,7 @@ static int  mdb_add_node(MDB_txn *txn, MDB_dbi dbi, MDB_page *mp,
 static void mdb_del_node(MDB_page *mp, indx_t indx);
 static int mdb_del0(MDB_txn *txn, MDB_dbi dbi, unsigned int ki,
     MDB_pageparent *mpp, MDB_node *leaf);
-static int  mdb_read_data(MDB_env *env, MDB_node *leaf, MDB_val *data);
+static int  mdb_read_data(MDB_txn *txn, MDB_node *leaf, MDB_val *data);
 
 static int		 mdb_rebalance(MDB_txn *txn, MDB_dbi dbi, MDB_pageparent *mp);
 static int		 mdb_update_key(MDB_page *mp, indx_t indx, MDB_val *key);
@@ -461,7 +469,7 @@ mdb_alloc_page(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num)
 			MDB_val data;
 			pgno_t *idl;
 
-			mdb_read_data(txn->mt_env, leaf, &data);
+			mdb_read_data(txn, leaf, &data);
 			idl = (ULONG *)data.mv_data;
 			mop = malloc(sizeof(MDB_oldpages) + MDB_IDL_SIZEOF(idl) - sizeof(pgno_t));
 			mop->mo_next = txn->mt_env->me_pghead;
@@ -1455,13 +1463,12 @@ cursor_push_page(MDB_cursor *cursor, MDB_page *mp)
 }
 
 static MDB_page *
-mdbenv_get_page(MDB_env *env, pgno_t pgno)
+mdb_get_page(MDB_txn *txn, pgno_t pgno)
 {
 	MDB_page *p = NULL;
-	MDB_txn *txn = env->me_txn;
 	int found = 0;
 
-	if (txn && !STAILQ_EMPTY(txn->mt_u.dirty_queue)) {
+	if (!F_ISSET(txn->mt_flags, MDB_TXN_RDONLY) && !STAILQ_EMPTY(txn->mt_u.dirty_queue)) {
 		MDB_dpage *dp;
 		STAILQ_FOREACH(dp, txn->mt_u.dirty_queue, h.md_next) {
 			if (dp->p.mp_pgno == pgno) {
@@ -1472,7 +1479,7 @@ mdbenv_get_page(MDB_env *env, pgno_t pgno)
 		}
 	}
 	if (!found) {
-		p = (MDB_page *)(env->me_map + env->me_psize * pgno);
+		p = (MDB_page *)(txn->mt_env->me_map + txn->mt_env->me_psize * pgno);
 	}
 	return p;
 }
@@ -1521,7 +1528,7 @@ mdb_search_page_root(MDB_txn *txn, MDB_dbi dbi, MDB_val *key,
 			CURSOR_TOP(cursor)->mp_ki = i;
 
 		mpp->mp_parent = mp;
-		if ((mp = mdbenv_get_page(txn->mt_env, NODEPGNO(node))) == NULL)
+		if ((mp = mdb_get_page(txn, NODEPGNO(node))) == NULL)
 			return MDB_FAIL;
 		mpp->mp_pi = i;
 		mpp->mp_page = mp;
@@ -1581,7 +1588,7 @@ mdb_search_page(MDB_txn *txn, MDB_dbi dbi, MDB_val *key,
 		return ENOENT;
 	}
 
-	if ((mpp->mp_page = mdbenv_get_page(txn->mt_env, root)) == NULL)
+	if ((mpp->mp_page = mdb_get_page(txn, root)) == NULL)
 		return MDB_FAIL;
 
 	DPRINTF("root page has flags 0x%X", mpp->mp_page->mp_flags);
@@ -1609,7 +1616,7 @@ mdb_search_page(MDB_txn *txn, MDB_dbi dbi, MDB_val *key,
 }
 
 static int
-mdb_read_data(MDB_env *env, MDB_node *leaf, MDB_val *data)
+mdb_read_data(MDB_txn *txn, MDB_node *leaf, MDB_val *data)
 {
 	MDB_page	*omp;		/* overflow mpage */
 	pgno_t		 pgno;
@@ -1624,7 +1631,7 @@ mdb_read_data(MDB_env *env, MDB_node *leaf, MDB_val *data)
 	 */
 	data->mv_size = leaf->mn_dsize;
 	memcpy(&pgno, NODEDATA(leaf), sizeof(pgno));
-	if ((omp = mdbenv_get_page(env, pgno)) == NULL) {
+	if ((omp = mdb_get_page(txn, pgno)) == NULL) {
 		DPRINTF("read overflow page %lu failed", pgno);
 		return MDB_FAIL;
 	}
@@ -1654,7 +1661,7 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 
 	leaf = mdb_search_node(txn, dbi, mpp.mp_page, key, &exact, NULL);
 	if (leaf && exact)
-		rc = mdb_read_data(txn->mt_env, leaf, data);
+		rc = mdb_read_data(txn, leaf, data);
 	else {
 		rc = ENOENT;
 	}
@@ -1697,7 +1704,7 @@ mdb_sibling(MDB_cursor *cursor, int move_right)
 	assert(IS_BRANCH(parent->mp_page));
 
 	indx = NODEPTR(parent->mp_page, parent->mp_ki);
-	if ((mp = mdbenv_get_page(cursor->mc_txn->mt_env, indx->mn_pgno)) == NULL)
+	if ((mp = mdb_get_page(cursor->mc_txn, indx->mn_pgno)) == NULL)
 		return MDB_FAIL;
 #if 0
 	mp->parent = parent->mp_page;
@@ -1757,7 +1764,7 @@ mdb_cursor_next(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 	assert(IS_LEAF(mp));
 	leaf = NODEPTR(mp, top->mp_ki);
 
-	if (data && mdb_read_data(cursor->mc_txn->mt_env, leaf, data) != MDB_SUCCESS)
+	if (data && mdb_read_data(cursor->mc_txn, leaf, data) != MDB_SUCCESS)
 		return MDB_FAIL;
 
 	return mdb_set_key(leaf, key);
@@ -1797,7 +1804,7 @@ mdb_cursor_prev(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 	assert(IS_LEAF(mp));
 	leaf = NODEPTR(mp, top->mp_ki);
 
-	if (data && mdb_read_data(cursor->mc_txn->mt_env, leaf, data) != MDB_SUCCESS)
+	if (data && mdb_read_data(cursor->mc_txn, leaf, data) != MDB_SUCCESS)
 		return MDB_FAIL;
 
 	return mdb_set_key(leaf, key);
@@ -1842,7 +1849,7 @@ mdb_cursor_set(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	cursor->mc_initialized = 1;
 	cursor->mc_eof = 0;
 
-	if (data && (rc = mdb_read_data(cursor->mc_txn->mt_env, leaf, data)) != MDB_SUCCESS)
+	if (data && (rc = mdb_read_data(cursor->mc_txn, leaf, data)) != MDB_SUCCESS)
 		return rc;
 
 	rc = mdb_set_key(leaf, key);
@@ -1871,7 +1878,7 @@ mdb_cursor_first(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 	cursor->mc_initialized = 1;
 	cursor->mc_eof = 0;
 
-	if (data && (rc = mdb_read_data(cursor->mc_txn->mt_env, leaf, data)) != MDB_SUCCESS)
+	if (data && (rc = mdb_read_data(cursor->mc_txn, leaf, data)) != MDB_SUCCESS)
 		return rc;
 
 	return mdb_set_key(leaf, key);
@@ -1901,7 +1908,7 @@ mdb_cursor_last(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 	top = CURSOR_TOP(cursor);
 	top->mp_ki = NUMKEYS(top->mp_page) - 1;
 
-	if (data && (rc = mdb_read_data(cursor->mc_txn->mt_env, leaf, data)) != MDB_SUCCESS)
+	if (data && (rc = mdb_read_data(cursor->mc_txn, leaf, data)) != MDB_SUCCESS)
 		return rc;
 
 	return mdb_set_key(leaf, key);
@@ -2151,14 +2158,36 @@ int
 mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **ret)
 {
 	MDB_cursor	*cursor;
+	size_t size = sizeof(MDB_cursor);
 
-	if (txn == NULL || ret == NULL)
+	if (txn == NULL || ret == NULL || !dbi || dbi >= txn->mt_numdbs)
 		return EINVAL;
 
-	if ((cursor = calloc(1, sizeof(*cursor))) != NULL) {
+	if (txn->mt_dbs[dbi].md_flags & MDB_DUPSORT)
+		size += sizeof(MDB_xcursor);
+
+	if ((cursor = calloc(1, size)) != NULL) {
 		SLIST_INIT(&cursor->mc_stack);
 		cursor->mc_dbi = dbi;
 		cursor->mc_txn = txn;
+		if (txn->mt_dbs[dbi].md_flags & MDB_DUPSORT) {
+			MDB_xcursor *mx = (MDB_xcursor *)(cursor + 1);
+			cursor->mc_xcursor = mx;
+			mx->mx_cursor.mc_txn = &mx->mx_txn;
+			mx->mx_txn = *txn;
+			mx->mx_txn.mt_dbxs = mx->mx_dbxs;
+			mx->mx_txn.mt_dbs = mx->mx_dbs;
+			mx->mx_dbxs[0] = txn->mt_dbxs[0];
+			mx->mx_dbxs[1] = txn->mt_dbxs[1];
+			if (dbi > 1) {
+				mx->mx_dbxs[2] = txn->mt_dbxs[dbi];
+				mx->mx_txn.mt_numdbs = 4;
+			} else {
+				mx->mx_txn.mt_numdbs = 3;
+			}
+		}
+	} else {
+		return ENOMEM;
 	}
 
 	*ret = cursor;
@@ -2387,7 +2416,7 @@ mdb_rebalance(MDB_txn *txn, MDB_dbi dbi, MDB_pageparent *mpp)
 		} else if (IS_BRANCH(mpp->mp_page) && NUMKEYS(mpp->mp_page) == 1) {
 			DPRINTF("collapsing root page!");
 			txn->mt_dbs[dbi].md_root = NODEPGNO(NODEPTR(mpp->mp_page, 0));
-			if ((root = mdbenv_get_page(txn->mt_env, txn->mt_dbs[dbi].md_root)) == NULL)
+			if ((root = mdb_get_page(txn, txn->mt_dbs[dbi].md_root)) == NULL)
 				return MDB_FAIL;
 			txn->mt_dbs[dbi].md_depth--;
 			txn->mt_dbs[dbi].md_branch_pages--;
@@ -2413,7 +2442,7 @@ mdb_rebalance(MDB_txn *txn, MDB_dbi dbi, MDB_pageparent *mpp)
 		 */
 		DPRINTF("reading right neighbor");
 		node = NODEPTR(mpp->mp_parent, mpp->mp_pi + 1);
-		if ((npp.mp_page = mdbenv_get_page(txn->mt_env, NODEPGNO(node))) == NULL)
+		if ((npp.mp_page = mdb_get_page(txn, NODEPGNO(node))) == NULL)
 			return MDB_FAIL;
 		npp.mp_pi = mpp->mp_pi + 1;
 		si = 0;
@@ -2423,7 +2452,7 @@ mdb_rebalance(MDB_txn *txn, MDB_dbi dbi, MDB_pageparent *mpp)
 		 */
 		DPRINTF("reading left neighbor");
 		node = NODEPTR(mpp->mp_parent, mpp->mp_pi - 1);
-		if ((npp.mp_page = mdbenv_get_page(txn->mt_env, NODEPGNO(node))) == NULL)
+		if ((npp.mp_page = mdb_get_page(txn, NODEPGNO(node))) == NULL)
 			return MDB_FAIL;
 		npp.mp_pi = mpp->mp_pi - 1;
 		si = NUMKEYS(npp.mp_page) - 1;
@@ -2510,7 +2539,7 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 		return ENOENT;
 	}
 
-	if (data && (rc = mdb_read_data(txn->mt_env, leaf, data)) != MDB_SUCCESS)
+	if (data && (rc = mdb_read_data(txn, leaf, data)) != MDB_SUCCESS)
 		return rc;
 
 	return mdb_del0(txn, dbi, ki, &mpp, leaf);
