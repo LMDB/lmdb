@@ -621,21 +621,20 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 		if (!r) {
 			unsigned int i;
 			pthread_mutex_lock(&env->me_txns->mt_mutex);
-			for (i=0; i<env->me_maxreaders; i++) {
-				if (env->me_txns->mt_readers[i].mr_pid == 0) {
-					env->me_txns->mt_readers[i].mr_pid = getpid();
-					env->me_txns->mt_readers[i].mr_tid = pthread_self();
-					r = &env->me_txns->mt_readers[i];
-					pthread_setspecific(env->me_txkey, r);
-					if (i >= env->me_txns->mt_numreaders)
-						env->me_txns->mt_numreaders = i+1;
+			for (i=0; i<env->me_txns->mt_numreaders; i++)
+				if (env->me_txns->mt_readers[i].mr_pid == 0)
 					break;
-				}
-			}
-			pthread_mutex_unlock(&env->me_txns->mt_mutex);
 			if (i == env->me_maxreaders) {
+				pthread_mutex_unlock(&env->me_txns->mti_mutex);
 				return ENOSPC;
 			}
+			env->me_txns->mt_readers[i].mr_pid = getpid();
+			env->me_txns->mt_readers[i].mr_tid = pthread_self();
+			r = &env->me_txns->mt_readers[i];
+			pthread_setspecific(env->me_txkey, r);
+			if (i >= env->me_txns->mt_numreaders)
+				env->me_txns->mt_numreaders = i+1;
+			pthread_mutex_unlock(&env->me_txns->mt_mutex);
 		}
 		r->mr_txnid = txn->mt_txnid;
 		txn->mt_u.reader = r;
