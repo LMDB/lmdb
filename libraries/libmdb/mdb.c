@@ -316,6 +316,7 @@ struct MDB_env {
 	MDB_db		*me_dbs[2];
 	MDB_oldpages *me_pghead;
 	pthread_key_t	me_txkey;	/* thread-key for readers */
+	pgno_t		me_free_pgs[MDB_IDL_UM_SIZE];
 };
 
 #define NODESIZE	 offsetof(MDB_node, mn_data)
@@ -610,12 +611,7 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 
 		pthread_mutex_lock(&env->me_txns->mt_wmutex);
 		env->me_txns->mt_txnid++;
-		txn->mt_free_pgs = malloc(MDB_IDL_UM_SIZEOF);
-		if (txn->mt_free_pgs == NULL) {
-			free(txn->mt_u.dirty_queue);
-			free(txn);
-			return ENOMEM;
-		}
+		txn->mt_free_pgs = env->me_free_pgs;
 		txn->mt_free_pgs[0] = 0;
 	}
 
@@ -703,7 +699,6 @@ mdb_txn_abort(MDB_txn *txn)
 			STAILQ_REMOVE_HEAD(txn->mt_u.dirty_queue, h.md_next);
 			free(dp);
 		}
-		free(txn->mt_free_pgs);
 		free(txn->mt_u.dirty_queue);
 
 		while ((mop = txn->mt_env->me_pghead)) {
@@ -917,7 +912,6 @@ mdb_txn_commit(MDB_txn *txn)
 	}
 
 	pthread_mutex_unlock(&env->me_txns->mt_wmutex);
-	free(txn->mt_free_pgs);
 	free(txn->mt_u.dirty_queue);
 	free(txn);
 	txn = NULL;
