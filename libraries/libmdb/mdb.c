@@ -230,6 +230,9 @@ SLIST_HEAD(page_stack, MDB_ppage);
 #define CURSOR_POP(c)		 SLIST_REMOVE_HEAD(&(c)->mc_stack, mp_entry)
 #define CURSOR_PUSH(c,p)	 SLIST_INSERT_HEAD(&(c)->mc_stack, p, mp_entry)
 
+struct MDB_fakeenv {
+};
+
 struct MDB_cursor {
 	MDB_txn		*mc_txn;
 	struct page_stack	 mc_stack;		/* stack of parent pages */
@@ -260,6 +263,8 @@ typedef struct MDB_dbx {
 	MDB_cmp_func	*md_cmp;		/* user compare function */
 	MDB_cmp_func	*md_dcmp;		/* user dupsort function */
 	MDB_rel_func	*md_rel;		/* user relocate function */
+	MDB_dbi	md_parent;
+	unsigned int	md_dirty;
 } MDB_dbx;
 
 struct MDB_txn {
@@ -682,6 +687,8 @@ mdb_txn_abort(MDB_txn *txn)
 		txn->mt_u.reader->mr_txnid = 0;
 	} else {
 		MDB_oldpages *mop;
+		unsigned int i;
+
 		/* Discard all dirty pages. */
 		while (!STAILQ_EMPTY(txn->mt_u.dirty_queue)) {
 			dp = STAILQ_FIRST(txn->mt_u.dirty_queue);
@@ -698,6 +705,8 @@ mdb_txn_abort(MDB_txn *txn)
 
 		env->me_txn = NULL;
 		env->me_txns->mt_txnid--;
+		for (i=2; i<env->me_numdbs; i++)
+			env->me_dbxs[i].md_dirty = 0;
 		pthread_mutex_unlock(&env->me_txns->mt_wmutex);
 	}
 
@@ -797,15 +806,11 @@ mdb_txn_commit(MDB_txn *txn)
 		MDB_val data;
 		data.mv_size = sizeof(MDB_db);
 
-		for (i = 2; i < env->me_numdbs; i++) {
-			if (env->me_dbs[env->me_db_toggle][i].md_root != txn->mt_dbs[i].md_root) {
+		for (i = 2; i < txn->mt_numdbs; i++) {
+			if (txn->mt_dbxs[i].md_dirty) {
 				data.mv_data = &txn->mt_dbs[i];
 				mdb_put(txn, i, &txn->mt_dbxs[i].md_name, &data, 0);
 			}
-		}
-		for (i = env->me_numdbs; i < txn->mt_numdbs; i++) {
-			data.mv_data = &txn->mt_dbs[i];
-			mdb_put(txn, i, &txn->mt_dbxs[i].md_name, &data, 0);
 		}
 	}
 
@@ -886,11 +891,14 @@ mdb_txn_commit(MDB_txn *txn)
 	{
 		int toggle = !env->me_db_toggle;
 
-		for (i = 0; i < env->me_numdbs; i++) {
-			if (env->me_dbs[toggle][i].md_root != txn->mt_dbs[i].md_root)
+		for (i = 2; i < env->me_numdbs; i++) {
+			if (txn->mt_dbxs[i].md_dirty) {
 				env->me_dbs[toggle][i] = txn->mt_dbs[i];
+				txn->mt_dbxs[i].md_dirty = 0;
+			}
 		}
 		for (i = env->me_numdbs; i < txn->mt_numdbs; i++) {
+			txn->mt_dbxs[i].md_dirty = 0;
 			env->me_dbxs[i] = txn->mt_dbxs[i];
 			env->me_dbs[toggle][i] = txn->mt_dbs[i];
 		}
@@ -1580,13 +1588,13 @@ mdb_search_page(MDB_txn *txn, MDB_dbi dbi, MDB_val *key,
 
 	if (modify) {
 		/* For sub-databases, update main root first */
-		if (dbi > MAIN_DBI && txn->mt_dbs[dbi].md_root ==
-			txn->mt_env->me_dbs[txn->mt_env->me_db_toggle][dbi].md_root) {
+		if (dbi > MAIN_DBI && !txn->mt_dbxs[dbi].md_dirty) {
 			MDB_pageparent mp2;
 			rc = mdb_search_page(txn, 0, &txn->mt_dbxs[dbi].md_name,
 				NULL, 1, &mp2);
 			if (rc)
 				return rc;
+			txn->mt_dbxs[dbi].md_dirty = 1;
 		}
 		if (!F_ISSET(mpp->mp_page->mp_flags, P_DIRTY)) {
 			mpp->mp_parent = NULL;
@@ -2837,6 +2845,8 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 		txn->mt_dbxs[txn->mt_numdbs].md_cmp = NULL;
 		txn->mt_dbxs[txn->mt_numdbs].md_dcmp = NULL;
 		txn->mt_dbxs[txn->mt_numdbs].md_rel = NULL;
+		txn->mt_dbxs[txn->mt_numdbs].md_parent = MAIN_DBI;
+		txn->mt_dbxs[txn->mt_numdbs].md_dirty = 0;
 		memcpy(&txn->mt_dbs[txn->mt_numdbs], data.mv_data, sizeof(MDB_db));
 		*dbi = txn->mt_numdbs;
 		txn->mt_numdbs++;
