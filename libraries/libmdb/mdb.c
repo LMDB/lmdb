@@ -1659,7 +1659,7 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 	assert(data);
 	DPRINTF("===> get key [%.*s]", (int)key->mv_size, (char *)key->mv_data);
 
-	if (txn == NULL || dbi >= txn->mt_numdbs)
+	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs)
 		return EINVAL;
 
 	if (key->mv_size == 0 || key->mv_size > MAXKEYSIZE) {
@@ -2673,7 +2673,7 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 
 	assert(key != NULL);
 
-	if (txn == NULL || dbi >= txn->mt_numdbs)
+	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs)
 		return EINVAL;
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
@@ -3035,7 +3035,7 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 	assert(key != NULL);
 	assert(data != NULL);
 
-	if (txn == NULL || dbi >= txn->mt_numdbs)
+	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs)
 		return EINVAL;
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
@@ -3170,4 +3170,31 @@ void mdb_close(MDB_txn *txn, MDB_dbi dbi)
 	txn->mt_dbxs[dbi].md_name.mv_data = NULL;
 	txn->mt_dbxs[dbi].md_name.mv_size = 0;
 	free(ptr);
+}
+
+int mdb_set_compare(MDB_txn *txn, MDB_dbi dbi, MDB_cmp_func *cmp)
+{
+	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs)
+		return EINVAL;
+
+	txn->mt_dbxs[dbi].md_cmp = cmp;
+	return MDB_SUCCESS;
+}
+
+int mdb_set_dupsort(MDB_txn *txn, MDB_dbi dbi, MDB_cmp_func *cmp)
+{
+	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs)
+		return EINVAL;
+
+	txn->mt_dbxs[dbi].md_dcmp = cmp;
+	return MDB_SUCCESS;
+}
+
+int mdb_set_relfunc(MDB_txn *txn, MDB_dbi dbi, MDB_rel_func *rel)
+{
+	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs)
+		return EINVAL;
+
+	txn->mt_dbxs[dbi].md_rel = rel;
+	return MDB_SUCCESS;
 }

@@ -100,6 +100,7 @@ typedef struct MDB_stat {
 int  mdbenv_create(MDB_env **env);
 int  mdbenv_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode);
 int  mdbenv_stat(MDB_env *env, MDB_stat *stat);
+int  mdbenv_sync(MDB_env *env);
 void mdbenv_close(MDB_env *env);
 int  mdbenv_get_flags(MDB_env *env, unsigned int *flags);
 int  mdbenv_get_path(MDB_env *env, const char **path);
@@ -107,7 +108,6 @@ int  mdbenv_set_mapsize(MDB_env *env, size_t size);
 int  mdbenv_set_maxreaders(MDB_env *env, int readers);
 int  mdbenv_get_maxreaders(MDB_env *env, int *readers);
 int  mdbenv_set_maxdbs(MDB_env *env, int dbs);
-int  mdbenv_sync(MDB_env *env);
 
 int  mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **txn);
 int  mdb_txn_commit(MDB_txn *txn);
