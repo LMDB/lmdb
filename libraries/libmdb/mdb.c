@@ -375,11 +375,11 @@ static MDB_ppage *cursor_push_page(MDB_cursor *cursor,
 static int		 mdb_set_key(MDB_node *node, MDB_val *key);
 static int		 mdb_sibling(MDB_cursor *cursor, int move_right);
 static int		 mdb_cursor_next(MDB_cursor *cursor,
-			    MDB_val *key, MDB_val *data);
+			    MDB_val *key, MDB_val *data, MDB_cursor_op op);
 static int		 mdb_cursor_prev(MDB_cursor *cursor,
-			    MDB_val *key, MDB_val *data);
+			    MDB_val *key, MDB_val *data, MDB_cursor_op op);
 static int		 mdb_cursor_set(MDB_cursor *cursor,
-			    MDB_val *key, MDB_val *data, int *exactp);
+			    MDB_val *key, MDB_val *data, MDB_cursor_op op, int *exactp);
 static int		 mdb_cursor_first(MDB_cursor *cursor,
 			    MDB_val *key, MDB_val *data);
 static int		 mdb_cursor_last(MDB_cursor *cursor,
@@ -598,7 +598,7 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 	MDB_txn	*txn;
 	int rc, toggle;
 
-	if ((txn = calloc(1, sizeof(*txn))) == NULL) {
+	if ((txn = calloc(1, sizeof(MDB_txn))) == NULL) {
 		DPRINTF("calloc: %s", strerror(errno));
 		return ENOMEM;
 	}
@@ -963,7 +963,7 @@ mdbenv_read_header(MDB_env *env, MDB_meta *meta)
 	if (m->mm_version != MDB_VERSION) {
 		DPRINTF("database is version %u, expected version %u",
 		    m->mm_version, MDB_VERSION);
-		return EINVAL;
+		return MDB_VERSION_MISMATCH;
 	}
 
 	memcpy(meta, m, sizeof(*m));
@@ -1078,7 +1078,7 @@ mdbenv_create(MDB_env **env)
 {
 	MDB_env *e;
 
-	e = calloc(1, sizeof(*e));
+	e = calloc(1, sizeof(MDB_env));
 	if (!e) return ENOMEM;
 
 	e->me_maxreaders = DEFAULT_READERS;
@@ -1275,12 +1275,14 @@ mdbenv_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 	} else {
 		if (env->me_txns->mt_magic != MDB_MAGIC) {
 			DPRINTF("lock region has invalid magic");
-			errno = EINVAL;
+			rc = EINVAL;
+			goto fail;
 		}
 		if (env->me_txns->mt_version != MDB_VERSION) {
 			DPRINTF("lock region is version %u, expected version %u",
 				env->me_txns->mt_version, MDB_VERSION);
-			errno = EINVAL;
+			rc = MDB_VERSION_MISMATCH;
+			goto fail;
 		}
 		if (errno != EACCES && errno != EAGAIN) {
 			rc = errno;
@@ -1452,7 +1454,7 @@ cursor_push_page(MDB_cursor *cursor, MDB_page *mp)
 
 	DPRINTF("pushing page %lu on cursor %p", mp->mp_pgno, (void *) cursor);
 
-	if ((ppage = calloc(1, sizeof(*ppage))) == NULL)
+	if ((ppage = calloc(1, sizeof(MDB_ppage))) == NULL)
 		return NULL;
 	ppage->mp_page = mp;
 	CURSOR_PUSH(cursor, ppage);
@@ -1584,7 +1586,7 @@ mdb_search_page(MDB_txn *txn, MDB_dbi dbi, MDB_val *key,
 
 	if (root == P_INVALID) {		/* Tree is empty. */
 		DPRINTF("tree is empty");
-		return ENOENT;
+		return MDB_NOTFOUND;
 	}
 
 	if ((mpp->mp_page = mdb_get_page(txn, root)) == NULL)
@@ -1673,7 +1675,7 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 		}
 		rc = mdb_read_data(txn, leaf, data);
 	} else {
-		rc = ENOENT;
+		rc = MDB_NOTFOUND;
 	}
 
 	return rc;
@@ -1689,7 +1691,7 @@ mdb_sibling(MDB_cursor *cursor, int move_right)
 
 	top = CURSOR_TOP(cursor);
 	if ((parent = SLIST_NEXT(top, mp_entry)) == NULL) {
-		return ENOENT;		/* root has no siblings */
+		return MDB_NOTFOUND;		/* root has no siblings */
 	}
 
 	DPRINTF("parent page is page %lu, index %u",
@@ -1739,17 +1741,26 @@ mdb_set_key(MDB_node *node, MDB_val *key)
 }
 
 static int
-mdb_cursor_next(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
+mdb_cursor_next(MDB_cursor *cursor, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 {
 	MDB_ppage	*top;
 	MDB_page	*mp;
 	MDB_node	*leaf;
+	int rc;
 
 	if (cursor->mc_eof) {
-		return ENOENT;
+		return MDB_NOTFOUND;
 	}
 
 	assert(cursor->mc_initialized);
+
+	if (cursor->mc_txn->mt_dbs[cursor->mc_dbi].md_flags & MDB_DUPSORT) {
+		if (op == MDB_NEXT || op == MDB_NEXT_DUP) {
+			rc = mdb_cursor_next(&cursor->mc_xcursor->mx_cursor, data, NULL, MDB_NEXT);
+			if (op != MDB_NEXT || rc == MDB_SUCCESS)
+				return rc;
+		}
+	}
 
 	top = CURSOR_TOP(cursor);
 	mp = top->mp_page;
@@ -1760,7 +1771,7 @@ mdb_cursor_next(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 		DPRINTF("=====> move to next sibling page");
 		if (mdb_sibling(cursor, 1) != MDB_SUCCESS) {
 			cursor->mc_eof = 1;
-			return ENOENT;
+			return MDB_NOTFOUND;
 		}
 		top = CURSOR_TOP(cursor);
 		mp = top->mp_page;
@@ -1774,20 +1785,38 @@ mdb_cursor_next(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 	assert(IS_LEAF(mp));
 	leaf = NODEPTR(mp, top->mp_ki);
 
-	if (data && mdb_read_data(cursor->mc_txn, leaf, data) != MDB_SUCCESS)
-		return MDB_FAIL;
+	if (data) {
+		if ((rc = mdb_read_data(cursor->mc_txn, leaf, data) != MDB_SUCCESS))
+			return rc;
+
+		if (cursor->mc_txn->mt_dbs[cursor->mc_dbi].md_flags & MDB_DUPSORT) {
+			mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, NODEDATA(leaf));
+			rc = mdb_cursor_first(&cursor->mc_xcursor->mx_cursor, data, NULL);
+			if (rc != MDB_SUCCESS)
+				return rc;
+		}
+	}
 
 	return mdb_set_key(leaf, key);
 }
 
 static int
-mdb_cursor_prev(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
+mdb_cursor_prev(MDB_cursor *cursor, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 {
 	MDB_ppage	*top;
 	MDB_page	*mp;
 	MDB_node	*leaf;
+	int rc;
 
 	assert(cursor->mc_initialized);
+
+	if (cursor->mc_txn->mt_dbs[cursor->mc_dbi].md_flags & MDB_DUPSORT) {
+		if (op == MDB_PREV || op == MDB_PREV_DUP) {
+			rc = mdb_cursor_next(&cursor->mc_xcursor->mx_cursor, data, NULL, MDB_PREV);
+			if (op != MDB_PREV || rc == MDB_SUCCESS)
+				return rc;
+		}
+	}
 
 	top = CURSOR_TOP(cursor);
 	mp = top->mp_page;
@@ -1797,7 +1826,7 @@ mdb_cursor_prev(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 	if (top->mp_ki == 0)  {
 		DPRINTF("=====> move to prev sibling page");
 		if (mdb_sibling(cursor, 0) != MDB_SUCCESS) {
-			return ENOENT;
+			return MDB_NOTFOUND;
 		}
 		top = CURSOR_TOP(cursor);
 		mp = top->mp_page;
@@ -1814,15 +1843,24 @@ mdb_cursor_prev(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 	assert(IS_LEAF(mp));
 	leaf = NODEPTR(mp, top->mp_ki);
 
-	if (data && mdb_read_data(cursor->mc_txn, leaf, data) != MDB_SUCCESS)
-		return MDB_FAIL;
+	if (data) {
+		if ((rc = mdb_read_data(cursor->mc_txn, leaf, data) != MDB_SUCCESS))
+			return rc;
+
+		if (cursor->mc_txn->mt_dbs[cursor->mc_dbi].md_flags & MDB_DUPSORT) {
+			mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, NODEDATA(leaf));
+			rc = mdb_cursor_last(&cursor->mc_xcursor->mx_cursor, data, NULL);
+			if (rc != MDB_SUCCESS)
+				return rc;
+		}
+	}
 
 	return mdb_set_key(leaf, key);
 }
 
 static int
 mdb_cursor_set(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
-    int *exactp)
+    MDB_cursor_op op, int *exactp)
 {
 	int		 rc;
 	MDB_node	*leaf;
@@ -1833,6 +1871,9 @@ mdb_cursor_set(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	assert(key);
 	assert(key->mv_size > 0);
 
+	while (CURSOR_TOP(cursor) != NULL)
+		cursor_pop_page(cursor);
+
 	rc = mdb_search_page(cursor->mc_txn, cursor->mc_dbi, key, cursor, 0, &mpp);
 	if (rc != MDB_SUCCESS)
 		return rc;
@@ -1842,7 +1883,7 @@ mdb_cursor_set(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	leaf = mdb_search_node(cursor->mc_txn, cursor->mc_dbi, mpp.mp_page, key, exactp, &top->mp_ki);
 	if (exactp != NULL && !*exactp) {
 		/* MDB_SET specified and not an exact match. */
-		return ENOENT;
+		return MDB_NOTFOUND;
 	}
 
 	if (leaf == NULL) {
@@ -1859,8 +1900,30 @@ mdb_cursor_set(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	cursor->mc_initialized = 1;
 	cursor->mc_eof = 0;
 
-	if (data && (rc = mdb_read_data(cursor->mc_txn, leaf, data)) != MDB_SUCCESS)
-		return rc;
+	if (data) {
+		if ((rc = mdb_read_data(cursor->mc_txn, leaf, data)) != MDB_SUCCESS)
+			return rc;
+
+		if (cursor->mc_txn->mt_dbs[cursor->mc_dbi].md_flags & MDB_DUPSORT) {
+			mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, NODEDATA(leaf));
+			if (op == MDB_SET || op == MDB_SET_RANGE) {
+				rc = mdb_cursor_first(&cursor->mc_xcursor->mx_cursor, data, NULL);
+			} else {
+				int ex2, *ex2p;
+				MDB_cursor_op op2;
+				if (op == MDB_GET_BOTH) {
+					ex2p = &ex2;
+					op2 = MDB_SET;
+				} else {
+					ex2p = NULL;
+					op2 = MDB_SET_RANGE;
+				}
+				rc = mdb_cursor_set(&cursor->mc_xcursor->mx_cursor, data, NULL, op2, ex2p);
+				if (rc != MDB_SUCCESS)
+					return rc;
+			}
+		}
+	}
 
 	rc = mdb_set_key(leaf, key);
 	if (rc == MDB_SUCCESS) {
@@ -1879,6 +1942,9 @@ mdb_cursor_first(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 	MDB_pageparent	mpp;
 	MDB_node	*leaf;
 
+	while (CURSOR_TOP(cursor) != NULL)
+		cursor_pop_page(cursor);
+
 	rc = mdb_search_page(cursor->mc_txn, cursor->mc_dbi, NULL, cursor, 0, &mpp);
 	if (rc != MDB_SUCCESS)
 		return rc;
@@ -1888,9 +1954,17 @@ mdb_cursor_first(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 	cursor->mc_initialized = 1;
 	cursor->mc_eof = 0;
 
-	if (data && (rc = mdb_read_data(cursor->mc_txn, leaf, data)) != MDB_SUCCESS)
-		return rc;
+	if (data) {
+		if ((rc = mdb_read_data(cursor->mc_txn, leaf, data)) != MDB_SUCCESS)
+			return rc;
 
+		if (cursor->mc_txn->mt_dbs[cursor->mc_dbi].md_flags & MDB_DUPSORT) {
+			mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, NODEDATA(leaf));
+			rc = mdb_cursor_first(&cursor->mc_xcursor->mx_cursor, data, NULL);
+			if (rc)
+				return rc;
+		}
+	}
 	return mdb_set_key(leaf, key);
 }
 
@@ -1902,6 +1976,9 @@ mdb_cursor_last(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 	MDB_pageparent	mpp;
 	MDB_node	*leaf;
 	MDB_val	lkey;
+
+	while (CURSOR_TOP(cursor) != NULL)
+		cursor_pop_page(cursor);
 
 	lkey.mv_size = MAXKEYSIZE+1;
 	lkey.mv_data = NULL;
@@ -1918,8 +1995,17 @@ mdb_cursor_last(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 	top = CURSOR_TOP(cursor);
 	top->mp_ki = NUMKEYS(top->mp_page) - 1;
 
-	if (data && (rc = mdb_read_data(cursor->mc_txn, leaf, data)) != MDB_SUCCESS)
-		return rc;
+	if (data) {
+		if ((rc = mdb_read_data(cursor->mc_txn, leaf, data)) != MDB_SUCCESS)
+			return rc;
+
+		if (cursor->mc_txn->mt_dbs[cursor->mc_dbi].md_flags & MDB_DUPSORT) {
+			mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, NODEDATA(leaf));
+			rc = mdb_cursor_last(&cursor->mc_xcursor->mx_cursor, data, NULL);
+			if (rc)
+				return rc;
+		}
+	}
 
 	return mdb_set_key(leaf, key);
 }
@@ -1934,39 +2020,42 @@ mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	assert(cursor);
 
 	switch (op) {
+	case MDB_GET_BOTH:
+	case MDB_GET_BOTH_RANGE:
+		if (data == NULL) {
+			rc = EINVAL;
+			break;
+		}
+		/* FALLTHRU */
 	case MDB_SET:
 	case MDB_SET_RANGE:
-		while (CURSOR_TOP(cursor) != NULL)
-			cursor_pop_page(cursor);
 		if (key == NULL || key->mv_size == 0 || key->mv_size > MAXKEYSIZE) {
 			rc = EINVAL;
-		} else if (op == MDB_SET)
-			rc = mdb_cursor_set(cursor, key, data, &exact);
+		} else if (op != MDB_SET_RANGE)
+			rc = mdb_cursor_set(cursor, key, data, op, NULL);
 		else
-			rc = mdb_cursor_set(cursor, key, data, NULL);
+			rc = mdb_cursor_set(cursor, key, data, op, &exact);
 		break;
 	case MDB_NEXT:
+	case MDB_NEXT_DUP:
+	case MDB_NEXT_NODUP:
 		if (!cursor->mc_initialized)
 			rc = mdb_cursor_first(cursor, key, data);
 		else
-			rc = mdb_cursor_next(cursor, key, data);
+			rc = mdb_cursor_next(cursor, key, data, op);
 		break;
 	case MDB_PREV:
-		if (!cursor->mc_initialized || cursor->mc_eof) {
-			while (CURSOR_TOP(cursor) != NULL)
-				cursor_pop_page(cursor);
+	case MDB_PREV_DUP:
+	case MDB_PREV_NODUP:
+		if (!cursor->mc_initialized || cursor->mc_eof)
 			rc = mdb_cursor_last(cursor, key, data);
-		} else
-			rc = mdb_cursor_prev(cursor, key, data);
+		else
+			rc = mdb_cursor_prev(cursor, key, data, op);
 		break;
 	case MDB_FIRST:
-		while (CURSOR_TOP(cursor) != NULL)
-			cursor_pop_page(cursor);
 		rc = mdb_cursor_first(cursor, key, data);
 		break;
 	case MDB_LAST:
-		while (CURSOR_TOP(cursor) != NULL)
-			cursor_pop_page(cursor);
 		rc = mdb_cursor_last(cursor, key, data);
 		break;
 	default:
@@ -1975,6 +2064,33 @@ mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 		break;
 	}
 
+	return rc;
+}
+
+/* Delete the item the cursor points to
+ * flags is currently unused.
+ */
+int
+mdb_cursor_del(MDB_cursor *cursor, uint32_t flags)
+{
+	int rc;
+	flags = 0;
+
+	return rc;
+}
+
+int mdb_cursor_put(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
+	MDB_cursor_op op)
+{
+	int		 rc;
+
+	assert(cursor);
+
+	switch (op) {
+	case MDB_CURRENT:
+	case MDB_NODUPDATA:
+	case MDB_SET:
+	}
 	return rc;
 }
 
@@ -2169,7 +2285,6 @@ mdb_xcursor_init0(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx)
 {
 	MDB_dbi dbn;
 
-	mx->mx_cursor.mc_txn = &mx->mx_txn;
 	mx->mx_txn = *txn;
 	mx->mx_txn.mt_dbxs = mx->mx_dbxs;
 	mx->mx_txn.mt_dbs = mx->mx_dbs;
@@ -2186,6 +2301,10 @@ mdb_xcursor_init0(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx)
 	mx->mx_dbxs[dbn+1].md_rel = mx->mx_dbxs[dbn].md_rel;
 	mx->mx_dbxs[dbn+1].md_dirty = 0;
 	mx->mx_txn.mt_numdbs = dbn+2;
+
+	SLIST_INIT(&mx->mx_cursor.mc_stack);
+	mx->mx_cursor.mc_txn = &mx->mx_txn;
+	mx->mx_cursor.mc_dbi = dbn+1;
 }
 
 static void
@@ -2248,10 +2367,14 @@ void
 mdb_cursor_close(MDB_cursor *cursor)
 {
 	if (cursor != NULL) {
-		while (!CURSOR_EMPTY(cursor))
+		while(!CURSOR_EMPTY(cursor))
 			cursor_pop_page(cursor);
+		if (cursor->mc_txn->mt_dbs[cursor->mc_dbi].md_flags & MDB_DUPSORT) {
+			mdb_xcursor_fini(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor);
+			while(!CURSOR_EMPTY(&cursor->mc_xcursor->mx_cursor))
+				cursor_pop_page(&cursor->mc_xcursor->mx_cursor);
+		}
 
-/*		btree_close(cursor->bt); */
 		free(cursor);
 	}
 }
@@ -2585,7 +2708,7 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 
 	leaf = mdb_search_node(txn, dbi, mpp.mp_page, key, &exact, &ki);
 	if (leaf == NULL || !exact) {
-		return ENOENT;
+		return MDB_NOTFOUND;
 	}
 
 	if (data && (rc = mdb_read_data(txn, leaf, data)) != MDB_SUCCESS)
@@ -2833,10 +2956,10 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 			if (F_ISSET(txn->mt_dbs[dbi].md_flags, MDB_DUPSORT)) {
 				goto put_sub;
 			}
-			if (F_ISSET(flags, MDB_NOOVERWRITE)) {
+			if (flags == MDB_NOOVERWRITE) {
 				DPRINTF("duplicate key %.*s",
 				    (int)key->mv_size, (char *)key->mv_data);
-				return EEXIST;
+				return MDB_KEYEXIST;
 			}
 			/* same size, just replace it */
 			if (NODEDSZ(leaf) == data->mv_size) {
@@ -2849,7 +2972,7 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 			ki = NUMKEYS(mpp.mp_page);
 			DPRINTF("appending key at index %i", ki);
 		}
-	} else if (rc == ENOENT) {
+	} else if (rc == MDB_NOTFOUND) {
 		MDB_dpage *dp;
 		/* new file, just write a root leaf page */
 		DPRINTF("allocating new root leaf page");
@@ -2907,6 +3030,8 @@ put_sub:
 			mdb_xcursor_init1(txn, dbi, &mx, NODEDATA(leaf));
 			xdata.mv_size = 0;
 			xdata.mv_data = "";
+			if (flags == MDB_NODUPDATA)
+				flags = MDB_NOOVERWRITE;
 			rc = mdb_put(&mx.mx_txn, mx.mx_txn.mt_numdbs-1, data, &xdata, flags);
 			mdb_xcursor_fini(txn, dbi, &mx);
 		}
@@ -2984,7 +3109,7 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 	rc = mdb_get(txn, MAIN_DBI, &key, &data);
 
 	/* Create if requested */
-	if (rc == ENOENT && (flags & MDB_CREATE)) {
+	if (rc == MDB_NOTFOUND && (flags & MDB_CREATE)) {
 		MDB_db dummy;
 		data.mv_size = sizeof(MDB_db);
 		data.mv_data = &dummy;

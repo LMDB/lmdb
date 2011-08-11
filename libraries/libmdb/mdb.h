@@ -50,22 +50,30 @@ typedef struct MDB_val {
 typedef int  (MDB_cmp_func)(const MDB_val *a, const MDB_val *b);
 typedef void (MDB_rel_func)(void *ptr, void *oldptr);
 
-#define MDB_NOOVERWRITE	 1
-
 typedef enum MDB_cursor_op {		/* cursor operations */
-	MDB_SET,				/* position at key, or fail */
-	MDB_SET_RANGE,			/* position at given key */
+	MDB_CURRENT,
 	MDB_FIRST,
-	MDB_NEXT,
-	MDB_LAST,
-	MDB_PREV,
 	MDB_GET_BOTH,			/* position at key/data */
-	MDB_GET_BOTH_RANGE		/* position at key, nearest data */
+	MDB_GET_BOTH_RANGE,		/* position at key, nearest data */
+	MDB_LAST,
+	MDB_NEXT,
+	MDB_NEXT_DUP,
+	MDB_NEXT_NODUP,
+	MDB_NODUPDATA,
+	MDB_NOOVERWRITE,
+	MDB_PREV,
+	MDB_PREV_DUP,
+	MDB_PREV_NODUP,
+	MDB_SET,				/* position at key, or fail */
+	MDB_SET_RANGE			/* position at given key */
 } MDB_cursor_op;
 
 /* return codes */
-#define MDB_FAIL		-1
 #define MDB_SUCCESS	 0
+#define MDB_FAIL		-1
+#define MDB_KEYEXIST	-2
+#define MDB_NOTFOUND	-3
+#define MDB_VERSION_MISMATCH	-4
 
 /* DB flags */
 #define MDB_REVERSEKEY	0x02		/* use reverse string keys */
@@ -121,6 +129,9 @@ int  mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **cursor);
 void mdb_cursor_close(MDB_cursor *cursor);
 int  mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 			    MDB_cursor_op op);
+int  mdb_cursor_put(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
+			    MDB_cursor_op op);
+int  mdb_cursor_del(MDB_cursor *cursor, unsigned int flags);
 
 int  mdb_cmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b);
 
