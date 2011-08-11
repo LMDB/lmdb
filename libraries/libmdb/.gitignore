@@ -1,7 +1,9 @@
 mtest
+mtest[23]
 testdb
 mdb_stat
 *.[ao]
+*.so
 *[~#]
 *.bak
 *.orig
