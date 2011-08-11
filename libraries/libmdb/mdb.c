@@ -3121,6 +3121,8 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 	/* main DB? */
 	if (!name) {
 		*dbi = MAIN_DBI;
+		if (flags & (MDB_DUPSORT|MDB_REVERSEKEY))
+			txn->mt_dbs[MAIN_DBI].md_flags |= (flags & (MDB_DUPSORT|MDB_REVERSEKEY));
 		return MDB_SUCCESS;
 	}
 
