@@ -3072,20 +3072,25 @@ mdbenv_get_path(MDB_env *env, const char **arg)
 	return MDB_SUCCESS;
 }
 
+static int
+mdb_stat0(MDB_env *env, MDB_db *db, MDB_stat *arg)
+{
+	arg->ms_psize = env->me_psize;
+	arg->ms_depth = db->md_depth;
+	arg->ms_branch_pages = db->md_branch_pages;
+	arg->ms_leaf_pages = db->md_leaf_pages;
+	arg->ms_overflow_pages = db->md_overflow_pages;
+	arg->ms_entries = db->md_entries;
+
+	return MDB_SUCCESS;
+}
 int
 mdbenv_stat(MDB_env *env, MDB_stat *arg)
 {
 	if (env == NULL || arg == NULL)
 		return EINVAL;
 
-	arg->ms_psize = env->me_psize;
-	arg->ms_depth = env->me_meta->mm_dbs[MAIN_DBI].md_depth;
-	arg->ms_branch_pages = env->me_meta->mm_dbs[MAIN_DBI].md_branch_pages;
-	arg->ms_leaf_pages = env->me_meta->mm_dbs[MAIN_DBI].md_leaf_pages;
-	arg->ms_overflow_pages = env->me_meta->mm_dbs[MAIN_DBI].md_overflow_pages;
-	arg->ms_entries = env->me_meta->mm_dbs[MAIN_DBI].md_entries;
-
-	return MDB_SUCCESS;
+	return mdb_stat0(env, &env->me_meta->mm_dbs[MAIN_DBI], arg);
 }
 
 int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
@@ -3150,17 +3155,10 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 
 int mdb_stat(MDB_txn *txn, MDB_dbi dbi, MDB_stat *arg)
 {
-	if (txn == NULL || arg == NULL)
+	if (txn == NULL || arg == NULL || dbi >= txn->mt_numdbs)
 		return EINVAL;
 
-	arg->ms_psize = txn->mt_env->me_psize;
-	arg->ms_depth = txn->mt_dbs[dbi].md_depth;
-	arg->ms_branch_pages = txn->mt_dbs[dbi].md_branch_pages;
-	arg->ms_leaf_pages = txn->mt_dbs[dbi].md_leaf_pages;
-	arg->ms_overflow_pages = txn->mt_dbs[dbi].md_overflow_pages;
-	arg->ms_entries = txn->mt_dbs[dbi].md_entries;
-
-	return MDB_SUCCESS;
+	return mdb_stat0(txn->mt_env, &txn->mt_dbs[dbi], arg);
 }
 
 void mdb_close(MDB_txn *txn, MDB_dbi dbi)
