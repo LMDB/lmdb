@@ -17,7 +17,7 @@
 #ifndef _MDB_IDL_H_
 #define _MDB_IDL_H_
 
-#define AC_MEMCPY(dst,src,size)	bcopy(src,dst,size)
+#define AC_MEMCPY(dst,src,size)	memcpy(dst,src,size)
 
 #define	ID	unsigned long
 #define	NOID	((ID)~0)

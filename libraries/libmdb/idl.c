@@ -14,7 +14,7 @@
  * <http://www.OpenLDAP.org/license.html>.
  */
 
-#include <strings.h>
+#include <string.h>
 #include <sys/types.h>
 #include <assert.h>
 #include "idl.h"
