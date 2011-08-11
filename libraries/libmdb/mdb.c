@@ -386,7 +386,7 @@ static int		 mdb_cursor_last(MDB_cursor *cursor,
 			    MDB_val *key, MDB_val *data);
 
 static void		mdb_xcursor_init0(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx);
-static void		mdb_xcursor_init1(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx, MDB_db *db);
+static void		mdb_xcursor_init1(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx, MDB_node *node);
 static void		mdb_xcursor_fini(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx);
 
 static size_t		 mdb_leaf_size(MDB_env *env, MDB_val *key,
@@ -1678,7 +1678,7 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 			MDB_xcursor mx;
 
 			mdb_xcursor_init0(txn, dbi, &mx);
-			mdb_xcursor_init1(txn, dbi, &mx, NODEDATA(leaf));
+			mdb_xcursor_init1(txn, dbi, &mx, leaf);
 			rc = mdb_search_page(&mx.mx_txn, mx.mx_cursor.mc_dbi, NULL, NULL, 0, &mpp);
 			if (rc != MDB_SUCCESS)
 				return rc;
@@ -1801,7 +1801,7 @@ mdb_cursor_next(MDB_cursor *cursor, MDB_val *key, MDB_val *data, MDB_cursor_op o
 			return rc;
 
 		if (cursor->mc_txn->mt_dbs[cursor->mc_dbi].md_flags & MDB_DUPSORT) {
-			mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, NODEDATA(leaf));
+			mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, leaf);
 			rc = mdb_cursor_first(&cursor->mc_xcursor->mx_cursor, data, NULL);
 			if (rc != MDB_SUCCESS)
 				return rc;
@@ -1823,7 +1823,7 @@ mdb_cursor_prev(MDB_cursor *cursor, MDB_val *key, MDB_val *data, MDB_cursor_op o
 
 	if (cursor->mc_txn->mt_dbs[cursor->mc_dbi].md_flags & MDB_DUPSORT) {
 		if (op == MDB_PREV || op == MDB_PREV_DUP) {
-			rc = mdb_cursor_next(&cursor->mc_xcursor->mx_cursor, data, NULL, MDB_PREV);
+			rc = mdb_cursor_prev(&cursor->mc_xcursor->mx_cursor, data, NULL, MDB_PREV);
 			if (op != MDB_PREV || rc == MDB_SUCCESS)
 				return rc;
 		}
@@ -1859,7 +1859,7 @@ mdb_cursor_prev(MDB_cursor *cursor, MDB_val *key, MDB_val *data, MDB_cursor_op o
 			return rc;
 
 		if (cursor->mc_txn->mt_dbs[cursor->mc_dbi].md_flags & MDB_DUPSORT) {
-			mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, NODEDATA(leaf));
+			mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, leaf);
 			rc = mdb_cursor_last(&cursor->mc_xcursor->mx_cursor, data, NULL);
 			if (rc != MDB_SUCCESS)
 				return rc;
@@ -1916,7 +1916,7 @@ mdb_cursor_set(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 			return rc;
 
 		if (cursor->mc_txn->mt_dbs[cursor->mc_dbi].md_flags & MDB_DUPSORT) {
-			mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, NODEDATA(leaf));
+			mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, leaf);
 			if (op == MDB_SET || op == MDB_SET_RANGE) {
 				rc = mdb_cursor_first(&cursor->mc_xcursor->mx_cursor, data, NULL);
 			} else {
@@ -1970,7 +1970,7 @@ mdb_cursor_first(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 			return rc;
 
 		if (cursor->mc_txn->mt_dbs[cursor->mc_dbi].md_flags & MDB_DUPSORT) {
-			mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, NODEDATA(leaf));
+			mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, leaf);
 			rc = mdb_cursor_first(&cursor->mc_xcursor->mx_cursor, data, NULL);
 			if (rc)
 				return rc;
@@ -2011,7 +2011,7 @@ mdb_cursor_last(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 			return rc;
 
 		if (cursor->mc_txn->mt_dbs[cursor->mc_dbi].md_flags & MDB_DUPSORT) {
-			mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, NODEDATA(leaf));
+			mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, leaf);
 			rc = mdb_cursor_last(&cursor->mc_xcursor->mx_cursor, data, NULL);
 			if (rc)
 				return rc;
@@ -2292,21 +2292,32 @@ mdb_xcursor_init0(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx)
 }
 
 static void
-mdb_xcursor_init1(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx, MDB_db *db)
+mdb_xcursor_init1(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx, MDB_node *node)
 {
+	MDB_db *db = NODEDATA(node);
+	MDB_dbi dbn;
 	mx->mx_dbs[0] = txn->mt_dbs[0];
 	mx->mx_dbs[1] = txn->mt_dbs[1];
 	if (dbi > 1) {
 		mx->mx_dbs[2] = txn->mt_dbs[dbi];
-		mx->mx_dbs[3] = *db;
+		dbn = 3;
 	} else {
-		mx->mx_dbs[2] = *db;
+		dbn = 2;
 	}
+	mx->mx_dbs[dbn] = *db;
+	mx->mx_dbxs[dbn].md_name.mv_data = NODEKEY(node);
+	mx->mx_dbxs[dbn].md_name.mv_size = node->mn_ksize;
+	mx->mx_txn.mt_next_pgno = txn->mt_next_pgno;
+	mx->mx_txn.mt_oldest = txn->mt_oldest;
+	mx->mx_txn.mt_u = txn->mt_u;
 }
 
 static void
 mdb_xcursor_fini(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx)
 {
+	txn->mt_next_pgno = mx->mx_txn.mt_next_pgno;
+	txn->mt_oldest = mx->mx_txn.mt_oldest;
+	txn->mt_u = mx->mx_txn.mt_u;
 	txn->mt_dbs[0] = mx->mx_dbs[0];
 	txn->mt_dbs[1] = mx->mx_dbs[1];
 	txn->mt_dbxs[0].md_dirty = mx->mx_dbxs[0].md_dirty;
@@ -2718,7 +2729,7 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 		MDB_pageparent mp2;
 
 		mdb_xcursor_init0(txn, dbi, &mx);
-		mdb_xcursor_init1(txn, dbi, &mx, NODEDATA(leaf));
+		mdb_xcursor_init1(txn, dbi, &mx, leaf);
 		if (flags == MDB_DEL_DUP) {
 			rc = mdb_del(&mx.mx_txn, mx.mx_cursor.mc_dbi, data, NULL, 0);
 			mdb_xcursor_fini(txn, dbi, &mx);
@@ -3002,11 +3013,11 @@ mdb_put0(MDB_txn *txn, MDB_dbi dbi,
 		rdata = data;
 	}
 
-	if (SIZELEFT(mpp.mp_page) < mdb_leaf_size(txn->mt_env, key, data)) {
-		rc = mdb_split(txn, dbi, &mpp.mp_page, &ki, key, data, P_INVALID);
+	if (SIZELEFT(mpp.mp_page) < mdb_leaf_size(txn->mt_env, key, rdata)) {
+		rc = mdb_split(txn, dbi, &mpp.mp_page, &ki, key, rdata, P_INVALID);
 	} else {
 		/* There is room already in this leaf page. */
-		rc = mdb_add_node(txn, dbi, mpp.mp_page, ki, key, data, 0, 0);
+		rc = mdb_add_node(txn, dbi, mpp.mp_page, ki, key, rdata, 0, 0);
 	}
 
 	if (rc != MDB_SUCCESS)
@@ -3031,7 +3042,7 @@ mdb_put0(MDB_txn *txn, MDB_dbi dbi,
 			leaf = NODEPTR(mpp.mp_page, ki);
 put_sub:
 			mdb_xcursor_init0(txn, dbi, &mx);
-			mdb_xcursor_init1(txn, dbi, &mx, NODEDATA(leaf));
+			mdb_xcursor_init1(txn, dbi, &mx, leaf);
 			xdata.mv_size = 0;
 			xdata.mv_data = "";
 			if (flags == MDB_NODUPDATA)

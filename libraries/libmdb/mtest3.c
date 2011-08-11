@@ -1,4 +1,4 @@
-/* mtest2.c - memory-mapped database tester/toy */
+/* mtest3.c - memory-mapped database tester/toy */
 /*
  * Copyright 2011 Howard Chu, Symas Corp.
  * All rights reserved.
@@ -12,11 +12,11 @@
  * <http://www.OpenLDAP.org/license.html>.
  */
 
-/* Just like mtest.c, but using a subDB instead of the main DB */
-
+/* Tests for sorted duplicate DBs */
 #define _XOPEN_SOURCE 500		/* srandom(), random() */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include "mdb.h"
 
@@ -32,8 +32,11 @@ int main(int argc,char * argv[])
 	int count;
 	int *values;
 	char sval[32];
+	char kval[sizeof(int)];
 
 	srandom(time(NULL));
+
+	memset(sval, 0, sizeof(sval));
 
 	count = (random()%384) + 64;
 	values = (int *)malloc(count*sizeof(int));
@@ -47,17 +50,19 @@ int main(int argc,char * argv[])
 	rc = mdbenv_set_maxdbs(env, 4);
 	rc = mdbenv_open(env, "./testdb", MDB_FIXEDMAP|MDB_NOSYNC, 0664);
 	rc = mdb_txn_begin(env, 0, &txn);
-	rc = mdb_open(txn, "id1", MDB_CREATE, &dbi);
-   
+	rc = mdb_open(txn, "id2", MDB_CREATE|MDB_DUPSORT, &dbi);
+
 	key.mv_size = sizeof(int);
-	key.mv_data = sval;
+	key.mv_data = kval;
 	data.mv_size = sizeof(sval);
 	data.mv_data = sval;
 
 	printf("Adding %d values\n", count);
-	for (i=0;i<count;i++) {	
+	for (i=0;i<count;i++) {
+		if (!(i & 0x0f))
+			sprintf(kval, "%03x", values[i]);
 		sprintf(sval, "%03x %d foo bar", values[i], values[i]);
-		rc = mdb_put(txn, dbi, &key, &data, MDB_NOOVERWRITE);
+		rc = mdb_put(txn, dbi, &key, &data, MDB_NODUPDATA);
 		if (rc) j++;
 	}
 	if (j) printf("%d duplicates skipped\n", j);
@@ -75,13 +80,18 @@ int main(int argc,char * argv[])
 	mdb_txn_abort(txn);
 
 	j=0;
-	key.mv_data = sval;
-	for (i= count - 1; i > -1; i-= (random()%5)) {	
+
+	for (i= count - 1; i > -1; i-= (random()%5)) {
 		j++;
 		txn=NULL;
 		rc = mdb_txn_begin(env, 0, &txn);
-		sprintf(sval, "%03x ", values[i]);
-		rc = mdb_del(txn, dbi, &key, NULL, 0);
+		sprintf(kval, "%03x", values[i & ~0x0f]);
+		sprintf(sval, "%03x %d foo bar", values[i], values[i]);
+		key.mv_size = sizeof(int);
+		key.mv_data = kval;
+		data.mv_size = sizeof(sval);
+		data.mv_data = sval;
+		rc = mdb_del(txn, dbi, &key, &data, MDB_DEL_DUP);
 		if (rc) {
 			j--;
 			mdb_txn_abort(txn);
