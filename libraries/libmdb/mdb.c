@@ -1299,6 +1299,8 @@ fail:
 
 }
 
+#define LOCKNAME	"/lock.mdb"
+#define DATANAME	"/data.mdb"
 int
 mdbenv_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 {
@@ -1306,12 +1308,12 @@ mdbenv_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 	char *lpath, *dpath;
 
 	len = strlen(path);
-	lpath = malloc(len + sizeof("/lock.mdb") + len + sizeof("/data.db"));
+	lpath = malloc(len + sizeof(LOCKNAME) + len + sizeof(DATANAME));
 	if (!lpath)
 		return ENOMEM;
-	dpath = lpath + len + sizeof("/lock.mdb");
-	sprintf(lpath, "%s/lock.mdb", path);
-	sprintf(dpath, "%s/data.mdb", path);
+	dpath = lpath + len + sizeof(LOCKNAME);
+	sprintf(lpath, "%s" LOCKNAME, path);
+	sprintf(dpath, "%s" DATANAME, path);
 
 	rc = mdbenv_setup_locks(env, lpath, mode, &excl);
 	if (rc)
@@ -1351,6 +1353,8 @@ mdbenv_close(MDB_env *env)
 	if (env == NULL)
 		return;
 
+	free(env->me_dbs[1]);
+	free(env->me_dbs[0]);
 	free(env->me_dbxs);
 	free(env->me_path);
 

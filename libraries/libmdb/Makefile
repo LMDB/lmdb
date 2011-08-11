@@ -4,7 +4,7 @@ OPT = -O2 -g
 CFLAGS	= -pthread $(OPT) $(W) $(XCFLAGS)
 LDLIBS	=
 
-all:	mtest mdb_stat
+all:	mdb_stat mtest mtest2
 
 clean:
 	rm -rf mtest mdb_stat *.[ao] *~ testdb
