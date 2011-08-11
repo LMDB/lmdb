@@ -452,8 +452,11 @@ mdb_alloc_page(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num)
 {
 	MDB_dpage *dp;
 	pgno_t pgno = P_INVALID;
-	ULONG oldest = txn->mt_txnid - 2;
+	ULONG oldest;
 
+	if (txn->mt_txnid > 2) {
+
+	oldest = txn->mt_txnid - 2;
 	if (!txn->mt_env->me_pghead && txn->mt_dbs[FREE_DBI].md_root != P_INVALID) {
 		/* See if there's anything in the free DB */
 		MDB_pageparent mpp;
@@ -533,6 +536,7 @@ mdb_alloc_page(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num)
 				}
 			}
 		}
+	}
 	}
 
 	if ((dp = malloc(txn->mt_env->me_psize * num + sizeof(MDB_dhead))) == NULL)
@@ -1101,8 +1105,6 @@ mdbenv_set_mapsize(MDB_env *env, size_t size)
 int
 mdbenv_set_maxdbs(MDB_env *env, int dbs)
 {
-	if (env->me_map)
-		return EINVAL;
 	env->me_maxdbs = dbs;
 	return MDB_SUCCESS;
 }
@@ -1598,7 +1600,7 @@ mdb_search_page(MDB_txn *txn, MDB_dbi dbi, MDB_val *key,
 		/* For sub-databases, update main root first */
 		if (dbi > MAIN_DBI && !txn->mt_dbxs[dbi].md_dirty) {
 			MDB_pageparent mp2;
-			rc = mdb_search_page(txn, 0, &txn->mt_dbxs[dbi].md_name,
+			rc = mdb_search_page(txn, MAIN_DBI, &txn->mt_dbxs[dbi].md_name,
 				NULL, 1, &mp2);
 			if (rc)
 				return rc;
@@ -3066,7 +3068,7 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 {
 	MDB_val key, data;
 	MDB_dbi i;
-	int rc;
+	int rc, dirty = 0;
 	size_t len;
 
 	/* main DB? */
@@ -3101,7 +3103,8 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 		memset(&dummy, 0, sizeof(dummy));
 		dummy.md_root = P_INVALID;
 		dummy.md_flags = flags & 0xffff;
-		rc = mdb_put(txn, 0, &key, &data, 0);
+		rc = mdb_put(txn, MAIN_DBI, &key, &data, 0);
+		dirty = 1;
 	}
 
 	/* OK, got info, add to table */
@@ -3112,7 +3115,7 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 		txn->mt_dbxs[txn->mt_numdbs].md_dcmp = NULL;
 		txn->mt_dbxs[txn->mt_numdbs].md_rel = NULL;
 		txn->mt_dbxs[txn->mt_numdbs].md_parent = MAIN_DBI;
-		txn->mt_dbxs[txn->mt_numdbs].md_dirty = 0;
+		txn->mt_dbxs[txn->mt_numdbs].md_dirty = dirty;
 		memcpy(&txn->mt_dbs[txn->mt_numdbs], data.mv_data, sizeof(MDB_db));
 		*dbi = txn->mt_numdbs;
 		txn->mt_numdbs++;

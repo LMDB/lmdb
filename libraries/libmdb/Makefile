@@ -15,6 +15,7 @@ test:	all
 
 mdb_stat: mdb_stat.o mdb.o idl.o
 mtest:    mtest.o    mdb.o idl.o
+mtest2:	mtest2.o mdb.o idl.o
 
 %:	%.o mdb.o
 	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LDLIBS) -o $@
