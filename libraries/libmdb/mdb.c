@@ -385,6 +385,10 @@ static int		 mdb_cursor_first(MDB_cursor *cursor,
 static int		 mdb_cursor_last(MDB_cursor *cursor,
 			    MDB_val *key, MDB_val *data);
 
+static void		mdb_xcursor_init0(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx);
+static void		mdb_xcursor_init1(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx, MDB_db *db);
+static void		mdb_xcursor_fini(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx);
+
 static size_t		 mdb_leaf_size(MDB_env *env, MDB_val *key,
 			    MDB_val *data);
 static size_t		 mdb_branch_size(MDB_env *env, MDB_val *key);
@@ -1472,6 +1476,8 @@ mdb_get_page(MDB_txn *txn, pgno_t pgno)
 		}
 	}
 	if (!found) {
+		if (pgno > txn->mt_env->me_meta->mm_last_pg)
+			return NULL;
 		p = (MDB_page *)(txn->mt_env->me_map + txn->mt_env->me_psize * pgno);
 	}
 	return p;
@@ -1653,9 +1659,20 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 		return rc;
 
 	leaf = mdb_search_node(txn, dbi, mpp.mp_page, key, &exact, NULL);
-	if (leaf && exact)
+	if (leaf && exact) {
+		/* Return first duplicate data item */
+		if (F_ISSET(txn->mt_dbs[dbi].md_flags, MDB_DUPSORT)) {
+			MDB_xcursor mx;
+
+			mdb_xcursor_init0(txn, dbi, &mx);
+			mdb_xcursor_init1(txn, dbi, &mx, NODEDATA(leaf));
+			rc = mdb_search_page(&mx.mx_txn, mx.mx_txn.mt_numdbs-1, NULL, NULL, 0, &mpp);
+			if (rc != MDB_SUCCESS)
+				return rc;
+			leaf = NODEPTR(mpp.mp_page, 0);
+		}
 		rc = mdb_read_data(txn, leaf, data);
-	else {
+	} else {
 		rc = ENOENT;
 	}
 
@@ -2607,7 +2624,7 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 						parent = SLIST_NEXT(top, mp_entry);
 					} else {
 						ni = NODEPTR(parent->mp_page, parent->mp_ki);
-						top = mdb_get_page(mc.mc_txn, ni->mn_pgno);
+						top->mp_page = mdb_get_page(mc.mc_txn, ni->mn_pgno);
 					}
 				}
 			}
