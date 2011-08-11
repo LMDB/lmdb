@@ -50,8 +50,11 @@ typedef struct MDB_val {
 typedef int  (MDB_cmp_func)(const MDB_val *a, const MDB_val *b);
 typedef void (MDB_rel_func)(void *ptr, void *oldptr);
 
+#define MDB_NOOVERWRITE	1
+#define MDB_NODUPDATA	2
+#define MDB_DEL_DUP		3
+
 typedef enum MDB_cursor_op {		/* cursor operations */
-	MDB_CURRENT,
 	MDB_FIRST,
 	MDB_GET_BOTH,			/* position at key/data */
 	MDB_GET_BOTH_RANGE,		/* position at key, nearest data */
@@ -59,8 +62,6 @@ typedef enum MDB_cursor_op {		/* cursor operations */
 	MDB_NEXT,
 	MDB_NEXT_DUP,
 	MDB_NEXT_NODUP,
-	MDB_NODUPDATA,
-	MDB_NOOVERWRITE,
 	MDB_PREV,
 	MDB_PREV_DUP,
 	MDB_PREV_NODUP,
@@ -123,7 +124,8 @@ int  mdb_set_relfunc(MDB_txn *txn, MDB_dbi dbi, MDB_rel_func *rel);
 int  mdb_get(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data);
 int  mdb_put(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data,
 			    unsigned int flags);
-int  mdb_del(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data);
+int  mdb_del(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data,
+			    unsigned int flags);
 
 int  mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **cursor);
 void mdb_cursor_close(MDB_cursor *cursor);
