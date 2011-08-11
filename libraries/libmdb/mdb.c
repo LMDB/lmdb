@@ -226,6 +226,9 @@ typedef struct MDB_ppage {					/* ordered list of pages */
 } MDB_ppage;
 SLIST_HEAD(page_stack, MDB_ppage);
 
+/* FIXME: tree depth is mostly bounded, we should just
+ * use a fixed array and avoid malloc/pointer chasing
+ */
 #define CURSOR_EMPTY(c)		 SLIST_EMPTY(&(c)->mc_stack)
 #define CURSOR_TOP(c)		 SLIST_FIRST(&(c)->mc_stack)
 #define CURSOR_POP(c)		 SLIST_REMOVE_HEAD(&(c)->mc_stack, mp_entry)
