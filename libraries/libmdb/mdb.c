@@ -1668,7 +1668,7 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 
 			mdb_xcursor_init0(txn, dbi, &mx);
 			mdb_xcursor_init1(txn, dbi, &mx, NODEDATA(leaf));
-			rc = mdb_search_page(&mx.mx_txn, mx.mx_txn.mt_numdbs-1, NULL, NULL, 0, &mpp);
+			rc = mdb_search_page(&mx.mx_txn, mx.mx_cursor.mc_dbi, NULL, NULL, 0, &mpp);
 			if (rc != MDB_SUCCESS)
 				return rc;
 			leaf = NODEPTR(mpp.mp_page, 0);
@@ -2302,7 +2302,7 @@ mdb_xcursor_fini(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx)
 	txn->mt_dbxs[1].md_dirty = mx->mx_dbxs[1].md_dirty;
 	if (dbi > 1) {
 		txn->mt_dbs[dbi] = mx->mx_dbs[2];
-		txn->mt_dbxs[2].md_dirty = mx->mx_dbxs[2].md_dirty;
+		txn->mt_dbxs[dbi].md_dirty = mx->mx_dbxs[2].md_dirty;
 	}
 }
 
@@ -2685,9 +2685,6 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 		return MDB_NOTFOUND;
 	}
 
-	if (data && (rc = mdb_read_data(txn, leaf, data)) != MDB_SUCCESS)
-		return rc;
-
 	if (F_ISSET(txn->mt_dbs[dbi].md_flags, MDB_DUPSORT)) {
 		MDB_xcursor mx;
 		MDB_pageparent mp2;
@@ -2696,13 +2693,16 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 		mdb_xcursor_init1(txn, dbi, &mx, NODEDATA(leaf));
 		if (flags == MDB_DEL_DUP) {
 			rc = mdb_del(&mx.mx_txn, mx.mx_cursor.mc_dbi, data, NULL, 0);
+			mdb_xcursor_fini(txn, dbi, &mx);
 			if (rc != MDB_SUCCESS)
 				return rc;
-			mdb_xcursor_fini(txn, dbi, &mx);
 			/* If sub-DB still has entries, we're done */
-			if (mx.mx_txn.mt_dbs[mx.mx_cursor.mc_dbi].md_root != P_INVALID)
+			if (mx.mx_txn.mt_dbs[mx.mx_cursor.mc_dbi].md_root != P_INVALID) {
+				memcpy(NODEDATA(leaf), &mx.mx_txn.mt_dbs[mx.mx_cursor.mc_dbi],
+					sizeof(MDB_db));
 				return rc;
-			/* otherwise fall thru and delete the sub-db */
+			}
+			/* otherwise fall thru and delete the sub-DB */
 		} else {
 			/* add all the child DB's pages to the free list */
 			rc = mdb_search_page(&mx.mx_txn, mx.mx_cursor.mc_dbi,
@@ -2738,6 +2738,9 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 			}
 		}
 	}
+
+	if (data && (rc = mdb_read_data(txn, leaf, data)) != MDB_SUCCESS)
+		return rc;
 
 	return mdb_del0(txn, dbi, ki, &mpp, leaf);
 }
@@ -3012,8 +3015,10 @@ put_sub:
 			xdata.mv_data = "";
 			if (flags == MDB_NODUPDATA)
 				flags = MDB_NOOVERWRITE;
-			rc = mdb_put(&mx.mx_txn, mx.mx_txn.mt_numdbs-1, data, &xdata, flags);
+			rc = mdb_put(&mx.mx_txn, mx.mx_cursor.mc_dbi, data, &xdata, flags);
 			mdb_xcursor_fini(txn, dbi, &mx);
+			memcpy(NODEDATA(leaf), &mx.mx_txn.mt_dbs[mx.mx_cursor.mc_dbi],
+				sizeof(MDB_db));
 		}
 	}
 
