@@ -2576,6 +2576,43 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 
 	if (F_ISSET(txn->mt_dbs[dbi].md_flags, MDB_DUPSORT)) {
 	/* add all the child DB's pages to the free list */
+		MDB_cursor mc;
+		MDB_xcursor mx;
+		MDB_pageparent mp2;
+
+		mdb_xcursor_init0(txn, dbi, &mx);
+		mdb_xcursor_init1(txn, dbi, &mx, NODEDATA(leaf));
+		SLIST_INIT(&mc.mc_stack);
+		mc.mc_dbi = mx.mx_txn.mt_numdbs-1;
+		mc.mc_txn = &mx.mx_txn;
+		rc = mdb_search_page(&mx.mx_txn, mx.mx_txn.mt_numdbs - 1, NULL, &mc, 0, &mp2);
+		if (rc == MDB_SUCCESS) {
+			MDB_ppage *top, *parent;
+			MDB_node *ni;
+			unsigned int i;
+
+			cursor_pop_page(&mc);
+			top = CURSOR_TOP(&mc);
+			parent = SLIST_NEXT(top, mp_entry);
+			do {
+				for (i=0; i<NUMKEYS(top->mp_page); i++) {
+					ni = NODEPTR(top->mp_page, i);
+					mdb_idl_insert(txn->mt_free_pgs, ni->mn_pgno);
+				}
+				if (parent) {
+					parent->mp_ki++;
+					if (parent->mp_ki >= NUMKEYS(parent->mp_page)) {
+						cursor_pop_page(&mc);
+						top = CURSOR_TOP(&mc);
+						parent = SLIST_NEXT(top, mp_entry);
+					} else {
+						ni = NODEPTR(parent->mp_page, parent->mp_ki);
+						top = mdb_get_page(mc.mc_txn, ni->mn_pgno);
+					}
+				}
+			}
+			mdb_idl_insert(txn->mt_free_pgs, mx.mx_txn.mt_dbs[mc.mc_dbi].md_root);
+		}
 	}
 
 	return mdb_del0(txn, dbi, ki, &mpp, leaf);
