@@ -131,9 +131,7 @@ int  mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **cursor);
 void mdb_cursor_close(MDB_cursor *cursor);
 int  mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 			    MDB_cursor_op op);
-int  mdb_cursor_put(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
-			    MDB_cursor_op op);
-int  mdb_cursor_del(MDB_cursor *cursor, unsigned int flags);
+int  mdb_cursor_count(MDB_cursor *cursor, unsigned long *countp);
 
 int  mdb_cmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b);
 

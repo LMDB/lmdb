@@ -1029,7 +1029,8 @@ mdbenv_write_meta(MDB_txn *txn)
 	assert(txn != NULL);
 	assert(txn->mt_env != NULL);
 
-	DPRINTF("writing meta page for root page %lu", txn->mt_dbs[MAIN_DBI].md_root);
+	DPRINTF("writing meta page %d for root page %lu",
+		!F_ISSET(txn->mt_flags, MDB_TXN_METOGGLE), txn->mt_dbs[MAIN_DBI].md_root);
 
 	env = txn->mt_env;
 
@@ -1125,7 +1126,7 @@ mdbenv_get_maxreaders(MDB_env *env, int *readers)
 	return MDB_SUCCESS;
 }
 
-int
+static int
 mdbenv_open2(MDB_env *env, unsigned int flags)
 {
 	int i, newenv = 0;
@@ -2342,6 +2343,23 @@ mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **ret)
 
 	*ret = cursor;
 
+	return MDB_SUCCESS;
+}
+
+/* Return the count of duplicate data items for the current key */
+int
+mdb_cursor_count(MDB_cursor *mc, unsigned long *countp)
+{
+	if (mc == NULL || countp == NULL)
+		return EINVAL;
+
+	if (!(mc->mc_txn->mt_dbs[mc->mc_dbi].md_flags & MDB_DUPSORT))
+		return EINVAL;
+
+	if (!mc->mc_xcursor->mx_cursor.mc_initialized)
+		return EINVAL;
+
+	*countp = mc->mc_xcursor->mx_txn.mt_dbs[mc->mc_xcursor->mx_cursor.mc_dbi].md_entries;
 	return MDB_SUCCESS;
 }
 

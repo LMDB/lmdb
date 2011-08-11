@@ -25,7 +25,7 @@ int main(int argc,char * argv[])
 	MDB_val key, data;
 	MDB_txn *txn;
 	MDB_stat mst;
-	MDB_cursor *cursor, *cur2;
+	MDB_cursor *cursor;
 	int count;
 	int *values;
 	char sval[32];
