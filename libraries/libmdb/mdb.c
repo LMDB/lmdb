@@ -821,7 +821,7 @@ mdb_txn_commit(MDB_txn *txn)
 		for (i = 2; i < txn->mt_numdbs; i++) {
 			if (txn->mt_dbxs[i].md_dirty) {
 				data.mv_data = &txn->mt_dbs[i];
-				mdb_put0(txn, i, &txn->mt_dbxs[i].md_name, &data, 0);
+				mdb_put0(txn, MAIN_DBI, &txn->mt_dbxs[i].md_name, &data, 0);
 			}
 		}
 	}
@@ -2987,7 +2987,6 @@ mdb_put0(MDB_txn *txn, MDB_dbi dbi,
 
 	if (SIZELEFT(mpp.mp_page) < mdb_leaf_size(txn->mt_env, key, data)) {
 		rc = mdb_split(txn, dbi, &mpp.mp_page, &ki, key, data, P_INVALID);
-		leaf = NODEPTR(mpp.mp_page, ki);
 	} else {
 		/* There is room already in this leaf page. */
 		rc = mdb_add_node(txn, dbi, mpp.mp_page, ki, key, data, 0, 0);
@@ -2999,8 +2998,10 @@ mdb_put0(MDB_txn *txn, MDB_dbi dbi,
 		txn->mt_dbs[dbi].md_entries++;
 
 		/* Remember if we just added a subdatabase */
-		if (flags & F_SUBDATA)
+		if (flags & F_SUBDATA) {
+			leaf = NODEPTR(mpp.mp_page, ki);
 			leaf->mn_flags |= F_SUBDATA;
+		}
 
 		/* Now store the actual data in the child DB. Note that we're
 		 * storing the user data in the keys field, so there are strict
