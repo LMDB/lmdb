@@ -48,7 +48,6 @@
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
-#include <endian.h>
 
 #include "mdb.h"
 
@@ -93,7 +92,11 @@ typedef struct MDB_rxbody {
 } MDB_rxbody;
 
 #ifndef CACHELINE
-#define CACHELINE	64	/* most CPUs. Itanium uses 128 */
+# ifdef __APPLE__
+#  define CACHELINE	128	/* 64 is too small to contain a mutex */
+# else
+#  define CACHELINE	64	/* most CPUs. Itanium uses 128 */
+# endif
 #endif
 
 typedef struct MDB_reader {
