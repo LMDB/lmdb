@@ -79,6 +79,7 @@ typedef enum MDB_cursor_op {		/* cursor operations */
 /* DB flags */
 #define MDB_REVERSEKEY	0x02		/* use reverse string keys */
 #define MDB_DUPSORT		0x04		/* use sorted duplicates */
+#define MDB_INTEGERKEY	0x08		/* numeric keys in native byte order */
 
 /* environment flags */
 #define MDB_FIXEDMAP	0x01		/* mmap at a fixed address */

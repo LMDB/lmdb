@@ -440,7 +440,11 @@ mdb_cmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b)
 static int
 _mdb_cmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *key1, const MDB_val *key2)
 {
-	if (F_ISSET(txn->mt_dbs[dbi].md_flags, MDB_REVERSEKEY))
+	if (txn->mt_dbs[dbi].md_flags & (MDB_REVERSEKEY
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+		|MDB_INTEGERKEY
+#endif
+	))
 		return memnrcmp(key1->mv_data, key1->mv_size, key2->mv_data, key2->mv_size);
 	else
 		return memncmp((char *)key1->mv_data, key1->mv_size, key2->mv_data, key2->mv_size);
@@ -990,10 +994,7 @@ mdbenv_init_meta(MDB_env *env, MDB_meta *meta)
 	meta->mm_psize = psize;
 	meta->mm_last_pg = 1;
 	meta->mm_flags = env->me_flags & 0xffff;
-#if __BYTE_ORDER == __LITTLE_ENDIAN
-	/* freeDB keys are pgno_t's, must compare in int order */
-	meta->mm_flags |= MDB_REVERSEKEY;
-#endif
+	meta->mm_flags |= MDB_INTEGERKEY;
 	meta->mm_dbs[0].md_root = P_INVALID;
 	meta->mm_dbs[1].md_root = P_INVALID;
 
@@ -3121,8 +3122,8 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 	/* main DB? */
 	if (!name) {
 		*dbi = MAIN_DBI;
-		if (flags & (MDB_DUPSORT|MDB_REVERSEKEY))
-			txn->mt_dbs[MAIN_DBI].md_flags |= (flags & (MDB_DUPSORT|MDB_REVERSEKEY));
+		if (flags & (MDB_DUPSORT|MDB_REVERSEKEY|MDB_INTEGERKEY))
+			txn->mt_dbs[MAIN_DBI].md_flags |= (flags & (MDB_DUPSORT|MDB_REVERSEKEY|MDB_INTEGERKEY));
 		return MDB_SUCCESS;
 	}
 
