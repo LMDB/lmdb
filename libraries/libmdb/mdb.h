@@ -50,9 +50,9 @@ typedef struct MDB_val {
 typedef int  (MDB_cmp_func)(const MDB_val *a, const MDB_val *b);
 typedef void (MDB_rel_func)(void *ptr, void *oldptr);
 
-#define MDB_NOOVERWRITE	1
-#define MDB_NODUPDATA	2
-#define MDB_DEL_DUP		3
+#define MDB_NOOVERWRITE	0x10
+#define MDB_NODUPDATA	0x20
+#define MDB_DEL_DUP		0x40
 
 typedef enum MDB_cursor_op {		/* cursor operations */
 	MDB_FIRST,

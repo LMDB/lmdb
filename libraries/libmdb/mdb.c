@@ -254,9 +254,9 @@ typedef struct MDB_node {
 	unsigned int	mn_flags:4;
 	unsigned int	mn_ksize:12;			/* key size */
 #define F_BIGDATA	 0x01			/* data put on overflow page */
+#define F_SUBDATA	 0x02			/* data is a sub-database */
 	char		mn_data[1];
 } MDB_node;
-
 
 typedef struct MDB_dbx {
 	MDB_val		md_name;
@@ -354,6 +354,8 @@ static int  mdb_add_node(MDB_txn *txn, MDB_dbi dbi, MDB_page *mp,
 static void mdb_del_node(MDB_page *mp, indx_t indx);
 static int mdb_del0(MDB_txn *txn, MDB_dbi dbi, unsigned int ki,
     MDB_pageparent *mpp, MDB_node *leaf);
+static int mdb_put0(MDB_txn *txn, MDB_dbi dbi,
+    MDB_val *key, MDB_val *data, unsigned int flags);
 static int  mdb_read_data(MDB_txn *txn, MDB_node *leaf, MDB_val *data);
 
 static int		 mdb_rebalance(MDB_txn *txn, MDB_dbi dbi, MDB_pageparent *mp);
@@ -774,7 +776,7 @@ mdb_txn_commit(MDB_txn *txn)
 		key.mv_data = (char *)&mop->mo_txnid;
 		data.mv_size = MDB_IDL_SIZEOF(mop->mo_pages);
 		data.mv_data = mop->mo_pages;
-		mdb_put(txn, FREE_DBI, &key, &data, 0);
+		mdb_put0(txn, FREE_DBI, &key, &data, 0);
 		free(env->me_pghead);
 		env->me_pghead = NULL;
 	}
@@ -806,7 +808,7 @@ mdb_txn_commit(MDB_txn *txn)
 		key.mv_data = (char *)&txn->mt_txnid;
 		data.mv_size = MDB_IDL_SIZEOF(txn->mt_free_pgs);
 		data.mv_data = txn->mt_free_pgs;
-		mdb_put(txn, FREE_DBI, &key, &data, 0);
+		mdb_put0(txn, FREE_DBI, &key, &data, 0);
 	}
 
 	/* Update DB root pointers. Their pages have already been
@@ -819,7 +821,7 @@ mdb_txn_commit(MDB_txn *txn)
 		for (i = 2; i < txn->mt_numdbs; i++) {
 			if (txn->mt_dbxs[i].md_dirty) {
 				data.mv_data = &txn->mt_dbs[i];
-				mdb_put(txn, i, &txn->mt_dbxs[i].md_name, &data, 0);
+				mdb_put0(txn, i, &txn->mt_dbxs[i].md_name, &data, 0);
 			}
 		}
 	}
@@ -1658,6 +1660,9 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 	assert(key);
 	assert(data);
 	DPRINTF("===> get key [%.*s]", (int)key->mv_size, (char *)key->mv_data);
+
+	if (txn == NULL || dbi >= txn->mt_numdbs)
+		return EINVAL;
 
 	if (key->mv_size == 0 || key->mv_size > MAXKEYSIZE) {
 		return EINVAL;
@@ -2908,8 +2913,8 @@ mdb_split(MDB_txn *txn, MDB_dbi dbi, MDB_page **mpp, unsigned int *newindxp,
 	return rc;
 }
 
-int
-mdb_put(MDB_txn *txn, MDB_dbi dbi,
+static int
+mdb_put0(MDB_txn *txn, MDB_dbi dbi,
     MDB_val *key, MDB_val *data, unsigned int flags)
 {
 	int		 rc = MDB_SUCCESS, exact;
@@ -2918,20 +2923,6 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 	MDB_pageparent	mpp;
 	MDB_val	xdata, *rdata;
 	MDB_db dummy;
-
-	assert(key != NULL);
-	assert(data != NULL);
-
-	if (txn == NULL)
-		return EINVAL;
-
-	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
-		return EINVAL;
-	}
-
-	if (key->mv_size == 0 || key->mv_size > MAXKEYSIZE) {
-		return EINVAL;
-	}
 
 	DPRINTF("==> put key %.*s, size %zu, data size %zu",
 		(int)key->mv_size, (char *)key->mv_data, key->mv_size, data->mv_size);
@@ -2996,6 +2987,7 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 
 	if (SIZELEFT(mpp.mp_page) < mdb_leaf_size(txn->mt_env, key, data)) {
 		rc = mdb_split(txn, dbi, &mpp.mp_page, &ki, key, data, P_INVALID);
+		leaf = NODEPTR(mpp.mp_page, ki);
 	} else {
 		/* There is room already in this leaf page. */
 		rc = mdb_add_node(txn, dbi, mpp.mp_page, ki, key, data, 0, 0);
@@ -3005,6 +2997,11 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 		txn->mt_flags |= MDB_TXN_ERROR;
 	else {
 		txn->mt_dbs[dbi].md_entries++;
+
+		/* Remember if we just added a subdatabase */
+		if (flags & F_SUBDATA)
+			leaf->mn_flags |= F_SUBDATA;
+
 		/* Now store the actual data in the child DB. Note that we're
 		 * storing the user data in the keys field, so there are strict
 		 * size limits on dupdata. The actual data fields of the child
@@ -3021,7 +3018,7 @@ put_sub:
 			xdata.mv_data = "";
 			if (flags == MDB_NODUPDATA)
 				flags = MDB_NOOVERWRITE;
-			rc = mdb_put(&mx.mx_txn, mx.mx_cursor.mc_dbi, data, &xdata, flags);
+			rc = mdb_put0(&mx.mx_txn, mx.mx_cursor.mc_dbi, data, &xdata, flags);
 			mdb_xcursor_fini(txn, dbi, &mx);
 			memcpy(NODEDATA(leaf), &mx.mx_txn.mt_dbs[mx.mx_cursor.mc_dbi],
 				sizeof(MDB_db));
@@ -3030,6 +3027,30 @@ put_sub:
 
 done:
 	return rc;
+}
+
+int
+mdb_put(MDB_txn *txn, MDB_dbi dbi,
+    MDB_val *key, MDB_val *data, unsigned int flags)
+{
+	assert(key != NULL);
+	assert(data != NULL);
+
+	if (txn == NULL || dbi >= txn->mt_numdbs)
+		return EINVAL;
+
+	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
+		return EINVAL;
+	}
+
+	if (key->mv_size == 0 || key->mv_size > MAXKEYSIZE) {
+		return EINVAL;
+	}
+
+	if ((flags & (MDB_NOOVERWRITE|MDB_NODUPDATA)) != flags)
+		return EINVAL;
+
+	return mdb_put0(txn, dbi, key, data, flags);
 }
 
 int
@@ -3107,7 +3128,7 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 		memset(&dummy, 0, sizeof(dummy));
 		dummy.md_root = P_INVALID;
 		dummy.md_flags = flags & 0xffff;
-		rc = mdb_put(txn, MAIN_DBI, &key, &data, 0);
+		rc = mdb_put0(txn, MAIN_DBI, &key, &data, F_SUBDATA);
 		dirty = 1;
 	}
 
