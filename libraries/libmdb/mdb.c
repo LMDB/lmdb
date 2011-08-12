@@ -83,44 +83,51 @@ typedef uint16_t	 indx_t;
 #define DEFAULT_MAPSIZE	1048576
 
 /* Lock descriptor stuff */
-#define RXBODY	\
-	ULONG		mr_txnid; \
-	pid_t		mr_pid; \
-	pthread_t	mr_tid
-typedef struct MDB_rxbody {
-	RXBODY;
-} MDB_rxbody;
-
 #ifndef CACHELINE
-# ifdef __APPLE__
-#  define CACHELINE	128	/* 64 is too small to contain a mutex */
-# else
-#  define CACHELINE	64	/* most CPUs. Itanium uses 128 */
-# endif
+#define CACHELINE	64	/* most CPUs. Itanium uses 128 */
 #endif
 
+typedef struct MDB_rxbody {
+	ULONG		mrb_txnid;
+	pid_t		mrb_pid;
+	pthread_t	mrb_tid;
+} MDB_rxbody;
+
 typedef struct MDB_reader {
-	RXBODY;
-	/* cache line alignment */
-	char pad[CACHELINE-sizeof(MDB_rxbody)];
+	union {
+		MDB_rxbody mrx;
+#define	mr_txnid	mru.mrx.mrb_txnid
+#define	mr_pid	mru.mrx.mrb_pid
+#define	mr_tid	mru.mrx.mrb_tid
+		/* cache line alignment */
+		char pad[(sizeof(MDB_rxbody)+CACHELINE-1) & ~(CACHELINE-1)];
+	} mru;
 } MDB_reader;
 
-#define	TXBODY \
-	uint32_t	mt_magic;	\
-	uint32_t	mt_version;	\
-	pthread_mutex_t	mt_mutex;	\
-	ULONG		mt_txnid;	\
-	uint32_t	mt_numreaders
 typedef struct MDB_txbody {
-	TXBODY;
+	uint32_t	mtb_magic;
+	uint32_t	mtb_version;
+	pthread_mutex_t	mtb_mutex;
+	ULONG		mtb_txnid;
+	uint32_t	mtb_numreaders;
 } MDB_txbody;
 
 typedef struct MDB_txninfo {
-	TXBODY;
-	char pad[CACHELINE-sizeof(MDB_txbody)];
-	pthread_mutex_t	mt_wmutex;
-	char pad2[CACHELINE-sizeof(pthread_mutex_t)];
-	MDB_reader	mt_readers[1];
+	union {
+		MDB_txbody mtb;
+#define mti_magic	mt1.mtb.mtb_magic
+#define mti_version	mt1.mtb.mtb_version
+#define mti_mutex	mt1.mtb.mtb_mutex
+#define mti_txnid	mt1.mtb.mtb_txnid
+#define mti_numreaders	mt1.mtb.mtb_numreaders
+		char pad[(sizeof(MDB_txbody)+CACHELINE-1) & ~(CACHELINE-1)];
+	} mt1;
+	union {
+		pthread_mutex_t	mt2_wmutex;
+#define mti_wmutex	mt2.mt2_wmutex
+		char pad[(sizeof(pthread_mutex_t)+CACHELINE-1) & ~(CACHELINE-1)];
+	} mt2;
+	MDB_reader	mti_readers[1];
 } MDB_txninfo;
 
 /* Common header for all page types. Overflow pages
@@ -524,11 +531,11 @@ mdb_alloc_page(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num)
 	}
 	if (txn->mt_env->me_pghead) {
 		unsigned int i;
-		for (i=0; i<txn->mt_env->me_txns->mt_numreaders; i++) {
-			ULONG mr = txn->mt_env->me_txns->mt_readers[i].mr_txnid;
+		for (i=0; i<txn->mt_env->me_txns->mti_numreaders; i++) {
+			ULONG mr = txn->mt_env->me_txns->mti_readers[i].mr_txnid;
 			if (!mr) continue;
 			if (mr < oldest)
-				oldest = txn->mt_env->me_txns->mt_readers[i].mr_txnid;
+				oldest = txn->mt_env->me_txns->mti_readers[i].mr_txnid;
 		}
 		if (oldest > txn->mt_env->me_pghead->mo_txnid) {
 			MDB_oldpages *mop = txn->mt_env->me_pghead;
@@ -636,32 +643,32 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 		}
 		STAILQ_INIT(txn->mt_u.dirty_queue);
 
-		pthread_mutex_lock(&env->me_txns->mt_wmutex);
-		env->me_txns->mt_txnid++;
+		pthread_mutex_lock(&env->me_txns->mti_wmutex);
+		env->me_txns->mti_txnid++;
 		txn->mt_free_pgs = env->me_free_pgs;
 		txn->mt_free_pgs[0] = 0;
 	}
 
-	txn->mt_txnid = env->me_txns->mt_txnid;
+	txn->mt_txnid = env->me_txns->mti_txnid;
 	if (rdonly) {
 		MDB_reader *r = pthread_getspecific(env->me_txkey);
 		if (!r) {
 			unsigned int i;
-			pthread_mutex_lock(&env->me_txns->mt_mutex);
-			for (i=0; i<env->me_txns->mt_numreaders; i++)
-				if (env->me_txns->mt_readers[i].mr_pid == 0)
+			pthread_mutex_lock(&env->me_txns->mti_mutex);
+			for (i=0; i<env->me_txns->mti_numreaders; i++)
+				if (env->me_txns->mti_readers[i].mr_pid == 0)
 					break;
 			if (i == env->me_maxreaders) {
 				pthread_mutex_unlock(&env->me_txns->mti_mutex);
 				return ENOSPC;
 			}
-			env->me_txns->mt_readers[i].mr_pid = getpid();
-			env->me_txns->mt_readers[i].mr_tid = pthread_self();
-			r = &env->me_txns->mt_readers[i];
+			env->me_txns->mti_readers[i].mr_pid = getpid();
+			env->me_txns->mti_readers[i].mr_tid = pthread_self();
+			r = &env->me_txns->mti_readers[i];
 			pthread_setspecific(env->me_txkey, r);
-			if (i >= env->me_txns->mt_numreaders)
-				env->me_txns->mt_numreaders = i+1;
-			pthread_mutex_unlock(&env->me_txns->mt_mutex);
+			if (i >= env->me_txns->mti_numreaders)
+				env->me_txns->mti_numreaders = i+1;
+			pthread_mutex_unlock(&env->me_txns->mti_mutex);
 		}
 		r->mr_txnid = txn->mt_txnid;
 		txn->mt_u.reader = r;
@@ -733,10 +740,10 @@ mdb_txn_abort(MDB_txn *txn)
 		}
 
 		env->me_txn = NULL;
-		env->me_txns->mt_txnid--;
+		env->me_txns->mti_txnid--;
 		for (i=2; i<env->me_numdbs; i++)
 			env->me_dbxs[i].md_dirty = 0;
-		pthread_mutex_unlock(&env->me_txns->mt_wmutex);
+		pthread_mutex_unlock(&env->me_txns->mti_wmutex);
 	}
 
 	free(txn);
@@ -937,7 +944,7 @@ mdb_txn_commit(MDB_txn *txn)
 		free(txn->mt_dbs);
 	}
 
-	pthread_mutex_unlock(&env->me_txns->mt_wmutex);
+	pthread_mutex_unlock(&env->me_txns->mti_wmutex);
 	free(txn->mt_u.dirty_queue);
 	free(txn);
 	txn = NULL;
@@ -1219,7 +1226,7 @@ mdb_env_share_locks(MDB_env *env)
 {
 	struct flock lock_info;
 
-	env->me_txns->mt_txnid = env->me_meta->mm_txnid;
+	env->me_txns->mti_txnid = env->me_meta->mm_txnid;
 
 	memset((void *)&lock_info, 0, sizeof(lock_info));
 	lock_info.l_type = F_RDLCK;
@@ -1284,22 +1291,22 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 
 		pthread_mutexattr_init(&mattr);
 		pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
-		pthread_mutex_init(&env->me_txns->mt_mutex, &mattr);
-		pthread_mutex_init(&env->me_txns->mt_wmutex, &mattr);
-		env->me_txns->mt_version = MDB_VERSION;
-		env->me_txns->mt_magic = MDB_MAGIC;
-		env->me_txns->mt_txnid = 0;
-		env->me_txns->mt_numreaders = 0;
+		pthread_mutex_init(&env->me_txns->mti_mutex, &mattr);
+		pthread_mutex_init(&env->me_txns->mti_wmutex, &mattr);
+		env->me_txns->mti_version = MDB_VERSION;
+		env->me_txns->mti_magic = MDB_MAGIC;
+		env->me_txns->mti_txnid = 0;
+		env->me_txns->mti_numreaders = 0;
 
 	} else {
-		if (env->me_txns->mt_magic != MDB_MAGIC) {
+		if (env->me_txns->mti_magic != MDB_MAGIC) {
 			DPRINTF("lock region has invalid magic");
 			rc = EINVAL;
 			goto fail;
 		}
-		if (env->me_txns->mt_version != MDB_VERSION) {
+		if (env->me_txns->mti_version != MDB_VERSION) {
 			DPRINTF("lock region is version %u, expected version %u",
-				env->me_txns->mt_version, MDB_VERSION);
+				env->me_txns->mti_version, MDB_VERSION);
 			rc = MDB_VERSION_MISMATCH;
 			goto fail;
 		}
