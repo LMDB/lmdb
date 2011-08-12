@@ -252,7 +252,6 @@ struct MDB_cursor {
 	struct MDB_xcursor	*mc_xcursor;
 };
 
-#define METAHASHLEN	 offsetof(MDB_meta, mm_hash)
 #define METADATA(p)	 ((void *)((char *)p + PAGEHDRSZ))
 
 typedef struct MDB_node {
@@ -292,8 +291,8 @@ struct MDB_txn {
 	MDB_db		*mt_dbs;
 	unsigned int	mt_numdbs;
 
-#define MDB_TXN_RDONLY		 0x01		/* read-only transaction */
-#define MDB_TXN_ERROR		 0x02		/* an error has occurred */
+#define MDB_TXN_RDONLY		0x01		/* read-only transaction */
+#define MDB_TXN_ERROR		0x02		/* an error has occurred */
 #define MDB_TXN_METOGGLE	0x04		/* used meta page 1 */
 	unsigned int	mt_flags;
 };
@@ -341,7 +340,6 @@ struct MDB_env {
 #define NODEDSZ(node)	 ((node)->mn_dsize)
 
 #define MDB_COMMIT_PAGES	 64	/* max number of pages to write in one commit */
-#define MDB_MAXCACHE_DEF	 1024	/* max number of pages to keep in cache  */
 
 static int  mdb_search_page_root(MDB_txn *txn,
 			    MDB_dbi dbi, MDB_val *key,
