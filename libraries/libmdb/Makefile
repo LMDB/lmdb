@@ -1,5 +1,5 @@
 CC	= gcc
-W	= -W -Wall -Wno-unused-parameter -Wcast-qual -Wbad-function-cast
+W	= -W -Wall -Wno-unused-parameter -Wbad-function-cast
 OPT = -O2 -g
 CFLAGS	= -pthread $(OPT) $(W) $(XCFLAGS)
 LDLIBS	=
