@@ -45,10 +45,10 @@ int main(int argc,char * argv[])
 		values[i] = random()%1024;
 	}
 
-	rc = mdbenv_create(&env);
-	rc = mdbenv_set_mapsize(env, 10485760);
-	rc = mdbenv_set_maxdbs(env, 4);
-	rc = mdbenv_open(env, "./testdb", MDB_FIXEDMAP|MDB_NOSYNC, 0664);
+	rc = mdb_env_create(&env);
+	rc = mdb_env_set_mapsize(env, 10485760);
+	rc = mdb_env_set_maxdbs(env, 4);
+	rc = mdb_env_open(env, "./testdb", MDB_FIXEDMAP|MDB_NOSYNC, 0664);
 	rc = mdb_txn_begin(env, 0, &txn);
 	rc = mdb_open(txn, "id2", MDB_CREATE|MDB_DUPSORT, &dbi);
 
@@ -67,7 +67,7 @@ int main(int argc,char * argv[])
 	}
 	if (j) printf("%d duplicates skipped\n", j);
 	rc = mdb_txn_commit(txn);
-	rc = mdbenv_stat(env, &mst);
+	rc = mdb_env_stat(env, &mst);
 
 	rc = mdb_txn_begin(env, 1, &txn);
 	rc = mdb_cursor_open(txn, dbi, &cursor);
@@ -102,7 +102,7 @@ int main(int argc,char * argv[])
 	free(values);
 	printf("Deleted %d values\n", j);
 
-	rc = mdbenv_stat(env, &mst);
+	rc = mdb_env_stat(env, &mst);
 	rc = mdb_txn_begin(env, 1, &txn);
 	rc = mdb_cursor_open(txn, dbi, &cursor);
 	printf("Cursor next\n");
@@ -121,7 +121,7 @@ int main(int argc,char * argv[])
 	mdb_close(txn, dbi);
 
 	mdb_txn_abort(txn);
-	mdbenv_close(env);
+	mdb_env_close(env);
 
 	return 0;
 }

@@ -26,16 +26,16 @@ int main(int argc,char * argv[])
 	char *envname = argv[1];
 	char *subname = NULL;
 
-	rc = mdbenv_create(&env);
+	rc = mdb_env_create(&env);
 
 	if (argc > 2) {
-		mdbenv_set_maxdbs(env, 4);
+		mdb_env_set_maxdbs(env, 4);
 		subname = argv[2];
 	}
 
-	rc = mdbenv_open(env, envname, MDB_RDONLY, 0);
+	rc = mdb_env_open(env, envname, MDB_RDONLY, 0);
 	if (rc) {
-		printf("mdbenv_open failed, error %d\n", rc);
+		printf("mdb_env_open failed, error %d\n", rc);
 		exit(1);
 	}
 	rc = mdb_txn_begin(env, 1, &txn);
@@ -58,7 +58,7 @@ int main(int argc,char * argv[])
 	printf("Entries: %lu\n", mst.ms_entries);
 	mdb_close(txn, dbi);
 	mdb_txn_abort(txn);
-	mdbenv_close(env);
+	mdb_env_close(env);
 
 	return 0;
 }

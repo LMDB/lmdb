@@ -345,9 +345,9 @@ static int  mdb_search_page(MDB_txn *txn,
 			    MDB_cursor *cursor, int modify,
 			    MDB_pageparent *mpp);
 
-static int  mdbenv_read_header(MDB_env *env, MDB_meta *meta);
-static int  mdbenv_read_meta(MDB_env *env, int *which);
-static int  mdbenv_write_meta(MDB_txn *txn);
+static int  mdb_env_read_header(MDB_env *env, MDB_meta *meta);
+static int  mdb_env_read_meta(MDB_env *env, int *which);
+static int  mdb_env_write_meta(MDB_txn *txn);
 static MDB_page *mdb_get_page(MDB_txn *txn, pgno_t pgno);
 
 static MDB_node *mdb_search_node(MDB_txn *txn, MDB_dbi dbi, MDB_page *mp,
@@ -596,7 +596,7 @@ mdb_touch(MDB_txn *txn, MDB_pageparent *pp)
 }
 
 int
-mdbenv_sync(MDB_env *env)
+mdb_env_sync(MDB_env *env)
 {
 	int rc = 0;
 	if (!F_ISSET(env->me_flags, MDB_NOSYNC)) {
@@ -662,7 +662,7 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 
 	txn->mt_env = env;
 
-	if ((rc = mdbenv_read_meta(env, &toggle)) != MDB_SUCCESS) {
+	if ((rc = mdb_env_read_meta(env, &toggle)) != MDB_SUCCESS) {
 		mdb_txn_abort(txn);
 		return rc;
 	}
@@ -899,9 +899,9 @@ mdb_txn_commit(MDB_txn *txn)
 		free(dp);
 	}
 
-	if ((n = mdbenv_sync(env)) != 0 ||
-	    (n = mdbenv_write_meta(txn)) != MDB_SUCCESS ||
-	    (n = mdbenv_sync(env)) != 0) {
+	if ((n = mdb_env_sync(env)) != 0 ||
+	    (n = mdb_env_write_meta(txn)) != MDB_SUCCESS ||
+	    (n = mdb_env_sync(env)) != 0) {
 		mdb_txn_abort(txn);
 		return n;
 	}
@@ -940,7 +940,7 @@ done:
 }
 
 static int
-mdbenv_read_header(MDB_env *env, MDB_meta *meta)
+mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 {
 	char		 page[PAGESIZE];
 	MDB_page	*p;
@@ -985,7 +985,7 @@ mdbenv_read_header(MDB_env *env, MDB_meta *meta)
 }
 
 static int
-mdbenv_init_meta(MDB_env *env, MDB_meta *meta)
+mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 {
 	MDB_page *p, *q;
 	MDB_meta *m;
@@ -1025,7 +1025,7 @@ mdbenv_init_meta(MDB_env *env, MDB_meta *meta)
 }
 
 static int
-mdbenv_write_meta(MDB_txn *txn)
+mdb_env_write_meta(MDB_txn *txn)
 {
 	MDB_env *env;
 	MDB_meta	meta;
@@ -1066,7 +1066,7 @@ mdbenv_write_meta(MDB_txn *txn)
 }
 
 static int
-mdbenv_read_meta(MDB_env *env, int *which)
+mdb_env_read_meta(MDB_env *env, int *which)
 {
 	int toggle = 0;
 
@@ -1086,7 +1086,7 @@ mdbenv_read_meta(MDB_env *env, int *which)
 }
 
 int
-mdbenv_create(MDB_env **env)
+mdb_env_create(MDB_env **env)
 {
 	MDB_env *e;
 
@@ -1102,7 +1102,7 @@ mdbenv_create(MDB_env **env)
 }
 
 int
-mdbenv_set_mapsize(MDB_env *env, size_t size)
+mdb_env_set_mapsize(MDB_env *env, size_t size)
 {
 	if (env->me_map)
 		return EINVAL;
@@ -1111,21 +1111,21 @@ mdbenv_set_mapsize(MDB_env *env, size_t size)
 }
 
 int
-mdbenv_set_maxdbs(MDB_env *env, int dbs)
+mdb_env_set_maxdbs(MDB_env *env, int dbs)
 {
 	env->me_maxdbs = dbs;
 	return MDB_SUCCESS;
 }
 
 int
-mdbenv_set_maxreaders(MDB_env *env, int readers)
+mdb_env_set_maxreaders(MDB_env *env, int readers)
 {
 	env->me_maxreaders = readers;
 	return MDB_SUCCESS;
 }
 
 int
-mdbenv_get_maxreaders(MDB_env *env, int *readers)
+mdb_env_get_maxreaders(MDB_env *env, int *readers)
 {
 	if (!env || !readers)
 		return EINVAL;
@@ -1134,7 +1134,7 @@ mdbenv_get_maxreaders(MDB_env *env, int *readers)
 }
 
 static int
-mdbenv_open2(MDB_env *env, unsigned int flags)
+mdb_env_open2(MDB_env *env, unsigned int flags)
 {
 	int i, newenv = 0;
 	MDB_meta meta;
@@ -1144,7 +1144,7 @@ mdbenv_open2(MDB_env *env, unsigned int flags)
 
 	memset(&meta, 0, sizeof(meta));
 
-	if ((i = mdbenv_read_header(env, &meta)) != 0) {
+	if ((i = mdb_env_read_header(env, &meta)) != 0) {
 		if (i != ENOENT)
 			return i;
 		DPRINTF("new mdbenv");
@@ -1167,7 +1167,7 @@ mdbenv_open2(MDB_env *env, unsigned int flags)
 		meta.mm_mapsize = env->me_mapsize;
 		if (flags & MDB_FIXEDMAP)
 			meta.mm_address = env->me_map;
-		i = mdbenv_init_meta(env, &meta);
+		i = mdb_env_init_meta(env, &meta);
 		if (i != MDB_SUCCESS) {
 			munmap(env->me_map, env->me_mapsize);
 			return i;
@@ -1179,7 +1179,7 @@ mdbenv_open2(MDB_env *env, unsigned int flags)
 	env->me_metas[0] = METADATA(p);
 	env->me_metas[1] = (MDB_meta *)((char *)env->me_metas[0] + meta.mm_psize);
 
-	if ((i = mdbenv_read_meta(env, NULL)) != 0)
+	if ((i = mdb_env_read_meta(env, NULL)) != 0)
 		return i;
 
 	DPRINTF("opened database version %u, pagesize %u",
@@ -1195,7 +1195,7 @@ mdbenv_open2(MDB_env *env, unsigned int flags)
 }
 
 static void
-mdbenv_reader_dest(void *ptr)
+mdb_env_reader_dest(void *ptr)
 {
 	MDB_reader *reader = ptr;
 
@@ -1206,7 +1206,7 @@ mdbenv_reader_dest(void *ptr)
 
 /* downgrade the exclusive lock on the region back to shared */
 static void
-mdbenv_share_locks(MDB_env *env)
+mdb_env_share_locks(MDB_env *env)
 {
 	struct flock lock_info;
 
@@ -1221,7 +1221,7 @@ mdbenv_share_locks(MDB_env *env)
 }
 
 static int
-mdbenv_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
+mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 {
 	int rc;
 	off_t size, rsize;
@@ -1310,7 +1310,7 @@ fail:
 #define LOCKNAME	"/lock.mdb"
 #define DATANAME	"/data.mdb"
 int
-mdbenv_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
+mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 {
 	int		oflags, rc, len, excl;
 	char *lpath, *dpath;
@@ -1323,7 +1323,7 @@ mdbenv_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 	sprintf(lpath, "%s" LOCKNAME, path);
 	sprintf(dpath, "%s" DATANAME, path);
 
-	rc = mdbenv_setup_locks(env, lpath, mode, &excl);
+	rc = mdb_env_setup_locks(env, lpath, mode, &excl);
 	if (rc)
 		goto leave;
 
@@ -1335,15 +1335,15 @@ mdbenv_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 	if ((env->me_fd = open(dpath, oflags, mode)) == -1)
 		return errno;
 
-	if ((rc = mdbenv_open2(env, flags)) != MDB_SUCCESS) {
+	if ((rc = mdb_env_open2(env, flags)) != MDB_SUCCESS) {
 		close(env->me_fd);
 		env->me_fd = -1;
 	} else {
 		env->me_path = strdup(path);
 		DPRINTF("opened dbenv %p", (void *) env);
-		pthread_key_create(&env->me_txkey, mdbenv_reader_dest);
+		pthread_key_create(&env->me_txkey, mdb_env_reader_dest);
 		if (excl)
-			mdbenv_share_locks(env);
+			mdb_env_share_locks(env);
 		env->me_dbxs = calloc(env->me_maxdbs, sizeof(MDB_dbx));
 		env->me_dbs[0] = calloc(env->me_maxdbs, sizeof(MDB_db));
 		env->me_dbs[1] = calloc(env->me_maxdbs, sizeof(MDB_db));
@@ -1356,7 +1356,7 @@ leave:
 }
 
 void
-mdbenv_close(MDB_env *env)
+mdb_env_close(MDB_env *env)
 {
 	if (env == NULL)
 		return;
@@ -1366,12 +1366,19 @@ mdbenv_close(MDB_env *env)
 	free(env->me_dbxs);
 	free(env->me_path);
 
+	pthread_key_delete(env->me_txkey);
+
 	if (env->me_map) {
 		munmap(env->me_map, env->me_mapsize);
 	}
 	close(env->me_fd);
 	if (env->me_txns) {
+		pid_t pid = getpid();
 		size_t size = (env->me_maxreaders-1) * sizeof(MDB_reader) + sizeof(MDB_txninfo);
+		int i;
+		for (i=0; i<env->me_txns->mti_numreaders; i++)
+			if (env->me_txns->mti_readers[i].mr_pid == pid)
+				env->me_txns->mti_readers[i].mr_pid = 0;
 		munmap(env->me_txns, size);
 	}
 	close(env->me_lfd);
@@ -3089,7 +3096,7 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 }
 
 int
-mdbenv_get_flags(MDB_env *env, unsigned int *arg)
+mdb_env_get_flags(MDB_env *env, unsigned int *arg)
 {
 	if (!env || !arg)
 		return EINVAL;
@@ -3099,7 +3106,7 @@ mdbenv_get_flags(MDB_env *env, unsigned int *arg)
 }
 
 int
-mdbenv_get_path(MDB_env *env, const char **arg)
+mdb_env_get_path(MDB_env *env, const char **arg)
 {
 	if (!env || !arg)
 		return EINVAL;
@@ -3121,7 +3128,7 @@ mdb_stat0(MDB_env *env, MDB_db *db, MDB_stat *arg)
 	return MDB_SUCCESS;
 }
 int
-mdbenv_stat(MDB_env *env, MDB_stat *arg)
+mdb_env_stat(MDB_env *env, MDB_stat *arg)
 {
 	if (env == NULL || arg == NULL)
 		return EINVAL;
