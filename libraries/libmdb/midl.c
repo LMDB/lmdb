@@ -17,14 +17,14 @@
 #include <string.h>
 #include <sys/types.h>
 #include <assert.h>
-#include "idl.h"
+#include "midl.h"
 
 typedef unsigned long pgno_t;
 
 /* Sort the IDLs from highest to lowest */
 #define IDL_CMP(x,y)	 ( x > y ? -1 : ( x < y ? 1 : 0 ) )
 
-unsigned mdb_idl_search( ID *ids, ID id )
+unsigned mdb_midl_search( ID *ids, ID id )
 {
 	/*
 	 * binary search of id in ids
@@ -60,7 +60,7 @@ unsigned mdb_idl_search( ID *ids, ID id )
 	}
 }
 
-int mdb_idl_insert( ID *ids, ID id )
+int mdb_midl_insert( ID *ids, ID id )
 {
 	unsigned x;
 
@@ -75,7 +75,7 @@ int mdb_idl_insert( ID *ids, ID id )
 		return 0;
 	}
 
-	x = mdb_idl_search( ids, id );
+	x = mdb_midl_search( ids, id );
 	assert( x > 0 );
 
 	if( x < 1 ) {

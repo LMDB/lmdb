@@ -14,22 +14,22 @@ test:	all
 	mkdir testdb
 	./mtest && ./mdb_stat testdb
 
-libmdb.a:	mdb.o idl.o
-	ar rs $@ mdb.o idl.o
+libmdb.a:	mdb.o midl.o
+	ar rs $@ mdb.o midl.o
 
-libmdb.so:	mdb.o idl.o
-	gcc -shared -o $@ mdb.o idl.o
+libmdb.so:	mdb.o midl.o
+	gcc -shared -o $@ mdb.o midl.o
 
 mdb_stat: mdb_stat.o libmdb.a
 mtest:    mtest.o    libmdb.a
 mtest2:	mtest2.o libmdb.a
 mtest3:	mtest3.o libmdb.a
 
-mdb.o: mdb.c mdb.h idl.h
+mdb.o: mdb.c mdb.h midl.h
 	$(CC) $(CFLAGS) -fPIC $(CPPFLAGS) -c mdb.c
 
-idl.o: idl.c idl.h
-	$(CC) $(CFLAGS) -fPIC $(CPPFLAGS) -c idl.c
+midl.o: midl.c midl.h
+	$(CC) $(CFLAGS) -fPIC $(CPPFLAGS) -c midl.c
 
 %:	%.o
 	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LDLIBS) -o $@

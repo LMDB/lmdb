@@ -14,8 +14,8 @@
  * <http://www.OpenLDAP.org/license.html>.
  */
 
-#ifndef _MDB_IDL_H_
-#define _MDB_IDL_H_
+#ifndef _MDB_MIDL_H_
+#define _MDB_MIDL_H_
 
 #define AC_MEMCPY(dst,src,size)	memcpy(dst,src,size)
 
@@ -73,6 +73,6 @@
 #define MDB_IDL_N( ids )		( MDB_IDL_IS_RANGE(ids) \
 	? (ids[2]-ids[1])+1 : ids[0] )
 
-int mdb_idl_insert( ID *ids, ID id );
+int mdb_midl_insert( ID *ids, ID id );
 
-#endif
+#endif	/* _MDB_MIDL_H_ */

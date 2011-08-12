@@ -54,7 +54,7 @@
 #define ULONG		unsigned long
 typedef ULONG		pgno_t;
 
-#include "idl.h"
+#include "midl.h"
 
 #ifndef DEBUG
 #define DEBUG 1
@@ -580,7 +580,7 @@ mdb_touch(MDB_txn *txn, MDB_pageparent *pp)
 		if ((dp = mdb_alloc_page(txn, pp->mp_parent, pp->mp_pi, 1)) == NULL)
 			return ENOMEM;
 		DPRINTF("touched page %lu -> %lu", mp->mp_pgno, dp->p.mp_pgno);
-		mdb_idl_insert(txn->mt_free_pgs, mp->mp_pgno);
+		mdb_midl_insert(txn->mt_free_pgs, mp->mp_pgno);
 		pgno = dp->p.mp_pgno;
 		memcpy(&dp->p, mp, txn->mt_env->me_psize);
 		mp = &dp->p;
@@ -2682,7 +2682,7 @@ mdb_del0(MDB_txn *txn, MDB_dbi dbi, unsigned int ki, MDB_pageparent *mpp, MDB_no
 		ovpages = OVPAGES(NODEDSZ(leaf), txn->mt_env->me_psize);
 		for (i=0; i<ovpages; i++) {
 			DPRINTF("freed ov page %lu", pg);
-			mdb_idl_insert(txn->mt_free_pgs, pg);
+			mdb_midl_insert(txn->mt_free_pgs, pg);
 			pg++;
 		}
 	}
@@ -2764,7 +2764,7 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 					while (parent != NULL) {
 						for (i=0; i<NUMKEYS(top->mp_page); i++) {
 							ni = NODEPTR(top->mp_page, i);
-							mdb_idl_insert(txn->mt_free_pgs, ni->mn_pgno);
+							mdb_midl_insert(txn->mt_free_pgs, ni->mn_pgno);
 						}
 						if (parent) {
 							parent->mp_ki++;
@@ -2779,7 +2779,7 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 						}
 					}
 				}
-				mdb_idl_insert(txn->mt_free_pgs, mx.mx_txn.mt_dbs[mx.mx_cursor.mc_dbi].md_root);
+				mdb_midl_insert(txn->mt_free_pgs, mx.mx_txn.mt_dbs[mx.mx_cursor.mc_dbi].md_root);
 			}
 		}
 	}
