@@ -35,7 +35,14 @@
 #define MDB_VERSION_MAJOR	0
 #define MDB_VERSION_MINOR	8
 #define MDB_VERSION_PATCH	0
-#define MDB_VERSION_FULL	((MDB_VERSION_MAJOR << 24) | (MDB_VERSION_MINOR << 16) | MDB_VERSION_PATCH)
+#define MDB_VERINT(a,b,c)	((a << 24) | (b << 16) | c)
+#define MDB_VERSION_FULL	\
+	MDB_VERINT(MDB_VERSION_MAJOR,MDB_VERSION_MINOR,MDB_VERSION_PATCH)
+#define MDB_VERSION_DATE	"August 11, 2011"
+#define MDB_VERSTR(a,b,c,d)	"MDB " #a "." #b "." #c ": (" #d ")"
+#define MDB_VERFOO(a,b,c,d)	MDB_VERSTR(a,b,c,d)
+#define	MDB_VERSION_STRING	\
+	MDB_VERFOO(MDB_VERSION_MAJOR,MDB_VERSION_MINOR,MDB_VERSION_PATCH,MDB_VERSION_DATE)
 
 struct MDB_cursor;
 struct MDB_txn;
@@ -103,10 +110,11 @@ typedef struct MDB_stat {
 	unsigned long	ms_entries;
 } MDB_stat;
 
+char *mdb_version(int *major, int *minor, int *patch);
 int  mdb_env_create(MDB_env **env);
 int  mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode);
 int  mdb_env_stat(MDB_env *env, MDB_stat *stat);
-int  mdb_env_sync(MDB_env *env);
+int  mdb_env_sync(MDB_env *env, int force);
 void mdb_env_close(MDB_env *env);
 int  mdb_env_get_flags(MDB_env *env, unsigned int *flags);
 int  mdb_env_get_path(MDB_env *env, const char **path);

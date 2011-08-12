@@ -437,6 +437,15 @@ memnrcmp(const void *s1, size_t n1, const void *s2, size_t n2)
 	return *p1 - *p2;
 }
 
+char *
+mdb_version(int *maj, int *min, int *pat)
+{
+	*maj = MDB_VERSION_MAJOR;
+	*min = MDB_VERSION_MINOR;
+	*pat = MDB_VERSION_PATCH;
+	return MDB_VERSION_STRING;
+}
+
 int
 mdb_cmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b)
 {
@@ -596,10 +605,10 @@ mdb_touch(MDB_txn *txn, MDB_pageparent *pp)
 }
 
 int
-mdb_env_sync(MDB_env *env)
+mdb_env_sync(MDB_env *env, int force)
 {
 	int rc = 0;
-	if (!F_ISSET(env->me_flags, MDB_NOSYNC)) {
+	if (force || !F_ISSET(env->me_flags, MDB_NOSYNC)) {
 		if (fsync(env->me_fd))
 			rc = errno;
 	}
@@ -899,9 +908,9 @@ mdb_txn_commit(MDB_txn *txn)
 		free(dp);
 	}
 
-	if ((n = mdb_env_sync(env)) != 0 ||
+	if ((n = mdb_env_sync(env, 0)) != 0 ||
 	    (n = mdb_env_write_meta(txn)) != MDB_SUCCESS ||
-	    (n = mdb_env_sync(env)) != 0) {
+	    (n = mdb_env_sync(env, 0)) != 0) {
 		mdb_txn_abort(txn);
 		return n;
 	}
