@@ -43,8 +43,8 @@ typedef struct MDB_env MDB_env;
 typedef unsigned int	MDB_dbi;
 
 typedef struct MDB_val {
-	void		*mv_data;
 	size_t		 mv_size;
+	void		*mv_data;
 } MDB_val;
 
 typedef int  (MDB_cmp_func)(const MDB_val *a, const MDB_val *b);
