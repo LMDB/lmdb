@@ -32,6 +32,11 @@
 
 #include <sys/types.h>
 
+#define MDB_VERSION_MAJOR	0
+#define MDB_VERSION_MINOR	8
+#define MDB_VERSION_PATCH	0
+#define MDB_VERSION_FULL	((MDB_VERSION_MAJOR << 24) | (MDB_VERSION_MINOR << 16) | MDB_VERSION_PATCH)
+
 struct MDB_cursor;
 struct MDB_txn;
 struct MDB_env;
