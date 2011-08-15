@@ -24,6 +24,9 @@ typedef unsigned long pgno_t;
 /* Sort the IDLs from highest to lowest */
 #define IDL_CMP(x,y)	 ( x > y ? -1 : ( x < y ? 1 : 0 ) )
 
+/* Sort the IDL2s from lowest to highest */
+#define IDL2_CMP(x,y)	 ( x < y ? -1 : ( x > y ? 1 : 0 ) )
+
 unsigned mdb_midl_search( ID *ids, ID id )
 {
 	/*
@@ -62,7 +65,7 @@ unsigned mdb_midl_search( ID *ids, ID id )
 
 int mdb_midl_insert( ID *ids, ID id )
 {
-	unsigned x;
+	unsigned x, i;
 
 	if (MDB_IDL_IS_RANGE( ids )) {
 		/* if already in range, treat as a dup */
@@ -101,8 +104,77 @@ int mdb_midl_insert( ID *ids, ID id )
 	
 	} else {
 		/* insert id */
-		AC_MEMCPY( &ids[x+1], &ids[x], (ids[0]-x) * sizeof(ID) );
+		for (i=ids[0]; i>x; i--)
+			ids[i] = ids[i-1];
 		ids[x] = id;
+	}
+
+	return 0;
+}
+
+unsigned mdb_midl2_search( MIDL2 *ids, MIDL2 *id )
+{
+	/*
+	 * binary search of id in ids
+	 * if found, returns position of id
+	 * if not found, returns first position greater than id
+	 */
+	unsigned base = 0;
+	unsigned cursor = 0;
+	int val = 0;
+	unsigned n = ids[0].mid;
+
+	while( 0 < n ) {
+		int pivot = n >> 1;
+		cursor = base + pivot;
+		val = IDL2_CMP( id->mid, ids[cursor + 1].mid );
+
+		if( val < 0 ) {
+			n = pivot;
+
+		} else if ( val > 0 ) {
+			base = cursor + 1;
+			n -= pivot + 1;
+
+		} else {
+			return cursor + 1;
+		}
+	}
+
+	if( val > 0 ) {
+		return cursor + 2;
+	} else {
+		return cursor + 1;
+	}
+}
+
+int mdb_midl2_insert( MIDL2 *ids, MIDL2 *id )
+{
+	unsigned x, i;
+
+	x = mdb_midl2_search( ids, id );
+	assert( x > 0 );
+
+	if( x < 1 ) {
+		/* internal error */
+		return -2;
+	}
+
+	if ( x <= ids[0].mid && ids[x].mid == id->mid ) {
+		/* duplicate */
+		return -1;
+	}
+
+	if ( ids[0].mid >= MDB_IDL_DB_MAX ) {
+		/* too big */
+		return -2;
+
+	} else {
+		/* insert id */
+		ids[0].mid++;
+		for (i=ids[0].mid; i>x; i--)
+			ids[i] = ids[i-1];
+		ids[x] = *id;
 	}
 
 	return 0;

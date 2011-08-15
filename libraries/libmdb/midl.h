@@ -75,4 +75,12 @@
 
 int mdb_midl_insert( ID *ids, ID id );
 
+typedef struct MIDL2 {
+	ID mid;
+	void *mptr;
+} MIDL2;
+
+unsigned mdb_midl2_search( MIDL2 *ids, MIDL2 *id );
+int mdb_midl2_insert( MIDL2 *ids, MIDL2 *id );
+
 #endif	/* _MDB_MIDL_H_ */

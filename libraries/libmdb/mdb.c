@@ -203,7 +203,6 @@ typedef struct MDB_meta {			/* meta (footer) page content */
 } MDB_meta;
 
 typedef struct MDB_dhead {					/* a dirty page */
-	STAILQ_ENTRY(MDB_dpage)	 md_next;	/* queue of dirty pages */
 	MDB_page	*md_parent;
 	unsigned	md_pi;				/* parent index */
 	int			md_num;
@@ -213,8 +212,6 @@ typedef struct MDB_dpage {
 	MDB_dhead	h;
 	MDB_page	p;
 } MDB_dpage;
-
-STAILQ_HEAD(dirty_queue, MDB_dpage);	/* FIXME: use a sorted data structure */
 
 typedef struct MDB_oldpages {
 	struct MDB_oldpages *mo_next;
@@ -289,7 +286,7 @@ struct MDB_txn {
 	MDB_env		*mt_env;	
 	pgno_t		*mt_free_pgs;	/* this is an IDL */
 	union {
-		struct dirty_queue	*dirty_queue;	/* modified pages */
+		MIDL2	*dirty_list;	/* modified pages */
 		MDB_reader	*reader;
 	} mt_u;
 	MDB_dbx		*mt_dbxs;		/* array */
@@ -333,6 +330,7 @@ struct MDB_env {
 	MDB_oldpages *me_pghead;
 	pthread_key_t	me_txkey;	/* thread-key for readers */
 	pgno_t		me_free_pgs[MDB_IDL_UM_SIZE];
+	MIDL2		me_dirty_list[MDB_IDL_DB_SIZE];
 };
 
 #define NODESIZE	 offsetof(MDB_node, mn_data)
@@ -483,6 +481,7 @@ mdb_alloc_page(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num)
 	MDB_dpage *dp;
 	pgno_t pgno = P_INVALID;
 	ULONG oldest;
+	MIDL2 mid;
 
 	if (txn->mt_txnid > 2) {
 
@@ -574,13 +573,15 @@ mdb_alloc_page(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num)
 	dp->h.md_num = num;
 	dp->h.md_parent = parent;
 	dp->h.md_pi = parent_idx;
-	STAILQ_INSERT_TAIL(txn->mt_u.dirty_queue, dp, h.md_next);
 	if (pgno == P_INVALID) {
 		dp->p.mp_pgno = txn->mt_next_pgno;
 		txn->mt_next_pgno += num;
 	} else {
 		dp->p.mp_pgno = pgno;
 	}
+	mid.mid = dp->p.mp_pgno;
+	mid.mptr = dp;
+	mdb_midl2_insert(txn->mt_u.dirty_list, &mid);
 
 	return dp;
 }
@@ -640,17 +641,13 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 	if (rdonly) {
 		txn->mt_flags |= MDB_TXN_RDONLY;
 	} else {
-		txn->mt_u.dirty_queue = calloc(1, sizeof(*txn->mt_u.dirty_queue));
-		if (txn->mt_u.dirty_queue == NULL) {
-			free(txn);
-			return ENOMEM;
-		}
-		STAILQ_INIT(txn->mt_u.dirty_queue);
+		txn->mt_u.dirty_list = env->me_dirty_list;
+		txn->mt_u.dirty_list[0].mid = 0;
+		txn->mt_free_pgs = env->me_free_pgs;
+		txn->mt_free_pgs[0] = 0;
 
 		pthread_mutex_lock(&env->me_txns->mti_wmutex);
 		env->me_txns->mti_txnid++;
-		txn->mt_free_pgs = env->me_free_pgs;
-		txn->mt_free_pgs[0] = 0;
 	}
 
 	txn->mt_txnid = env->me_txns->mti_txnid;
@@ -712,7 +709,6 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 void
 mdb_txn_abort(MDB_txn *txn)
 {
-	MDB_dpage *dp;
 	MDB_env	*env;
 
 	if (txn == NULL)
@@ -731,12 +727,8 @@ mdb_txn_abort(MDB_txn *txn)
 		unsigned int i;
 
 		/* Discard all dirty pages. */
-		while (!STAILQ_EMPTY(txn->mt_u.dirty_queue)) {
-			dp = STAILQ_FIRST(txn->mt_u.dirty_queue);
-			STAILQ_REMOVE_HEAD(txn->mt_u.dirty_queue, h.md_next);
-			free(dp);
-		}
-		free(txn->mt_u.dirty_queue);
+		for (i=1; i<=txn->mt_u.dirty_list[0].mid; i++)
+			free(txn->mt_u.dirty_list[i].mptr);
 
 		while ((mop = txn->mt_env->me_pghead)) {
 			txn->mt_env->me_pghead = mop->mo_next;
@@ -788,7 +780,7 @@ mdb_txn_commit(MDB_txn *txn)
 		return EINVAL;
 	}
 
-	if (STAILQ_EMPTY(txn->mt_u.dirty_queue))
+	if (!txn->mt_u.dirty_list[0].mid)
 		goto done;
 
 	DPRINTF("committing transaction %lu on mdbenv %p, root page %lu",
@@ -861,7 +853,8 @@ mdb_txn_commit(MDB_txn *txn)
 		n = 0;
 		done = 1;
 		size = 0;
-		STAILQ_FOREACH(dp, txn->mt_u.dirty_queue, h.md_next) {
+		for (i=1; i<=txn->mt_u.dirty_list[0].mid; i++) {
+			dp = txn->mt_u.dirty_list[i].mptr;
 			if (dp->p.mp_pgno != next) {
 				if (n) {
 					DPRINTF("committing %u dirty pages", n);
@@ -913,11 +906,8 @@ mdb_txn_commit(MDB_txn *txn)
 
 	/* Drop the dirty pages.
 	 */
-	while (!STAILQ_EMPTY(txn->mt_u.dirty_queue)) {
-		dp = STAILQ_FIRST(txn->mt_u.dirty_queue);
-		STAILQ_REMOVE_HEAD(txn->mt_u.dirty_queue, h.md_next);
-		free(dp);
-	}
+	for (i=1; i<=txn->mt_u.dirty_list[0].mid; i++)
+		free(txn->mt_u.dirty_list[i].mptr);
 
 	if ((n = mdb_env_sync(env, 0)) != 0 ||
 	    (n = mdb_env_write_meta(txn)) != MDB_SUCCESS) {
@@ -948,7 +938,6 @@ mdb_txn_commit(MDB_txn *txn)
 	}
 
 	pthread_mutex_unlock(&env->me_txns->mti_wmutex);
-	free(txn->mt_u.dirty_queue);
 	free(txn);
 	txn = NULL;
 
@@ -1529,14 +1518,16 @@ mdb_get_page(MDB_txn *txn, pgno_t pgno)
 	MDB_page *p = NULL;
 	int found = 0;
 
-	if (!F_ISSET(txn->mt_flags, MDB_TXN_RDONLY) && !STAILQ_EMPTY(txn->mt_u.dirty_queue)) {
+	if (!F_ISSET(txn->mt_flags, MDB_TXN_RDONLY) && txn->mt_u.dirty_list[0].mid) {
 		MDB_dpage *dp;
-		STAILQ_FOREACH(dp, txn->mt_u.dirty_queue, h.md_next) {
-			if (dp->p.mp_pgno == pgno) {
-				p = &dp->p;
-				found = 1;
-				break;
-			}
+		MIDL2 id;
+		unsigned x;
+		id.mid = pgno;
+		x = mdb_midl2_search(txn->mt_u.dirty_list, &id);
+		if (x <= txn->mt_u.dirty_list[0].mid && txn->mt_u.dirty_list[x].mid == pgno) {
+			dp = txn->mt_u.dirty_list[x].mptr;
+			p = &dp->p;
+			found = 1;
 		}
 	}
 	if (!found) {
