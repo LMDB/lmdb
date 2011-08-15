@@ -41,7 +41,7 @@ int main(int argc,char * argv[])
     
 		rc = mdb_env_create(&env);
 		rc = mdb_env_set_mapsize(env, 10485760);
-		rc = mdb_env_open(env, "./testdb", MDB_FIXEDMAP|MDB_NOSYNC, 0664);
+		rc = mdb_env_open(env, "./testdb", MDB_FIXEDMAP /*|MDB_NOSYNC*/, 0664);
 		rc = mdb_txn_begin(env, 0, &txn);
 		rc = mdb_open(txn, NULL, 0, &dbi);
    

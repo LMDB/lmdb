@@ -145,6 +145,7 @@ typedef struct MDB_page {		/* represents a page of storage */
 #define	P_OVERFLOW	 0x04		/* overflow page */
 #define	P_META		 0x08		/* meta page */
 #define	P_DIRTY		 0x10		/* dirty page */
+#define	P_LEAF2		 0x20		/* DB with small, fixed size keys and no data */
 	uint32_t	mp_flags;
 #define mp_lower	mp_pb.pb.pb_lower
 #define mp_upper	mp_pb.pb.pb_upper
@@ -155,6 +156,10 @@ typedef struct MDB_page {		/* represents a page of storage */
 			indx_t		pb_upper;		/* upper bound of free space */
 		} pb;
 		uint32_t	pb_pages;	/* number of overflow pages */
+		struct {
+			indx_t	pb_ksize;	/* on a LEAF2 page */
+			indx_t	pb_numkeys;
+		} pb2;
 	} mp_pb;
 	indx_t		mp_ptrs[1];		/* dynamic size */
 } MDB_page;
@@ -308,7 +313,10 @@ typedef struct MDB_xcursor {
 struct MDB_env {
 	int			me_fd;
 	int			me_lfd;
-	uint32_t	me_flags;
+	int			me_mfd;			/* just for writing the meta pages */
+	uint16_t	me_flags;
+	uint16_t		me_db_toggle;
+	unsigned int	me_psize;
 	unsigned int	me_maxreaders;
 	unsigned int	me_numdbs;
 	unsigned int	me_maxdbs;
@@ -320,8 +328,6 @@ struct MDB_env {
 	MDB_txn		*me_txn;		/* current write transaction */
 	size_t		me_mapsize;
 	off_t		me_size;		/* current file size */
-	unsigned int	me_psize;
-	int			me_db_toggle;
 	MDB_dbx		*me_dbxs;		/* array */
 	MDB_db		*me_dbs[2];
 	MDB_oldpages *me_pghead;
@@ -614,7 +620,7 @@ mdb_env_sync(MDB_env *env, int force)
 {
 	int rc = 0;
 	if (force || !F_ISSET(env->me_flags, MDB_NOSYNC)) {
-		if (fsync(env->me_fd))
+		if (fdatasync(env->me_fd))
 			rc = errno;
 	}
 	return rc;
@@ -914,8 +920,7 @@ mdb_txn_commit(MDB_txn *txn)
 	}
 
 	if ((n = mdb_env_sync(env, 0)) != 0 ||
-	    (n = mdb_env_write_meta(txn)) != MDB_SUCCESS ||
-	    (n = mdb_env_sync(env, 0)) != 0) {
+	    (n = mdb_env_write_meta(txn)) != MDB_SUCCESS) {
 		mdb_txn_abort(txn);
 		return n;
 	}
@@ -1069,8 +1074,7 @@ mdb_env_write_meta(MDB_txn *txn)
 		off += env->me_psize;
 	off += PAGEHDRSZ;
 
-	lseek(env->me_fd, off, SEEK_SET);
-	rc = write(env->me_fd, ptr, len);
+	rc = pwrite(env->me_fd, ptr, len, off);
 	if (rc != len) {
 		DPRINTF("write failed, disk error?");
 		return errno;
@@ -1111,6 +1115,7 @@ mdb_env_create(MDB_env **env)
 	e->me_maxdbs = 2;
 	e->me_fd = -1;
 	e->me_lfd = -1;
+	e->me_mfd = -1;
 	*env = e;
 	return MDB_SUCCESS;
 }
@@ -1288,7 +1293,10 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		pthread_mutexattr_t mattr;
 
 		pthread_mutexattr_init(&mattr);
-		pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
+		rc = pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
+		if (rc) {
+			goto fail;
+		}
 		pthread_mutex_init(&env->me_txns->mti_mutex, &mattr);
 		pthread_mutex_init(&env->me_txns->mti_wmutex, &mattr);
 		env->me_txns->mti_version = MDB_VERSION;
@@ -1317,6 +1325,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 
 fail:
 	close(env->me_lfd);
+	env->me_lfd = -1;
 	return rc;
 
 }
@@ -1346,13 +1355,20 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 	else
 		oflags = O_RDWR | O_CREAT;
 
-	if ((env->me_fd = open(dpath, oflags, mode)) == -1)
-		return errno;
+	if ((env->me_fd = open(dpath, oflags, mode)) == -1) {
+		rc = errno;
+		goto leave;
+	}
 
-	if ((rc = mdb_env_open2(env, flags)) != MDB_SUCCESS) {
-		close(env->me_fd);
-		env->me_fd = -1;
-	} else {
+	if ((rc = mdb_env_open2(env, flags)) == MDB_SUCCESS) {
+		/* synchronous fd for meta writes */
+		if (!(flags & (MDB_RDONLY|MDB_NOSYNC)))
+			oflags |= O_DSYNC;
+		if ((env->me_mfd = open(dpath, oflags, mode)) == -1) {
+			rc = errno;
+			goto leave;
+		}
+
 		env->me_path = strdup(path);
 		DPRINTF("opened dbenv %p", (void *) env);
 		pthread_key_create(&env->me_txkey, mdb_env_reader_dest);
@@ -1365,6 +1381,16 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 	}
 
 leave:
+	if (rc) {
+		if (env->me_fd >= 0) {
+			close(env->me_fd);
+			env->me_fd = -1;
+		}
+		if (env->me_lfd >= 0) {
+			close(env->me_lfd);
+			env->me_lfd = -1;
+		}
+	}
 	free(lpath);
 	return rc;
 }
@@ -1385,6 +1411,7 @@ mdb_env_close(MDB_env *env)
 	if (env->me_map) {
 		munmap(env->me_map, env->me_mapsize);
 	}
+	close(env->me_mfd);
 	close(env->me_fd);
 	if (env->me_txns) {
 		pid_t pid = getpid();
