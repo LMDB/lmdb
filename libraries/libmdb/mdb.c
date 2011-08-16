@@ -778,9 +778,8 @@ mdb_txn_commit(MDB_txn *txn)
 	env = txn->mt_env;
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
-		DPRINTF("attempt to commit read-only transaction");
 		mdb_txn_abort(txn);
-		return EPERM;
+		return MDB_SUCCESS;
 	}
 
 	if (txn != env->me_txn) {
