@@ -460,6 +460,27 @@ mdb_version(int *maj, int *min, int *pat)
 	return MDB_VERSION_STRING;
 }
 
+static const char *errstr[] = {
+	"MDB_KEYEXIST: Key/data pair already exists",
+	"MDB_NOTFOUND: No matching key/data pair found",
+	"MDB_PAGE_NOTFOUND: Requested page not found",
+	"MDB_CORRUPTED: Located page was wrong type",
+	"MDB_PANIC: Update of meta page failed",
+	"MDB_VERSION_MISMATCH: Database environment version mismatch"
+};
+
+char *
+mdb_strerror(int err)
+{
+	if (!err)
+		return ("Successful return: 0");
+
+	if (err >= MDB_KEYEXIST && err <= MDB_VERSION_MISMATCH)
+		return (char *)errstr[err - MDB_KEYEXIST];
+
+	return strerror(err);
+}
+
 int
 mdb_cmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b)
 {
@@ -3158,6 +3179,19 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 		return EINVAL;
 
 	return mdb_put0(txn, dbi, key, data, flags);
+}
+
+int
+mdb_env_set_flags(MDB_env *env, unsigned int flag, int onoff)
+{
+#define	CHANGEABLE	(MDB_NOSYNC)
+	if ((flag & CHANGEABLE) != flag)
+		return EINVAL;
+	if (onoff)
+		env->me_flags |= flag;
+	else
+		env->me_flags &= ~flag;
+	return MDB_SUCCESS;
 }
 
 int
