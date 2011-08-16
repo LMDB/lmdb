@@ -82,11 +82,14 @@ typedef enum MDB_cursor_op {		/* cursor operations */
 } MDB_cursor_op;
 
 /* return codes */
+/* BerkeleyDB uses -30800 to -30999, we'll go under them */
 #define MDB_SUCCESS	 0
-#define MDB_FAIL		-1
-#define MDB_KEYEXIST	-2
-#define MDB_NOTFOUND	-3
-#define MDB_VERSION_MISMATCH	-4
+#define MDB_KEYEXIST	-30799		/* key/data pair already exists */
+#define MDB_NOTFOUND	-30798		/* key/data pair not found (EOF) */
+#define MDB_PAGE_NOTFOUND	-30797	/* Requested page not found */
+#define MDB_CORRUPTED	-30796		/* Located page was wrong type */
+#define MDB_PANIC		-30795		/* Update of meta page failed, probably I/O error */
+#define MDB_VERSION_MISMATCH	-30794	/* Environment version mismatch */
 
 /* DB flags */
 #define MDB_REVERSEKEY	0x02		/* use reverse string keys */
