@@ -975,9 +975,6 @@ done:
 
 	pthread_mutex_unlock(&env->me_txns->mti_wmutex);
 	free(txn);
-	txn = NULL;
-
-	mdb_txn_abort(txn);
 
 	return MDB_SUCCESS;
 }
@@ -2481,7 +2478,6 @@ mdb_cursor_close(MDB_cursor *cursor)
 		while(!CURSOR_EMPTY(cursor))
 			cursor_pop_page(cursor);
 		if (cursor->mc_txn->mt_dbs[cursor->mc_dbi].md_flags & MDB_DUPSORT) {
-			mdb_xcursor_fini(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor);
 			while(!CURSOR_EMPTY(&cursor->mc_xcursor->mx_cursor))
 				cursor_pop_page(&cursor->mc_xcursor->mx_cursor);
 		}
