@@ -1740,7 +1740,7 @@ mdb_read_data(MDB_txn *txn, MDB_node *leaf, MDB_val *data)
 		DPRINTF("read overflow page %lu failed", pgno);
 		return MDB_PAGE_NOTFOUND;
 	}
-	data->mv_data = omp;
+	data->mv_data = METADATA(omp);
 
 	return MDB_SUCCESS;
 }
