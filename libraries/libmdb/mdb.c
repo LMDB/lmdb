@@ -2008,7 +2008,8 @@ mdb_cursor_set(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	cursor->mc_eof = 0;
 
 	if (data) {
-		if ((rc = mdb_read_data(cursor->mc_txn, leaf, data)) != MDB_SUCCESS)
+		MDB_val d2;
+		if ((rc = mdb_read_data(cursor->mc_txn, leaf, &d2)) != MDB_SUCCESS)
 			return rc;
 
 		if (cursor->mc_txn->mt_dbs[cursor->mc_dbi].md_flags & MDB_DUPSORT) {
@@ -2029,7 +2030,10 @@ mdb_cursor_set(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 				if (rc != MDB_SUCCESS)
 					return rc;
 			}
+		} else {
+			*data = d2;
 		}
+
 	}
 
 	rc = mdb_set_key(leaf, key);
