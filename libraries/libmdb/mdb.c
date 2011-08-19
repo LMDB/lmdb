@@ -29,7 +29,6 @@
  */
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/queue.h>
 #include <sys/param.h>
 #include <sys/uio.h>
 #include <sys/mman.h>
@@ -231,25 +230,19 @@ static MDB_dpage *mdb_alloc_page(MDB_txn *txn, MDB_page *parent, unsigned int pa
 static int 		mdb_touch(MDB_txn *txn, MDB_pageparent *mp);
 
 typedef struct MDB_ppage {					/* ordered list of pages */
-	SLIST_ENTRY(MDB_ppage)	 mp_entry;
 	MDB_page		*mp_page;
 	unsigned int	mp_ki;		/* cursor index on page */
 } MDB_ppage;
-SLIST_HEAD(page_stack, MDB_ppage);
 
-/* FIXME: tree depth is mostly bounded, we should just
- * use a fixed array and avoid malloc/pointer chasing
- */
-#define CURSOR_EMPTY(c)		 SLIST_EMPTY(&(c)->mc_stack)
-#define CURSOR_TOP(c)		 SLIST_FIRST(&(c)->mc_stack)
-#define CURSOR_POP(c)		 SLIST_REMOVE_HEAD(&(c)->mc_stack, mp_entry)
-#define CURSOR_PUSH(c,p)	 SLIST_INSERT_HEAD(&(c)->mc_stack, p, mp_entry)
+#define CURSOR_TOP(c)		 (&(c)->mc_stack[(c)->mc_snum-1])
+#define CURSOR_PARENT(c)	 (&(c)->mc_stack[(c)->mc_snum-2])
 
 struct MDB_xcursor;
 
 struct MDB_cursor {
 	MDB_txn		*mc_txn;
-	struct page_stack	 mc_stack;		/* stack of parent pages */
+	MDB_ppage	mc_stack[32];		/* stack of parent pages */
+	unsigned int	mc_snum;		/* number of pushed pages */
 	MDB_dbi		mc_dbi;
 	short		mc_initialized;	/* 1 if initialized */
 	short		mc_eof;		/* 1 if end is reached */
@@ -1542,12 +1535,12 @@ cursor_pop_page(MDB_cursor *cursor)
 {
 	MDB_ppage	*top;
 
-	top = CURSOR_TOP(cursor);
-	CURSOR_POP(cursor);
+	if (cursor->mc_snum) {
+		top = CURSOR_TOP(cursor);
+		cursor->mc_snum--;
 
-	DPRINTF("popped page %lu off cursor %p", top->mp_page->mp_pgno, (void *) cursor);
-
-	free(top);
+		DPRINTF("popped page %lu off cursor %p", top->mp_page->mp_pgno, (void *) cursor);
+	}
 }
 
 static MDB_ppage *
@@ -1557,10 +1550,9 @@ cursor_push_page(MDB_cursor *cursor, MDB_page *mp)
 
 	DPRINTF("pushing page %lu on cursor %p", mp->mp_pgno, (void *) cursor);
 
-	if ((ppage = calloc(1, sizeof(MDB_ppage))) == NULL)
-		return NULL;
+	ppage = &cursor->mc_stack[cursor->mc_snum++];
 	ppage->mp_page = mp;
-	CURSOR_PUSH(cursor, ppage);
+	ppage->mp_ki = 0;
 	return ppage;
 }
 
@@ -1794,13 +1786,13 @@ mdb_sibling(MDB_cursor *cursor, int move_right)
 {
 	int		 rc;
 	MDB_node	*indx;
-	MDB_ppage	*parent, *top;
+	MDB_ppage	*parent;
 	MDB_page	*mp;
 
-	top = CURSOR_TOP(cursor);
-	if ((parent = SLIST_NEXT(top, mp_entry)) == NULL) {
+	if (cursor->mc_snum < 2) {
 		return MDB_NOTFOUND;		/* root has no siblings */
 	}
+	parent = CURSOR_PARENT(cursor);
 
 	DPRINTF("parent page is page %lu, index %u",
 	    parent->mp_page->mp_pgno, parent->mp_ki);
@@ -1979,8 +1971,7 @@ mdb_cursor_set(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	assert(key);
 	assert(key->mv_size > 0);
 
-	while (CURSOR_TOP(cursor) != NULL)
-		cursor_pop_page(cursor);
+	cursor->mc_snum = 0;
 
 	rc = mdb_search_page(cursor->mc_txn, cursor->mc_dbi, key, cursor, 0, &mpp);
 	if (rc != MDB_SUCCESS)
@@ -2054,8 +2045,7 @@ mdb_cursor_first(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 	MDB_pageparent	mpp;
 	MDB_node	*leaf;
 
-	while (CURSOR_TOP(cursor) != NULL)
-		cursor_pop_page(cursor);
+	cursor->mc_snum = 0;
 
 	rc = mdb_search_page(cursor->mc_txn, cursor->mc_dbi, NULL, cursor, 0, &mpp);
 	if (rc != MDB_SUCCESS)
@@ -2089,8 +2079,7 @@ mdb_cursor_last(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 	MDB_node	*leaf;
 	MDB_val	lkey;
 
-	while (CURSOR_TOP(cursor) != NULL)
-		cursor_pop_page(cursor);
+	cursor->mc_snum = 0;
 
 	lkey.mv_size = MAXKEYSIZE+1;
 	lkey.mv_data = NULL;
@@ -2387,7 +2376,7 @@ mdb_xcursor_init0(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx)
 	mx->mx_dbxs[dbn+1].md_dirty = 0;
 	mx->mx_txn.mt_numdbs = dbn+2;
 
-	SLIST_INIT(&mx->mx_cursor.mc_stack);
+	mx->mx_cursor.mc_snum = 0;
 	mx->mx_cursor.mc_txn = &mx->mx_txn;
 	mx->mx_cursor.mc_dbi = dbn+1;
 }
@@ -2442,7 +2431,6 @@ mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **ret)
 		size += sizeof(MDB_xcursor);
 
 	if ((cursor = calloc(1, size)) != NULL) {
-		SLIST_INIT(&cursor->mc_stack);
 		cursor->mc_dbi = dbi;
 		cursor->mc_txn = txn;
 		if (txn->mt_dbs[dbi].md_flags & MDB_DUPSORT) {
@@ -2480,13 +2468,6 @@ void
 mdb_cursor_close(MDB_cursor *cursor)
 {
 	if (cursor != NULL) {
-		while(!CURSOR_EMPTY(cursor))
-			cursor_pop_page(cursor);
-		if (cursor->mc_txn->mt_dbs[cursor->mc_dbi].md_flags & MDB_DUPSORT) {
-			while(!CURSOR_EMPTY(&cursor->mc_xcursor->mx_cursor))
-				cursor_pop_page(&cursor->mc_xcursor->mx_cursor);
-		}
-
 		free(cursor);
 	}
 }
@@ -2852,24 +2833,21 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 				unsigned int i;
 
 				cursor_pop_page(&mx.mx_cursor);
-				top = CURSOR_TOP(&mx.mx_cursor);
-				if (top != NULL) {
-					parent = SLIST_NEXT(top, mp_entry);
-					while (parent != NULL) {
+				if (mx.mx_cursor.mc_snum) {
+					top = CURSOR_TOP(&mx.mx_cursor);
+					while (mx.mx_cursor.mc_snum > 1) {
+						parent = CURSOR_PARENT(&mx.mx_cursor);
 						for (i=0; i<NUMKEYS(top->mp_page); i++) {
 							ni = NODEPTR(top->mp_page, i);
 							mdb_midl_insert(txn->mt_free_pgs, ni->mn_pgno);
 						}
-						if (parent) {
-							parent->mp_ki++;
-							if (parent->mp_ki >= NUMKEYS(parent->mp_page)) {
-								cursor_pop_page(&mx.mx_cursor);
-								top = CURSOR_TOP(&mx.mx_cursor);
-								parent = SLIST_NEXT(top, mp_entry);
-							} else {
-								ni = NODEPTR(parent->mp_page, parent->mp_ki);
-								top->mp_page = mdb_get_page(&mx.mx_txn, ni->mn_pgno);
-							}
+						parent->mp_ki++;
+						if (parent->mp_ki >= NUMKEYS(parent->mp_page)) {
+							cursor_pop_page(&mx.mx_cursor);
+							top = parent;
+						} else {
+							ni = NODEPTR(parent->mp_page, parent->mp_ki);
+							top->mp_page = mdb_get_page(&mx.mx_txn, ni->mn_pgno);
 						}
 					}
 				}
