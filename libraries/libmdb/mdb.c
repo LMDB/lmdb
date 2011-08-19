@@ -478,20 +478,26 @@ mdb_strerror(int err)
 int
 mdb_cmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b)
 {
-	return txn->mt_dbxs[dbi].md_cmp(a, b);
-}
+	if (txn->mt_dbxs[dbi].md_cmp)
+		return txn->mt_dbxs[dbi].md_cmp(a, b);
 
-static int
-_mdb_cmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *key1, const MDB_val *key2)
-{
 	if (txn->mt_dbs[dbi].md_flags & (MDB_REVERSEKEY
 #if __BYTE_ORDER == __LITTLE_ENDIAN
 		|MDB_INTEGERKEY
 #endif
 	))
-		return memnrcmp(key1->mv_data, key1->mv_size, key2->mv_data, key2->mv_size);
+		return memnrcmp(a->mv_data, a->mv_size, b->mv_data, b->mv_size);
 	else
-		return memncmp((char *)key1->mv_data, key1->mv_size, key2->mv_data, key2->mv_size);
+		return memncmp((char *)a->mv_data, a->mv_size, b->mv_data, b->mv_size);
+}
+
+int
+mdb_dcmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b)
+{
+	if (txn->mt_dbxs[dbi].md_dcmp)
+		return txn->mt_dbxs[dbi].md_dcmp(a, b);
+
+	return memncmp((char *)a->mv_data, a->mv_size, b->mv_data, b->mv_size);
 }
 
 /* Allocate new page(s) for writing */
@@ -1496,10 +1502,7 @@ mdb_search_node(MDB_txn *txn, MDB_dbi dbi, MDB_page *mp, MDB_val *key,
 		nodekey.mv_size = node->mn_ksize;
 		nodekey.mv_data = NODEKEY(node);
 
-		if (txn->mt_dbxs[dbi].md_cmp)
-			rc = txn->mt_dbxs[dbi].md_cmp(key, &nodekey);
-		else
-			rc = _mdb_cmp(txn, dbi, key, &nodekey);
+		rc = mdb_cmp(txn, dbi, key, &nodekey);
 
 		if (IS_LEAF(mp))
 			DPRINTF("found leaf index %u [%.*s], rc = %i",
@@ -2027,6 +2030,16 @@ mdb_cursor_set(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 				if (rc != MDB_SUCCESS)
 					return rc;
 			}
+		} else if (op == MDB_GET_BOTH || op == MDB_GET_BOTH_RANGE) {
+			MDB_val d2;
+			if ((rc = mdb_read_data(cursor->mc_txn, leaf, &d2)) != MDB_SUCCESS)
+				return rc;
+			rc = mdb_dcmp(cursor->mc_txn, cursor->mc_dbi, data, &d2);
+			if (rc) {
+				if (op == MDB_GET_BOTH || rc > 0)
+					return MDB_NOTFOUND;
+			}
+
 		} else {
 			if ((rc = mdb_read_data(cursor->mc_txn, leaf, data)) != MDB_SUCCESS)
 				return rc;
@@ -2128,7 +2141,7 @@ mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	switch (op) {
 	case MDB_GET_BOTH:
 	case MDB_GET_BOTH_RANGE:
-		if (data == NULL) {
+		if (data == NULL || cursor->mc_xcursor == NULL) {
 			rc = EINVAL;
 			break;
 		}
@@ -2137,7 +2150,7 @@ mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	case MDB_SET_RANGE:
 		if (key == NULL || key->mv_size == 0 || key->mv_size > MAXKEYSIZE) {
 			rc = EINVAL;
-		} else if (op != MDB_SET_RANGE)
+		} else if (op == MDB_SET_RANGE)
 			rc = mdb_cursor_set(cursor, key, data, op, NULL);
 		else
 			rc = mdb_cursor_set(cursor, key, data, op, &exact);
@@ -2834,6 +2847,7 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 			if (mx.mx_txn.mt_dbs[mx.mx_cursor.mc_dbi].md_root != P_INVALID) {
 				memcpy(NODEDATA(leaf), &mx.mx_txn.mt_dbs[mx.mx_cursor.mc_dbi],
 					sizeof(MDB_db));
+				txn->mt_dbs[dbi].md_entries--;
 				return rc;
 			}
 			/* otherwise fall thru and delete the sub-DB */
@@ -3125,8 +3139,6 @@ new_sub:
 	if (rc != MDB_SUCCESS)
 		txn->mt_flags |= MDB_TXN_ERROR;
 	else {
-		txn->mt_dbs[dbi].md_entries++;
-
 		/* Remember if we just added a subdatabase */
 		if (flags & F_SUBDATA) {
 			leaf = NODEPTR(mpp.mp_page, ki);
@@ -3161,6 +3173,7 @@ put_sub:
 			memcpy(NODEDATA(leaf), &mx.mx_txn.mt_dbs[mx.mx_cursor.mc_dbi],
 				sizeof(MDB_db));
 		}
+		txn->mt_dbs[dbi].md_entries++;
 	}
 
 done:
