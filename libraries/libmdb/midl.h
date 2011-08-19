@@ -18,7 +18,7 @@
 #define _MDB_MIDL_H_
 
 #define	ID	unsigned long
-#define	NOID	((ID)~0)
+#define	NOID	(~(ID)0)
 
 /* IDL sizes - likely should be even bigger
  *   limiting factors: sizeof(ID), thread stack size
@@ -64,12 +64,12 @@
 #define MDB_IDL_ID( bdb, ids, id ) MDB_IDL_RANGE( ids, id, ((bdb)->bi_lastid) )
 #define MDB_IDL_ALL( bdb, ids ) MDB_IDL_RANGE( ids, 1, ((bdb)->bi_lastid) )
 
-#define MDB_IDL_FIRST( ids )	( ids[1] )
+#define MDB_IDL_FIRST( ids )	( (ids)[1] )
 #define MDB_IDL_LAST( ids )		( MDB_IDL_IS_RANGE(ids) \
-	? ids[2] : ids[ids[0]] )
+	? (ids)[2] : (ids)[(ids)[0]] )
 
 #define MDB_IDL_N( ids )		( MDB_IDL_IS_RANGE(ids) \
-	? (ids[2]-ids[1])+1 : ids[0] )
+	? ((ids)[2]-(ids)[1])+1 : (ids)[0] )
 
 int mdb_midl_insert( ID *ids, ID id );
 

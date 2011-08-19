@@ -22,10 +22,10 @@
 typedef unsigned long pgno_t;
 
 /* Sort the IDLs from highest to lowest */
-#define IDL_CMP(x,y)	 ( x > y ? -1 : ( x < y ? 1 : 0 ) )
+#define IDL_CMP(x,y)	 ( (x) > (y) ? -1 : (x) < (y) )
 
 /* Sort the IDL2s from lowest to highest */
-#define IDL2_CMP(x,y)	 ( x < y ? -1 : ( x > y ? 1 : 0 ) )
+#define IDL2_CMP(x,y)	 ( (x) < (y) ? -1 : (x) > (y) )
 
 unsigned mdb_midl_search( ID *ids, ID id )
 {

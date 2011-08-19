@@ -35,7 +35,7 @@
 #define MDB_VERSION_MAJOR	0
 #define MDB_VERSION_MINOR	8
 #define MDB_VERSION_PATCH	0
-#define MDB_VERINT(a,b,c)	((a << 24) | (b << 16) | c)
+#define MDB_VERINT(a,b,c)	(((a) << 24) | ((b) << 16) | (c))
 #define MDB_VERSION_FULL	\
 	MDB_VERINT(MDB_VERSION_MAJOR,MDB_VERSION_MINOR,MDB_VERSION_PATCH)
 #define MDB_VERSION_DATE	"August 11, 2011"

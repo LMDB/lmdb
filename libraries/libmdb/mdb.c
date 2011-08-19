@@ -178,7 +178,7 @@ typedef struct MDB_page {		/* represents a page of storage */
 #define IS_BRANCH(p)	 F_ISSET((p)->mp_flags, P_BRANCH)
 #define IS_OVERFLOW(p)	 F_ISSET((p)->mp_flags, P_OVERFLOW)
 
-#define OVPAGES(size, psize)	(PAGEHDRSZ + size + psize - 1) / psize;
+#define OVPAGES(size, psize)	((PAGEHDRSZ-1 + (size)) / (psize) + 1)
 
 typedef struct MDB_db {
 	uint32_t	md_pad;
@@ -252,7 +252,7 @@ struct MDB_cursor {
 	struct MDB_xcursor	*mc_xcursor;
 };
 
-#define METADATA(p)	 ((void *)((char *)p + PAGEHDRSZ))
+#define METADATA(p)	 ((void *)((char *)(p) + PAGEHDRSZ))
 
 typedef struct MDB_node {
 #define mn_pgno		 mn_p.np_pgno
