@@ -55,6 +55,14 @@ typedef ULONG		pgno_t;
 
 #include "midl.h"
 
+/* Note: If O_DSYNC is undefined but exists in /usr/include,
+ * preferably set some compiler flag to get the definition.
+ * Otherwise compile with the less efficient -DMDB_DSYNC=O_SYNC.
+ */
+#ifndef MDB_DSYNC
+# define MDB_DSYNC	O_DSYNC
+#endif
+
 #ifndef DEBUG
 #define DEBUG 1
 #endif
@@ -1407,7 +1415,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 	if ((rc = mdb_env_open2(env, flags)) == MDB_SUCCESS) {
 		/* synchronous fd for meta writes */
 		if (!(flags & (MDB_RDONLY|MDB_NOSYNC)))
-			oflags |= O_DSYNC;
+			oflags |= MDB_DSYNC;
 		if ((env->me_mfd = open(dpath, oflags, mode)) == -1) {
 			rc = errno;
 			goto leave;
