@@ -465,7 +465,7 @@ mdb_version(int *maj, int *min, int *pat)
 	return MDB_VERSION_STRING;
 }
 
-static const char *errstr[] = {
+static char *const errstr[] = {
 	"MDB_KEYEXIST: Key/data pair already exists",
 	"MDB_NOTFOUND: No matching key/data pair found",
 	"MDB_PAGE_NOTFOUND: Requested page not found",
@@ -481,7 +481,7 @@ mdb_strerror(int err)
 		return ("Successful return: 0");
 
 	if (err >= MDB_KEYEXIST && err <= MDB_VERSION_MISMATCH)
-		return (char *)errstr[err - MDB_KEYEXIST];
+		return errstr[err - MDB_KEYEXIST];
 
 	return strerror(err);
 }
