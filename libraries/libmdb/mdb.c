@@ -140,7 +140,7 @@ typedef struct MDB_page {		/* represents a page of storage */
 #define	mp_pgno		mp_p.p_pgno
 	union padded {
 		pgno_t		p_pgno;		/* page number */
-		void *		p_pad;
+		void *		p_align;	/* for IL32P64 */
 	} mp_p;
 #define	P_BRANCH	 0x01		/* branch page */
 #define	P_LEAF		 0x02		/* leaf page */
@@ -949,8 +949,9 @@ mdb_txn_commit(MDB_txn *txn)
 		mdb_txn_abort(txn);
 		return n;
 	}
-	env->me_txn = NULL;
 
+done:
+	env->me_txn = NULL;
 	/* update the DB tables */
 	{
 		int toggle = !env->me_db_toggle;
@@ -976,7 +977,6 @@ mdb_txn_commit(MDB_txn *txn)
 	free(txn);
 	txn = NULL;
 
-done:
 	mdb_txn_abort(txn);
 
 	return MDB_SUCCESS;
