@@ -884,11 +884,12 @@ mdb_txn_commit(MDB_txn *txn)
 	/* Commit up to MDB_COMMIT_PAGES dirty pages to disk until done.
 	 */
 	next = 0;
+	i = 1;
 	do {
 		n = 0;
 		done = 1;
 		size = 0;
-		for (i=1; i<=txn->mt_u.dirty_list[0].mid; i++) {
+		for (; i<=txn->mt_u.dirty_list[0].mid; i++) {
 			dp = txn->mt_u.dirty_list[i].mptr;
 			if (dp->p.mp_pgno != next) {
 				if (n) {
