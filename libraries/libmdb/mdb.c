@@ -3089,6 +3089,7 @@ mdb_put0(MDB_txn *txn, MDB_dbi dbi,
 		mpp.mp_page = &dp->p;
 		txn->mt_dbs[dbi].md_root = mpp.mp_page->mp_pgno;
 		txn->mt_dbs[dbi].md_depth++;
+		txn->mt_dbxs[dbi].md_dirty = 1;
 		ki = 0;
 	}
 	else
@@ -3291,6 +3292,8 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 		txn->mt_dbxs[txn->mt_numdbs].md_dirty = dirty;
 		memcpy(&txn->mt_dbs[txn->mt_numdbs], data.mv_data, sizeof(MDB_db));
 		*dbi = txn->mt_numdbs;
+		txn->mt_env->me_dbs[0][txn->mt_numdbs] = txn->mt_dbs[txn->mt_numdbs];
+		txn->mt_env->me_dbs[1][txn->mt_numdbs] = txn->mt_dbs[txn->mt_numdbs];
 		txn->mt_numdbs++;
 	}
 
