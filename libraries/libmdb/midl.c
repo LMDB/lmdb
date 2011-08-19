@@ -21,11 +21,7 @@
 
 typedef unsigned long pgno_t;
 
-/* Sort the IDLs from highest to lowest */
-#define IDL_CMP(x,y)	 ( (x) > (y) ? -1 : (x) < (y) )
-
-/* Sort the IDL2s from lowest to highest */
-#define IDL2_CMP(x,y)	 ( (x) < (y) ? -1 : (x) > (y) )
+#define CMP(x,y)	 ( (x) > (y) ? -1 : (x) < (y) )
 
 unsigned mdb_midl_search( ID *ids, ID id )
 {
@@ -42,7 +38,7 @@ unsigned mdb_midl_search( ID *ids, ID id )
 	while( 0 < n ) {
 		int pivot = n >> 1;
 		cursor = base + pivot;
-		val = IDL_CMP( id, ids[cursor + 1] );
+		val = CMP( id, ids[cursor + 1] );
 
 		if( val < 0 ) {
 			n = pivot;
@@ -127,7 +123,7 @@ unsigned mdb_midl2_search( MIDL2 *ids, MIDL2 *id )
 	while( 0 < n ) {
 		int pivot = n >> 1;
 		cursor = base + pivot;
-		val = IDL2_CMP( id->mid, ids[cursor + 1].mid );
+		val = CMP( ids[cursor + 1].mid, id->mid );
 
 		if( val < 0 ) {
 			n = pivot;
