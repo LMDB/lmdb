@@ -59,12 +59,15 @@ typedef ULONG		pgno_t;
 #define DEBUG 1
 #endif
 
-#if DEBUG && defined(__GNUC__)
-# define DPRINTF(fmt, ...) \
-	fprintf(stderr, "%s:%d: " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
+#if !(__STDC_VERSION__ >= 199901L || defined(__GNUC__))
+# define DPRINTF	(void)	/* Vararg macros may be unsupported */
+#elif DEBUG
+# define DPRINTF(fmt, ...)	/* Requires 2 or more args */ \
+	fprintf(stderr, "%s:%d: " fmt "\n", __func__, __LINE__, __VA_ARGS__)
 #else
-# define DPRINTF(...)	((void) 0)
+# define DPRINTF(fmt, ...)	((void) 0)
 #endif
+#define DPUTS(arg)	DPRINTF("%s", arg)
 
 #define PAGESIZE	 4096
 #define MDB_MINKEYS	 4
@@ -665,7 +668,7 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 	int rc, toggle;
 
 	if (env->me_flags & MDB_FATAL_ERROR) {
-		DPRINTF("mdb_txn_begin: environment had fatal error, must shutdown!");
+		DPUTS("mdb_txn_begin: environment had fatal error, must shutdown!");
 		return MDB_PANIC;
 	}
 	if ((txn = calloc(1, sizeof(MDB_txn))) == NULL) {
@@ -804,13 +807,13 @@ mdb_txn_commit(MDB_txn *txn)
 	}
 
 	if (txn != env->me_txn) {
-		DPRINTF("attempt to commit unknown transaction");
+		DPUTS("attempt to commit unknown transaction");
 		mdb_txn_abort(txn);
 		return EINVAL;
 	}
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_ERROR)) {
-		DPRINTF("error flag is set, can't commit");
+		DPUTS("error flag is set, can't commit");
 		mdb_txn_abort(txn);
 		return EINVAL;
 	}
@@ -898,7 +901,7 @@ mdb_txn_commit(MDB_txn *txn)
 					if (rc != size) {
 						n = errno;
 						if (rc > 0)
-							DPRINTF("short write, filesystem full?");
+							DPUTS("short write, filesystem full?");
 						else
 							DPRINTF("writev: %s", strerror(errno));
 						mdb_txn_abort(txn);
@@ -931,7 +934,7 @@ mdb_txn_commit(MDB_txn *txn)
 		if (rc != size) {
 			n = errno;
 			if (rc > 0)
-				DPRINTF("short write, filesystem full?");
+				DPUTS("short write, filesystem full?");
 			else
 				DPRINTF("writev: %s", strerror(errno));
 			mdb_txn_abort(txn);
@@ -1011,7 +1014,7 @@ mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 
 	m = METADATA(p);
 	if (m->mm_magic != MDB_MAGIC) {
-		DPRINTF("meta has invalid magic");
+		DPUTS("meta has invalid magic");
 		return EINVAL;
 	}
 
@@ -1033,7 +1036,7 @@ mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 	int rc;
 	unsigned int	 psize;
 
-	DPRINTF("writing new meta page");
+	DPUTS("writing new meta page");
 	psize = sysconf(_SC_PAGE_SIZE);
 
 	meta->mm_magic = MDB_MAGIC;
@@ -1103,7 +1106,7 @@ mdb_env_write_meta(MDB_txn *txn)
 	/* Write to the SYNC fd */
 	rc = pwrite(env->me_mfd, ptr, len, off);
 	if (rc != len) {
-		DPRINTF("write failed, disk error?");
+		DPUTS("write failed, disk error?");
 		/* On a failure, the pagecache still contains the new data.
 		 * Write some old data back, to prevent it from being used.
 		 * Use the non-SYNC fd; we know it will fail anyway.
@@ -1202,7 +1205,7 @@ mdb_env_open2(MDB_env *env, unsigned int flags)
 	if ((i = mdb_env_read_header(env, &meta)) != 0) {
 		if (i != ENOENT)
 			return i;
-		DPRINTF("new mdbenv");
+		DPUTS("new mdbenv");
 		newenv = 1;
 	}
 
@@ -1347,7 +1350,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 
 	} else {
 		if (env->me_txns->mti_magic != MDB_MAGIC) {
-			DPRINTF("lock region has invalid magic");
+			DPUTS("lock region has invalid magic");
 			rc = EINVAL;
 			goto fail;
 		}
@@ -1680,13 +1683,13 @@ mdb_search_page(MDB_txn *txn, MDB_dbi dbi, MDB_val *key,
 	 * committed root page.
 	 */
 	if (F_ISSET(txn->mt_flags, MDB_TXN_ERROR)) {
-		DPRINTF("transaction has failed, must abort");
+		DPUTS("transaction has failed, must abort");
 		return EINVAL;
 	} else
 		root = txn->mt_dbs[dbi].md_root;
 
 	if (root == P_INVALID) {		/* Tree is empty. */
-		DPRINTF("tree is empty");
+		DPUTS("tree is empty");
 		return MDB_NOTFOUND;
 	}
 
@@ -1873,7 +1876,7 @@ mdb_cursor_next(MDB_cursor *cursor, MDB_val *key, MDB_val *data, MDB_cursor_op o
 	DPRINTF("cursor_next: top page is %lu in cursor %p", mp->mp_pgno, (void *) cursor);
 
 	if (top->mp_ki + 1 >= NUMKEYS(mp)) {
-		DPRINTF("=====> move to next sibling page");
+		DPUTS("=====> move to next sibling page");
 		if (mdb_sibling(cursor, 1) != MDB_SUCCESS) {
 			cursor->mc_eof = 1;
 			return MDB_NOTFOUND;
@@ -1932,7 +1935,7 @@ mdb_cursor_prev(MDB_cursor *cursor, MDB_val *key, MDB_val *data, MDB_cursor_op o
 	DPRINTF("cursor_prev: top page is %lu in cursor %p", mp->mp_pgno, (void *) cursor);
 
 	if (top->mp_ki == 0)  {
-		DPRINTF("=====> move to prev sibling page");
+		DPUTS("=====> move to prev sibling page");
 		if (mdb_sibling(cursor, 0) != MDB_SUCCESS) {
 			return MDB_NOTFOUND;
 		}
@@ -1996,7 +1999,7 @@ mdb_cursor_set(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	}
 
 	if (leaf == NULL) {
-		DPRINTF("===> inexact leaf not found, goto sibling");
+		DPUTS("===> inexact leaf not found, goto sibling");
 		if ((rc = mdb_sibling(cursor, 1)) != MDB_SUCCESS)
 			return rc;		/* no entries matched */
 		top = CURSOR_TOP(cursor);
@@ -2701,19 +2704,19 @@ mdb_rebalance(MDB_txn *txn, MDB_dbi dbi, MDB_pageparent *mpp)
 
 	if (mpp->mp_parent == NULL) {
 		if (NUMKEYS(mpp->mp_page) == 0) {
-			DPRINTF("tree is completely empty");
+			DPUTS("tree is completely empty");
 			txn->mt_dbs[dbi].md_root = P_INVALID;
 			txn->mt_dbs[dbi].md_depth--;
 			txn->mt_dbs[dbi].md_leaf_pages--;
 		} else if (IS_BRANCH(mpp->mp_page) && NUMKEYS(mpp->mp_page) == 1) {
-			DPRINTF("collapsing root page!");
+			DPUTS("collapsing root page!");
 			txn->mt_dbs[dbi].md_root = NODEPGNO(NODEPTR(mpp->mp_page, 0));
 			if ((root = mdb_get_page(txn, txn->mt_dbs[dbi].md_root)) == NULL)
 				return MDB_PAGE_NOTFOUND;
 			txn->mt_dbs[dbi].md_depth--;
 			txn->mt_dbs[dbi].md_branch_pages--;
 		} else
-			DPRINTF("root page doesn't need rebalancing");
+			DPUTS("root page doesn't need rebalancing");
 		return MDB_SUCCESS;
 	}
 
@@ -2732,7 +2735,7 @@ mdb_rebalance(MDB_txn *txn, MDB_dbi dbi, MDB_pageparent *mpp)
 	if (mpp->mp_pi == 0) {
 		/* We're the leftmost leaf in our parent.
 		 */
-		DPRINTF("reading right neighbor");
+		DPUTS("reading right neighbor");
 		node = NODEPTR(mpp->mp_parent, mpp->mp_pi + 1);
 		if ((npp.mp_page = mdb_get_page(txn, NODEPGNO(node))) == NULL)
 			return MDB_PAGE_NOTFOUND;
@@ -2742,7 +2745,7 @@ mdb_rebalance(MDB_txn *txn, MDB_dbi dbi, MDB_pageparent *mpp)
 	} else {
 		/* There is at least one neighbor to the left.
 		 */
-		DPRINTF("reading left neighbor");
+		DPUTS("reading left neighbor");
 		node = NODEPTR(mpp->mp_parent, mpp->mp_pi - 1);
 		if ((npp.mp_page = mdb_get_page(txn, NODEPGNO(node))) == NULL)
 			return MDB_PAGE_NOTFOUND;
@@ -3109,7 +3112,7 @@ mdb_put0(MDB_txn *txn, MDB_dbi dbi,
 	} else if (rc == MDB_NOTFOUND) {
 		MDB_dpage *dp;
 		/* new file, just write a root leaf page */
-		DPRINTF("allocating new root leaf page");
+		DPUTS("allocating new root leaf page");
 		if ((dp = mdb_new_page(txn, dbi, P_LEAF, 1)) == NULL) {
 			return ENOMEM;
 		}
