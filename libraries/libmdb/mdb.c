@@ -339,6 +339,7 @@ struct MDB_env {
 	MDB_db		*me_dbs[2];
 	MDB_oldpages *me_pghead;
 	pthread_key_t	me_txkey;	/* thread-key for readers */
+	MDB_dpage	*me_dpages;
 	pgno_t		me_free_pgs[MDB_IDL_UM_SIZE];
 	MIDL2		me_dirty_list[MDB_IDL_DB_SIZE];
 };
@@ -610,8 +611,13 @@ mdb_alloc_page(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num)
 		if (txn->mt_next_pgno + num >= txn->mt_env->me_maxpg)
 			return NULL;
 	}
-	if ((dp = malloc(txn->mt_env->me_psize * num + sizeof(MDB_dhead))) == NULL)
-		return NULL;
+	if (txn->mt_env->me_dpages && num == 1) {
+		dp = txn->mt_env->me_dpages;
+		txn->mt_env->me_dpages = (MDB_dpage *)dp->h.md_parent;
+	} else {
+		if ((dp = malloc(txn->mt_env->me_psize * num + sizeof(MDB_dhead))) == NULL)
+			return NULL;
+	}
 	dp->h.md_num = num;
 	dp->h.md_parent = parent;
 	dp->h.md_pi = parent_idx;
@@ -771,11 +777,20 @@ mdb_txn_abort(MDB_txn *txn)
 		txn->mt_u.reader->mr_txnid = 0;
 	} else {
 		MDB_oldpages *mop;
+		MDB_dpage *dp;
 		unsigned int i;
 
-		/* Discard all dirty pages. */
-		for (i=1; i<=txn->mt_u.dirty_list[0].mid; i++)
-			free(txn->mt_u.dirty_list[i].mptr);
+		/* return all dirty pages to dpage list */
+		for (i=1; i<=txn->mt_u.dirty_list[0].mid; i++) {
+			dp = txn->mt_u.dirty_list[i].mptr;
+			if (dp->h.md_num == 1) {
+				dp->h.md_parent = (MDB_page *)txn->mt_env->me_dpages;
+				txn->mt_env->me_dpages = dp;
+			} else {
+				/* large pages just get freed directly */
+				free(dp);
+			}
+		}
 
 		while ((mop = txn->mt_env->me_pghead)) {
 			txn->mt_env->me_pghead = mop->mo_next;
@@ -953,8 +968,16 @@ mdb_txn_commit(MDB_txn *txn)
 
 	/* Drop the dirty pages.
 	 */
-	for (i=1; i<=txn->mt_u.dirty_list[0].mid; i++)
-		free(txn->mt_u.dirty_list[i].mptr);
+	for (i=1; i<=txn->mt_u.dirty_list[0].mid; i++) {
+		dp = txn->mt_u.dirty_list[i].mptr;
+		if (dp->h.md_num == 1) {
+			dp->h.md_parent = (MDB_page *)txn->mt_env->me_dpages;
+			txn->mt_env->me_dpages = dp;
+		} else {
+			free(dp);
+		}
+		txn->mt_u.dirty_list[i].mid = 0;
+	}
 
 	if ((n = mdb_env_sync(env, 0)) != 0 ||
 	    (n = mdb_env_write_meta(txn)) != MDB_SUCCESS) {
@@ -1450,8 +1473,16 @@ leave:
 void
 mdb_env_close(MDB_env *env)
 {
+	MDB_dpage *dp;
+
 	if (env == NULL)
 		return;
+
+	while (env->me_dpages) {
+		dp = env->me_dpages;
+		env->me_dpages = (MDB_dpage *)dp->h.md_parent;
+		free(dp);
+	}
 
 	free(env->me_dbs[1]);
 	free(env->me_dbs[0]);
