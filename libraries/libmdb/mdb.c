@@ -78,7 +78,7 @@ typedef ULONG		pgno_t;
 #define DPUTS(arg)	DPRINTF("%s", arg)
 
 #define PAGESIZE	 4096
-#define MDB_MINKEYS	 4
+#define MDB_MINKEYS	 2
 #define MDB_MAGIC	 0xBEEFC0DE
 #define MDB_VERSION	 1
 #define MAXKEYSIZE	 511
