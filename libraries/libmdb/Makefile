@@ -24,6 +24,7 @@ mdb_stat: mdb_stat.o libmdb.a
 mtest:    mtest.o    libmdb.a
 mtest2:	mtest2.o libmdb.a
 mtest3:	mtest3.o libmdb.a
+mtest4:	mtest4.o libmdb.a
 
 mdb.o: mdb.c mdb.h midl.h
 	$(CC) $(CFLAGS) -fPIC $(CPPFLAGS) -c mdb.c

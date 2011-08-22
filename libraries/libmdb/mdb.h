@@ -70,9 +70,11 @@ typedef enum MDB_cursor_op {		/* cursor operations */
 	MDB_FIRST,
 	MDB_GET_BOTH,			/* position at key/data */
 	MDB_GET_BOTH_RANGE,		/* position at key, nearest data */
+	MDB_GET_MULTIPLE,		/* only for MDB_DUPFIXED */
 	MDB_LAST,
 	MDB_NEXT,
 	MDB_NEXT_DUP,
+	MDB_NEXT_MULTIPLE,		/* only for MDB_DUPFIXED */
 	MDB_NEXT_NODUP,
 	MDB_PREV,
 	MDB_PREV_DUP,
@@ -95,6 +97,8 @@ typedef enum MDB_cursor_op {		/* cursor operations */
 #define MDB_REVERSEKEY	0x02		/* use reverse string keys */
 #define MDB_DUPSORT		0x04		/* use sorted duplicates */
 #define MDB_INTEGERKEY	0x08		/* numeric keys in native byte order */
+#define MDB_DUPFIXED	0x10		/* sorted dup items have fixed size */
+#define MDB_INTEGERDUP	0x20		/* numeric dups in native byte order */
 
 /* environment flags */
 #define MDB_FIXEDMAP	0x01		/* mmap at a fixed address */
