@@ -135,6 +135,8 @@ int  mdb_env_set_maxdbs(MDB_env *env, int dbs);
 int  mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **txn);
 int  mdb_txn_commit(MDB_txn *txn);
 void mdb_txn_abort(MDB_txn *txn);
+void mdb_txn_reset(MDB_txn *txn);	/* like abort, but doesn't free TXN */
+int  mdb_txn_renew(MDB_txn *txn);	/* like begin, but doesn't alloc TXN */
 
 int  mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi);
 int  mdb_stat(MDB_txn *txn, MDB_dbi dbi, MDB_stat *stat);

@@ -703,24 +703,22 @@ mdb_env_sync(MDB_env *env, int force)
 	return rc;
 }
 
-int
-mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
+static inline void
+mdb_txn_reset0(MDB_txn *txn);
+
+static inline int
+mdb_txn_renew0(MDB_txn *txn)
 {
-	MDB_txn	*txn;
+	MDB_env *env = txn->mt_env;
+
 	int rc, toggle;
 
 	if (env->me_flags & MDB_FATAL_ERROR) {
 		DPUTS("mdb_txn_begin: environment had fatal error, must shutdown!");
 		return MDB_PANIC;
 	}
-	if ((txn = calloc(1, sizeof(MDB_txn))) == NULL) {
-		DPRINTF("calloc: %s", strerror(errno));
-		return ENOMEM;
-	}
 
-	if (rdonly) {
-		txn->mt_flags |= MDB_TXN_RDONLY;
-	} else {
+	if (!(txn->mt_flags & MDB_TXN_RDONLY)) {
 		txn->mt_u.dirty_list = env->me_dirty_list;
 		txn->mt_u.dirty_list[0].mid = 0;
 		txn->mt_free_pgs = env->me_free_pgs;
@@ -731,7 +729,8 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 	}
 
 	txn->mt_txnid = env->me_txns->mti_txnid;
-	if (rdonly) {
+
+	if (txn->mt_flags & MDB_TXN_RDONLY) {
 		MDB_reader *r = pthread_getspecific(env->me_txkey);
 		if (!r) {
 			unsigned int i;
@@ -757,24 +756,21 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 		env->me_txn = txn;
 	}
 
-	txn->mt_env = env;
-
 	toggle = env->me_txns->mti_me_toggle;
 	if ((rc = mdb_env_read_meta(env, &toggle)) != MDB_SUCCESS) {
-		mdb_txn_abort(txn);
+		mdb_txn_reset0(txn);
 		return rc;
 	}
 
 	/* Copy the DB arrays */
 	txn->mt_numdbs = env->me_numdbs;
 	txn->mt_dbxs = env->me_dbxs;	/* mostly static anyway */
-	txn->mt_dbs = malloc(env->me_maxdbs * sizeof(MDB_db));
 	memcpy(txn->mt_dbs, env->me_meta->mm_dbs, 2 * sizeof(MDB_db));
 	if (txn->mt_numdbs > 2)
 		memcpy(txn->mt_dbs+2, env->me_dbs[env->me_db_toggle]+2,
 			(txn->mt_numdbs - 2) * sizeof(MDB_db));
 
-	if (!rdonly) {
+	if (!(txn->mt_flags & MDB_TXN_RDONLY)) {
 		if (toggle)
 			txn->mt_flags |= MDB_TXN_METOGGLE;
 		txn->mt_next_pgno = env->me_meta->mm_last_pg+1;
@@ -783,23 +779,63 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 	DPRINTF("begin transaction %lu on mdbenv %p, root page %lu",
 		txn->mt_txnid, (void *) env, txn->mt_dbs[MAIN_DBI].md_root);
 
-	*ret = txn;
 	return MDB_SUCCESS;
 }
 
-void
-mdb_txn_abort(MDB_txn *txn)
+int
+mdb_txn_renew(MDB_txn *txn)
 {
-	MDB_env	*env;
+	int rc;
 
-	if (txn == NULL)
-		return;
+	if (!txn)
+		return EINVAL;
 
-	env = txn->mt_env;
-	DPRINTF("abort transaction %lu on mdbenv %p, root page %lu",
-		txn->mt_txnid, (void *) env, txn->mt_dbs[MAIN_DBI].md_root);
+	rc = mdb_txn_renew0(txn);
+	if (rc == MDB_SUCCESS) {
+		DPRINTF("reset txn %p %lu%c on mdbenv %p, root page %lu", txn,
+			txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w',
+			(void *)txn->mt_env, txn->mt_dbs[MAIN_DBI].md_root);
+	}
+	return rc;
+}
 
-	free(txn->mt_dbs);
+int
+mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
+{
+	MDB_txn *txn;
+	int rc;
+
+	if (env->me_flags & MDB_FATAL_ERROR) {
+		DPUTS("mdb_txn_begin: environment had fatal error, must shutdown!");
+		return MDB_PANIC;
+	}
+	if ((txn = calloc(1, sizeof(MDB_txn) + env->me_maxdbs * sizeof(MDB_db))) == NULL) {
+		DPRINTF("calloc: %s", strerror(errno));
+		return ENOMEM;
+	}
+	txn->mt_dbs = (MDB_db *)(txn+1);
+	if (rdonly) {
+		txn->mt_flags |= MDB_TXN_RDONLY;
+	}
+	txn->mt_env = env;
+
+	rc = mdb_txn_renew0(txn);
+	if (rc)
+		free(txn);
+	else {
+		*ret = txn;
+		DPRINTF("begin txn %p %lu%c on mdbenv %p, root page %lu", txn,
+			txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w',
+			(void *) env, txn->mt_dbs[MAIN_DBI].md_root);
+	}
+
+	return rc;
+}
+
+static inline void
+mdb_txn_reset0(MDB_txn *txn)
+{
+	MDB_env	*env = txn->mt_env;
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
 		txn->mt_u.reader->mr_txnid = 0;
@@ -831,7 +867,32 @@ mdb_txn_abort(MDB_txn *txn)
 			env->me_dbxs[i].md_dirty = 0;
 		pthread_mutex_unlock(&env->me_txns->mti_wmutex);
 	}
+}
 
+void
+mdb_txn_reset(MDB_txn *txn)
+{
+	if (txn == NULL)
+		return;
+
+	DPRINTF("reset txn %p %lu%c on mdbenv %p, root page %lu", txn,
+		txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w',
+		(void *)txn->mt_env, txn->mt_dbs[MAIN_DBI].md_root);
+
+	mdb_txn_reset0(txn);
+}
+
+void
+mdb_txn_abort(MDB_txn *txn)
+{
+	if (txn == NULL)
+		return;
+
+	DPRINTF("abort txn %p %lu%c on mdbenv %p, root page %lu", txn,
+		txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w',
+		(void *)txn->mt_env, txn->mt_dbs[MAIN_DBI].md_root);
+
+	mdb_txn_reset0(txn);
 	free(txn);
 }
 
@@ -1032,8 +1093,6 @@ done:
 		}
 		env->me_db_toggle = toggle;
 		env->me_numdbs = txn->mt_numdbs;
-
-		free(txn->mt_dbs);
 	}
 
 	pthread_mutex_unlock(&env->me_txns->mti_wmutex);
