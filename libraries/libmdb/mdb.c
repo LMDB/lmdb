@@ -71,7 +71,7 @@ typedef ULONG		pgno_t;
 # define DPRINTF	(void)	/* Vararg macros may be unsupported */
 #elif DEBUG
 # define DPRINTF(fmt, ...)	/* Requires 2 or more args */ \
-	fprintf(stderr, "%s:%d: " fmt "\n", __func__, __LINE__, __VA_ARGS__)
+	fprintf(stderr, "%s:%d:(%p) " fmt "\n", __func__, __LINE__, pthread_self(), __VA_ARGS__)
 #else
 # define DPRINTF(fmt, ...)	((void) 0)
 #endif
@@ -421,7 +421,8 @@ static int		 mdb_cursor_last(MDB_cursor *cursor,
 			    MDB_val *key, MDB_val *data);
 
 static void		mdb_xcursor_init0(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx);
-static void		mdb_xcursor_init1(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx, MDB_node *node);
+static void		mdb_xcursor_init1(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx,
+					MDB_page *mp, MDB_node *node);
 static void		mdb_xcursor_fini(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx);
 
 static size_t		 mdb_leaf_size(MDB_env *env, MDB_val *key,
@@ -1921,7 +1922,7 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 			MDB_xcursor mx;
 
 			mdb_xcursor_init0(txn, dbi, &mx);
-			mdb_xcursor_init1(txn, dbi, &mx, leaf);
+			mdb_xcursor_init1(txn, dbi, &mx, mpp.mp_page, leaf);
 			rc = mdb_search_page(&mx.mx_txn, mx.mx_cursor.mc_dbi, NULL, NULL, 0, &mpp);
 			if (rc != MDB_SUCCESS)
 				return rc;
@@ -2049,7 +2050,7 @@ mdb_cursor_next(MDB_cursor *cursor, MDB_val *key, MDB_val *data, MDB_cursor_op o
 	leaf = NODEPTR(mp, top->mp_ki);
 
 	if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
-		mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, leaf);
+		mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, mp, leaf);
 	}
 	if (data) {
 		if ((rc = mdb_read_data(cursor->mc_txn, leaf, data) != MDB_SUCCESS))
@@ -2124,7 +2125,7 @@ mdb_cursor_prev(MDB_cursor *cursor, MDB_val *key, MDB_val *data, MDB_cursor_op o
 	leaf = NODEPTR(mp, top->mp_ki);
 
 	if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
-		mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, leaf);
+		mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, mp, leaf);
 	}
 	if (data) {
 		if ((rc = mdb_read_data(cursor->mc_txn, leaf, data) != MDB_SUCCESS))
@@ -2214,7 +2215,7 @@ set2:
 	}
 
 	if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
-		mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, leaf);
+		mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, mpp.mp_page, leaf);
 	}
 	if (data) {
 		if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
@@ -2281,7 +2282,7 @@ mdb_cursor_first(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 
 	if (data) {
 		if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
-			mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, leaf);
+			mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, mpp.mp_page, leaf);
 			rc = mdb_cursor_first(&cursor->mc_xcursor->mx_cursor, data, NULL);
 			if (rc)
 				return rc;
@@ -2330,7 +2331,7 @@ mdb_cursor_last(MDB_cursor *cursor, MDB_val *key, MDB_val *data)
 
 	if (data) {
 		if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
-			mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, leaf);
+			mdb_xcursor_init1(cursor->mc_txn, cursor->mc_dbi, cursor->mc_xcursor, mpp.mp_page, leaf);
 			rc = mdb_cursor_last(&cursor->mc_xcursor->mx_cursor, data, NULL);
 			if (rc)
 				return rc;
@@ -2677,7 +2678,7 @@ mdb_xcursor_init0(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx)
 }
 
 static void
-mdb_xcursor_init1(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx, MDB_node *node)
+mdb_xcursor_init1(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx, MDB_page *mp, MDB_node *node)
 {
 	MDB_db *db = NODEDATA(node);
 	MDB_dbi dbn;
@@ -2691,6 +2692,8 @@ mdb_xcursor_init1(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx, MDB_node *node)
 	}
 	DPRINTF("Sub-db %u for db %u root page %lu", dbn, dbi, db->md_root);
 	mx->mx_dbs[dbn] = *db;
+	if (F_ISSET(mp->mp_flags, P_DIRTY))
+		mx->mx_dbxs[dbn].md_dirty = 1;
 	mx->mx_dbxs[dbn].md_name.mv_data = NODEKEY(node);
 	mx->mx_dbxs[dbn].md_name.mv_size = node->mn_ksize;
 	mx->mx_txn.mt_next_pgno = txn->mt_next_pgno;
@@ -3150,12 +3153,10 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 		MDB_pageparent mp2;
 
 		mdb_xcursor_init0(txn, dbi, &mx);
-		mdb_xcursor_init1(txn, dbi, &mx, leaf);
+		mdb_xcursor_init1(txn, dbi, &mx, mpp.mp_page, leaf);
 		if (flags == MDB_DEL_DUP) {
 			rc = mdb_del(&mx.mx_txn, mx.mx_cursor.mc_dbi, data, NULL, 0);
 			mdb_xcursor_fini(txn, dbi, &mx);
-			if (rc != MDB_SUCCESS)
-				return rc;
 			/* If sub-DB still has entries, we're done */
 			if (mx.mx_txn.mt_dbs[mx.mx_cursor.mc_dbi].md_root != P_INVALID) {
 				memcpy(NODEDATA(leaf), &mx.mx_txn.mt_dbs[mx.mx_cursor.mc_dbi],
@@ -3535,7 +3536,7 @@ new_sub:
 			leaf = NODEPTR(mpp.mp_page, ki);
 put_sub:
 			mdb_xcursor_init0(txn, dbi, &mx);
-			mdb_xcursor_init1(txn, dbi, &mx, leaf);
+			mdb_xcursor_init1(txn, dbi, &mx, mpp.mp_page, leaf);
 			xdata.mv_size = 0;
 			xdata.mv_data = "";
 			if (flags == MDB_NODUPDATA)
