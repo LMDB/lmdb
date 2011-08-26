@@ -553,7 +553,7 @@ mdb_alloc_page(MDB_txn *txn, MDB_page *parent, unsigned int parent_idx, int num)
 
 	if (txn->mt_txnid > 2) {
 
-	oldest = txn->mt_txnid - 2;
+	oldest = txn->mt_txnid - 1;
 	if (!txn->mt_env->me_pghead && txn->mt_dbs[FREE_DBI].md_root != P_INVALID) {
 		/* See if there's anything in the free DB */
 		MDB_pageparent mpp;
@@ -1083,16 +1083,12 @@ done:
 	{
 		int toggle = !env->me_db_toggle;
 
-		for (i = 2; i < env->me_numdbs; i++) {
-			if (txn->mt_dbxs[i].md_dirty) {
-				env->me_dbs[toggle][i] = txn->mt_dbs[i];
-				txn->mt_dbxs[i].md_dirty = 0;
-			}
-		}
-		for (i = env->me_numdbs; i < txn->mt_numdbs; i++) {
-			txn->mt_dbxs[i].md_dirty = 0;
-			env->me_dbxs[i] = txn->mt_dbxs[i];
+		for (i = 2; i < txn->mt_numdbs; i++)
 			env->me_dbs[toggle][i] = txn->mt_dbs[i];
+
+		for (i = 2; i < txn->mt_numdbs; i++) {
+			if (txn->mt_dbxs[i].md_dirty)
+				txn->mt_dbxs[i].md_dirty = 0;
 		}
 		env->me_db_toggle = toggle;
 		env->me_numdbs = txn->mt_numdbs;
