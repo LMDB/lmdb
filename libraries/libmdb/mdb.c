@@ -3469,7 +3469,8 @@ mdb_put0(MDB_txn *txn, MDB_dbi dbi,
 				goto put_sub;
 			}
 			/* same size, just replace it */
-			if (NODEDSZ(leaf) == data->mv_size) {
+			if (!F_ISSET(leaf->mn_flags, F_BIGDATA) &&
+				NODEDSZ(leaf) == data->mv_size) {
 				memcpy(NODEDATA(leaf), data->mv_data, data->mv_size);
 				goto done;
 			}
