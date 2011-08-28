@@ -3216,7 +3216,7 @@ mdb_split(MDB_txn *txn, MDB_dbi dbi, MDB_page **mpp, unsigned int *newindxp,
 	unsigned int	 i, j, split_indx, nkeys, pmax;
 	MDB_node	*node;
 	MDB_val	 sepkey, rkey, rdata;
-	MDB_page	*copy;
+	MDB_page	*copy, *cptr;
 	MDB_dpage	*mdp, *rdp, *pdp;
 	MDB_dhead *dh;
 	DKBUF;
@@ -3301,13 +3301,6 @@ mdb_split(MDB_txn *txn, MDB_dbi dbi, MDB_page **mpp, unsigned int *newindxp,
 		goto newsep;
 	}
 
-	/* Move half of the keys to the right sibling. */
-	if ((copy = malloc(txn->mt_env->me_psize)) == NULL)
-		return ENOMEM;
-	memcpy(copy, &mdp->p, txn->mt_env->me_psize);
-	memset(&mdp->p.mp_ptrs, 0, txn->mt_env->me_psize - PAGEHDRSZ);
-	mdp->p.mp_lower = PAGEHDRSZ;
-	mdp->p.mp_upper = txn->mt_env->me_psize;
 	/* For leaf pages, check the split point based on what
 	 * fits where, since otherwise add_node can fail.
 	 */
@@ -3356,7 +3349,7 @@ split2:
 		sepkey.mv_size = newkey->mv_size;
 		sepkey.mv_data = newkey->mv_data;
 	} else {
-		node = NODEPTR(copy, split_indx);
+		node = NODEPTR(&mdp->p, split_indx);
 		sepkey.mv_size = node->mn_ksize;
 		sepkey.mv_data = NODEKEY(node);
 	}
@@ -3386,20 +3379,24 @@ newsep:
 		return rc;
 	}
 	if (rc != MDB_SUCCESS) {
-		free(copy);
 		return rc;
 	}
 
-	for (i = j = 0; i <= NUMKEYS(copy); j++) {
-		if (i < split_indx) {
-			/* Re-insert in left sibling. */
-			pdp = mdp;
-		} else {
-			/* Insert in right sibling. */
-			if (i == split_indx)
-				/* Reset insert index for right sibling. */
-				j = (i == newindx && ins_new);
-			pdp = rdp;
+	/* Move half of the keys to the right sibling. */
+	if ((copy = malloc(txn->mt_env->me_psize)) == NULL)
+		return ENOMEM;
+
+	copy->mp_pgno  = mdp->p.mp_pgno;
+	copy->mp_flags = mdp->p.mp_flags;
+	copy->mp_lower = PAGEHDRSZ;
+	copy->mp_upper = txn->mt_env->me_psize;
+	cptr = copy;
+	for (i = j = 0; i <= nkeys; j++) {
+		if (i == split_indx) {
+		/* Insert in right sibling. */
+		/* Reset insert index for right sibling. */
+			j = (i == newindx && ins_new);
+			cptr = &rdp->p;
 		}
 
 		if (i == newindx && !ins_new) {
@@ -3417,11 +3414,12 @@ newsep:
 
 			/* Update page and index for the new key. */
 			*newindxp = j;
-			*mpp = &pdp->p;
-		} else if (i == NUMKEYS(copy)) {
+			if (cptr == &rdp->p)
+				*mpp = cptr;
+		} else if (i == nkeys) {
 			break;
 		} else {
-			node = NODEPTR(copy, i);
+			node = NODEPTR(&mdp->p, i);
 			rkey.mv_data = NODEKEY(node);
 			rkey.mv_size = node->mn_ksize;
 			if (IS_LEAF(&mdp->p)) {
@@ -3439,8 +3437,15 @@ newsep:
 			rkey.mv_size = 0;
 		}
 
-		rc = mdb_add_node(txn, dbi, &pdp->p, j, &rkey, &rdata, pgno,flags);
+		rc = mdb_add_node(txn, dbi, cptr, j, &rkey, &rdata, pgno, flags);
 	}
+	nkeys = NUMKEYS(copy);
+	for (i=0; i<nkeys; i++)
+		mdp->p.mp_ptrs[i] = copy->mp_ptrs[i];
+	mdp->p.mp_lower = copy->mp_lower;
+	mdp->p.mp_upper = copy->mp_upper;
+	memcpy(NODEPTR(&mdp->p, nkeys-1), NODEPTR(copy, nkeys-1),
+		txn->mt_env->me_psize - copy->mp_upper);
 
 	free(copy);
 	return rc;
