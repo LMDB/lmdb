@@ -91,6 +91,32 @@ typedef ULONG		pgno_t;
 #define DKEY(x)
 #endif
 
+/* The DB view is always consistent because all writes are wrapped in
+ * the wmutex. Finer-grained locks aren't necessary.
+ */
+#ifndef	LAZY_LOCKS
+#define	LAZY_LOCKS	1
+#endif
+#if	LAZY_LOCKS
+#define	LAZY_MUTEX_LOCK(x)
+#define	LAZY_MUTEX_UNLOCK(x)
+#define	LAZY_RWLOCK_UNLOCK(x)
+#define	LAZY_RWLOCK_WRLOCK(x)
+#define	LAZY_RWLOCK_RDLOCK(x)
+#define	LAZY_RWLOCK_DEF(x)
+#define	LAZY_RWLOCK_INIT(x,y)
+#define	LAZY_RWLOCK_DESTROY(x)
+#else
+#define	LAZY_MUTEX_LOCK(x)		pthread_mutex_lock(x)
+#define	LAZY_MUTEX_UNLOCK(x)	pthread_mutex_unlock(x)
+#define	LAZY_RWLOCK_UNLOCK(x)	pthread_rwlock_unlock(x)
+#define	LAZY_RWLOCK_WRLOCK(x)	pthread_rwlock_wrlock(x)
+#define	LAZY_RWLOCK_RDLOCK(x)	pthread_rwlock_rdlock(x)
+#define	LAZY_RWLOCK_DEF(x)		pthread_rwlock_t	x
+#define	LAZY_RWLOCK_INIT(x,y)	pthread_rwlock_init(x,y)
+#define	LAZY_RWLOCK_DESTROY(x)	pthread_rwlock_destroy(x)
+#endif
+
 #define P_INVALID	 (~0UL)
 
 #define F_ISSET(w, f)	 (((w) & (f)) == (f))
@@ -308,8 +334,8 @@ struct MDB_txn {
 
 #define MDB_TXN_RDONLY		0x01		/* read-only transaction */
 #define MDB_TXN_ERROR		0x02		/* an error has occurred */
-#define MDB_TXN_METOGGLE	0x04		/* used meta page 1 */
 	unsigned int	mt_flags;
+	unsigned int	mt_toggle;
 };
 
 /* Context for sorted-dup records */
@@ -334,7 +360,6 @@ struct MDB_env {
 	char		*me_map;
 	MDB_txninfo	*me_txns;
 	MDB_meta	*me_metas[2];
-	MDB_meta	*me_meta;
 	MDB_txn		*me_txn;		/* current write transaction */
 	size_t		me_mapsize;
 	off_t		me_size;		/* current file size */
@@ -348,6 +373,7 @@ struct MDB_env {
 	MDB_dpage	*me_dpages;
 	pgno_t		me_free_pgs[MDB_IDL_UM_SIZE];
 	MIDL2		me_dirty_list[MDB_IDL_DB_SIZE];
+	LAZY_RWLOCK_DEF(me_dblock);
 };
 
 #define NODESIZE	 offsetof(MDB_node, mn_data)
@@ -714,8 +740,6 @@ mdb_txn_renew0(MDB_txn *txn)
 {
 	MDB_env *env = txn->mt_env;
 
-	int rc, toggle;
-
 	if (env->me_flags & MDB_FATAL_ERROR) {
 		DPUTS("mdb_txn_begin: environment had fatal error, must shutdown!");
 		return MDB_PANIC;
@@ -725,6 +749,9 @@ mdb_txn_renew0(MDB_txn *txn)
 		MDB_reader *r = pthread_getspecific(env->me_txkey);
 		if (!r) {
 			unsigned int i;
+			pid_t pid = getpid();
+			pthread_t tid = pthread_self();
+
 			pthread_mutex_lock(&env->me_txns->mti_mutex);
 			for (i=0; i<env->me_txns->mti_numreaders; i++)
 				if (env->me_txns->mti_readers[i].mr_pid == 0)
@@ -733,47 +760,40 @@ mdb_txn_renew0(MDB_txn *txn)
 				pthread_mutex_unlock(&env->me_txns->mti_mutex);
 				return ENOSPC;
 			}
-			env->me_txns->mti_readers[i].mr_pid = getpid();
-			env->me_txns->mti_readers[i].mr_tid = pthread_self();
-			r = &env->me_txns->mti_readers[i];
-			pthread_setspecific(env->me_txkey, r);
+			env->me_txns->mti_readers[i].mr_pid = pid;
+			env->me_txns->mti_readers[i].mr_tid = tid;
 			if (i >= env->me_txns->mti_numreaders)
 				env->me_txns->mti_numreaders = i+1;
 			pthread_mutex_unlock(&env->me_txns->mti_mutex);
+			r = &env->me_txns->mti_readers[i];
+			pthread_setspecific(env->me_txkey, r);
 		}
 		txn->mt_txnid = env->me_txns->mti_txnid;
+		txn->mt_toggle = env->me_txns->mti_me_toggle;
 		r->mr_txnid = txn->mt_txnid;
 		txn->mt_u.reader = r;
 	} else {
 		pthread_mutex_lock(&env->me_txns->mti_wmutex);
 
 		txn->mt_txnid = env->me_txns->mti_txnid+1;
+		txn->mt_toggle = env->me_txns->mti_me_toggle;
 		txn->mt_u.dirty_list = env->me_dirty_list;
 		txn->mt_u.dirty_list[0].mid = 0;
 		txn->mt_free_pgs = env->me_free_pgs;
 		txn->mt_free_pgs[0] = 0;
+		txn->mt_next_pgno = env->me_metas[txn->mt_toggle]->mm_last_pg+1;
 		env->me_txn = txn;
 	}
 
-	toggle = env->me_txns->mti_me_toggle;
-	if ((rc = mdb_env_read_meta(env, &toggle)) != MDB_SUCCESS) {
-		mdb_txn_reset0(txn);
-		return rc;
-	}
-
 	/* Copy the DB arrays */
+	LAZY_RWLOCK_RDLOCK(&env->me_dblock);
 	txn->mt_numdbs = env->me_numdbs;
 	txn->mt_dbxs = env->me_dbxs;	/* mostly static anyway */
-	memcpy(txn->mt_dbs, env->me_meta->mm_dbs, 2 * sizeof(MDB_db));
+	memcpy(txn->mt_dbs, env->me_metas[txn->mt_toggle]->mm_dbs, 2 * sizeof(MDB_db));
 	if (txn->mt_numdbs > 2)
 		memcpy(txn->mt_dbs+2, env->me_dbs[env->me_db_toggle]+2,
 			(txn->mt_numdbs - 2) * sizeof(MDB_db));
-
-	if (!(txn->mt_flags & MDB_TXN_RDONLY)) {
-		if (toggle)
-			txn->mt_flags |= MDB_TXN_METOGGLE;
-		txn->mt_next_pgno = env->me_meta->mm_last_pg+1;
-	}
+	LAZY_RWLOCK_UNLOCK(&env->me_dblock);
 
 	DPRINTF("begin txn %p %lu%c on mdbenv %p, root page %lu", txn,
 		txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w',
@@ -1075,16 +1095,21 @@ mdb_txn_commit(MDB_txn *txn)
 		return n;
 	}
 
-	env->me_txns->mti_txnid = txn->mt_txnid;
-
 done:
 	env->me_txn = NULL;
 	/* update the DB tables */
 	{
 		int toggle = !env->me_db_toggle;
+		MDB_db *ip, *jp;
 
-		for (i = 2; i < txn->mt_numdbs; i++)
-			env->me_dbs[toggle][i] = txn->mt_dbs[i];
+		ip = &env->me_dbs[toggle][2];
+		jp = &txn->mt_dbs[2];
+		LAZY_RWLOCK_WRLOCK(&env->me_dblock);
+		for (i = 2; i < txn->mt_numdbs; i++) {
+			if (ip->md_root != jp->md_root)
+				*ip = *jp;
+			ip++; jp++;
+		}
 
 		for (i = 2; i < txn->mt_numdbs; i++) {
 			if (txn->mt_dbxs[i].md_dirty)
@@ -1092,6 +1117,7 @@ done:
 		}
 		env->me_db_toggle = toggle;
 		env->me_numdbs = txn->mt_numdbs;
+		LAZY_RWLOCK_UNLOCK(&env->me_dblock);
 	}
 
 	pthread_mutex_unlock(&env->me_txns->mti_wmutex);
@@ -1197,7 +1223,7 @@ mdb_env_write_meta(MDB_txn *txn)
 	assert(txn != NULL);
 	assert(txn->mt_env != NULL);
 
-	toggle = !F_ISSET(txn->mt_flags, MDB_TXN_METOGGLE);
+	toggle = !txn->mt_toggle;
 	DPRINTF("writing meta page %d for root page %lu",
 		toggle, txn->mt_dbs[MAIN_DBI].md_root);
 
@@ -1236,7 +1262,16 @@ mdb_env_write_meta(MDB_txn *txn)
 		env->me_flags |= MDB_FATAL_ERROR;
 		return rc;
 	}
+	/* Memory ordering issues are irrelevant; since the entire writer
+	 * is wrapped by wmutex, all of these changes will become visible
+	 * after the wmutex is unlocked. Since the DB is multi-version,
+	 * readers will get consistent data regardless of how fresh or
+	 * how stale their view of these values is.
+	 */
+	LAZY_MUTEX_LOCK(&env->me_txns->mti_mutex);
 	txn->mt_env->me_txns->mti_me_toggle = toggle;
+	txn->mt_env->me_txns->mti_txnid = txn->mt_txnid;
+	LAZY_MUTEX_UNLOCK(&env->me_txns->mti_mutex);
 
 	return MDB_SUCCESS;
 }
@@ -1248,15 +1283,11 @@ mdb_env_read_meta(MDB_env *env, int *which)
 
 	assert(env != NULL);
 
-	if (which)
-		toggle = *which;
-	else if (env->me_metas[0]->mm_txnid < env->me_metas[1]->mm_txnid)
+	if (env->me_metas[0]->mm_txnid < env->me_metas[1]->mm_txnid)
 		toggle = 1;
 
-	if (env->me_meta != env->me_metas[toggle])
-		env->me_meta = env->me_metas[toggle];
-
 	DPRINTF("Using meta page %d", toggle);
+	*which = toggle;
 
 	return MDB_SUCCESS;
 }
@@ -1313,7 +1344,7 @@ mdb_env_get_maxreaders(MDB_env *env, int *readers)
 static int
 mdb_env_open2(MDB_env *env, unsigned int flags)
 {
-	int i, newenv = 0;
+	int i, newenv = 0, toggle;
 	MDB_meta meta;
 	MDB_page *p;
 
@@ -1358,17 +1389,17 @@ mdb_env_open2(MDB_env *env, unsigned int flags)
 	env->me_metas[0] = METADATA(p);
 	env->me_metas[1] = (MDB_meta *)((char *)env->me_metas[0] + meta.mm_psize);
 
-	if ((i = mdb_env_read_meta(env, NULL)) != 0)
+	if ((i = mdb_env_read_meta(env, &toggle)) != 0)
 		return i;
 
 	DPRINTF("opened database version %u, pagesize %u",
-	    env->me_meta->mm_version, env->me_psize);
-	DPRINTF("depth: %u", env->me_meta->mm_dbs[MAIN_DBI].md_depth);
-	DPRINTF("entries: %lu", env->me_meta->mm_dbs[MAIN_DBI].md_entries);
-	DPRINTF("branch pages: %lu", env->me_meta->mm_dbs[MAIN_DBI].md_branch_pages);
-	DPRINTF("leaf pages: %lu", env->me_meta->mm_dbs[MAIN_DBI].md_leaf_pages);
-	DPRINTF("overflow pages: %lu", env->me_meta->mm_dbs[MAIN_DBI].md_overflow_pages);
-	DPRINTF("root: %lu", env->me_meta->mm_dbs[MAIN_DBI].md_root);
+	    env->me_metas[toggle]->mm_version, env->me_psize);
+	DPRINTF("depth: %u", env->me_metas[toggle]->mm_dbs[MAIN_DBI].md_depth);
+	DPRINTF("entries: %lu", env->me_metas[toggle]->mm_dbs[MAIN_DBI].md_entries);
+	DPRINTF("branch pages: %lu", env->me_metas[toggle]->mm_dbs[MAIN_DBI].md_branch_pages);
+	DPRINTF("leaf pages: %lu", env->me_metas[toggle]->mm_dbs[MAIN_DBI].md_leaf_pages);
+	DPRINTF("overflow pages: %lu", env->me_metas[toggle]->mm_dbs[MAIN_DBI].md_overflow_pages);
+	DPRINTF("root: %lu", env->me_metas[toggle]->mm_dbs[MAIN_DBI].md_root);
 
 	return MDB_SUCCESS;
 }
@@ -1388,10 +1419,12 @@ static void
 mdb_env_share_locks(MDB_env *env)
 {
 	struct flock lock_info;
+	int toggle = 0;
 
-	env->me_txns->mti_txnid = env->me_meta->mm_txnid;
 	if (env->me_metas[0]->mm_txnid < env->me_metas[1]->mm_txnid)
-		env->me_txns->mti_me_toggle = 1;
+		toggle = 1;
+	env->me_txns->mti_me_toggle = toggle;
+	env->me_txns->mti_txnid = env->me_metas[toggle]->mm_txnid;
 
 	memset((void *)&lock_info, 0, sizeof(lock_info));
 	lock_info.l_type = F_RDLCK;
@@ -1535,6 +1568,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 		env->me_path = strdup(path);
 		DPRINTF("opened dbenv %p", (void *) env);
 		pthread_key_create(&env->me_txkey, mdb_env_reader_dest);
+		LAZY_RWLOCK_INIT(&env->me_dblock, NULL);
 		if (excl)
 			mdb_env_share_locks(env);
 		env->me_dbxs = calloc(env->me_maxdbs, sizeof(MDB_dbx));
@@ -1577,6 +1611,7 @@ mdb_env_close(MDB_env *env)
 	free(env->me_dbxs);
 	free(env->me_path);
 
+	LAZY_RWLOCK_DESTROY(&env->me_dblock);
 	pthread_key_delete(env->me_txkey);
 
 	if (env->me_map) {
@@ -1587,7 +1622,7 @@ mdb_env_close(MDB_env *env)
 	if (env->me_txns) {
 		pid_t pid = getpid();
 		size_t size = (env->me_maxreaders-1) * sizeof(MDB_reader) + sizeof(MDB_txninfo);
-		int i;
+		unsigned int i;
 		for (i=0; i<env->me_txns->mti_numreaders; i++)
 			if (env->me_txns->mti_readers[i].mr_pid == pid)
 				env->me_txns->mti_readers[i].mr_pid = 0;
@@ -1718,7 +1753,7 @@ mdb_get_page(MDB_txn *txn, pgno_t pgno, MDB_page **ret)
 		}
 	}
 	if (!p) {
-		if (pgno <= txn->mt_env->me_meta->mm_last_pg)
+		if (pgno <= txn->mt_env->me_metas[txn->mt_toggle]->mm_last_pg)
 			p = (MDB_page *)(txn->mt_env->me_map + txn->mt_env->me_psize * pgno);
 	}
 	*ret = p;
@@ -3674,10 +3709,14 @@ mdb_stat0(MDB_env *env, MDB_db *db, MDB_stat *arg)
 int
 mdb_env_stat(MDB_env *env, MDB_stat *arg)
 {
+	int toggle;
+
 	if (env == NULL || arg == NULL)
 		return EINVAL;
 
-	return mdb_stat0(env, &env->me_meta->mm_dbs[MAIN_DBI], arg);
+	mdb_env_read_meta(env, &toggle);
+
+	return mdb_stat0(env, &env->me_metas[toggle]->mm_dbs[MAIN_DBI], arg);
 }
 
 int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
