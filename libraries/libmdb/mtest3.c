@@ -91,7 +91,7 @@ int main(int argc,char * argv[])
 		key.mv_data = kval;
 		data.mv_size = sizeof(sval);
 		data.mv_data = sval;
-		rc = mdb_del(txn, dbi, &key, &data, MDB_DEL_DUP);
+		rc = mdb_del(txn, dbi, &key, &data);
 		if (rc) {
 			j--;
 			mdb_txn_abort(txn);

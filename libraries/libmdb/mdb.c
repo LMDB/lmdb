@@ -1,4 +1,9 @@
-/* mdb.c - memory-mapped database library */
+/** @file mdb.c
+ *	@brief memory-mapped database library
+ *
+ *	A Btree-based database management library modeled loosely on the
+ *	BerkeleyDB API, but much simplified.
+ */
 /*
  * Copyright 2011 Howard Chu, Symas Corp.
  * All rights reserved.
@@ -64,7 +69,7 @@ typedef ULONG		pgno_t;
 #endif
 
 #ifndef DEBUG
-#define DEBUG 1
+#define DEBUG 0
 #endif
 
 #if !(__STDC_VERSION__ >= 199901L || defined(__GNUC__))
@@ -495,9 +500,9 @@ memnrcmp(const void *s1, size_t n1, const void *s2, size_t n2)
 char *
 mdb_version(int *maj, int *min, int *pat)
 {
-	*maj = MDB_VERSION_MAJOR;
-	*min = MDB_VERSION_MINOR;
-	*pat = MDB_VERSION_PATCH;
+	if (maj) *maj = MDB_VERSION_MAJOR;
+	if (min) *min = MDB_VERSION_MINOR;
+	if (pat) *pat = MDB_VERSION_PATCH;
 	return MDB_VERSION_STRING;
 }
 
@@ -522,6 +527,7 @@ mdb_strerror(int err)
 	return strerror(err);
 }
 
+#if DEBUG
 static char *
 mdb_dkey(MDB_val *key, char *buf)
 {
@@ -534,6 +540,7 @@ mdb_dkey(MDB_val *key, char *buf)
 		ptr += sprintf(ptr, "%02x", *c++);
 	return buf;
 }
+#endif
 
 int
 mdb_cmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b)
@@ -750,7 +757,7 @@ mdb_txn_renew0(MDB_txn *txn)
 					break;
 			if (i == env->me_maxreaders) {
 				pthread_mutex_unlock(&env->me_txns->mti_mutex);
-				return ENOSPC;
+				return ENOMEM;
 			}
 			env->me_txns->mti_readers[i].mr_pid = pid;
 			env->me_txns->mti_readers[i].mr_tid = tid;
@@ -813,7 +820,7 @@ mdb_txn_renew(MDB_txn *txn)
 }
 
 int
-mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
+mdb_txn_begin(MDB_env *env, unsigned int flags, MDB_txn **ret)
 {
 	MDB_txn *txn;
 	int rc;
@@ -827,7 +834,7 @@ mdb_txn_begin(MDB_env *env, int rdonly, MDB_txn **ret)
 		return ENOMEM;
 	}
 	txn->mt_dbs = (MDB_db *)(txn+1);
-	if (rdonly) {
+	if (flags & MDB_RDONLY) {
 		txn->mt_flags |= MDB_TXN_RDONLY;
 	}
 	txn->mt_env = env;
@@ -1335,6 +1342,8 @@ mdb_env_set_mapsize(MDB_env *env, size_t size)
 int
 mdb_env_set_maxdbs(MDB_env *env, int dbs)
 {
+	if (env->me_map)
+		return EINVAL;
 	env->me_maxdbs = dbs;
 	return MDB_SUCCESS;
 }
@@ -1342,6 +1351,8 @@ mdb_env_set_maxdbs(MDB_env *env, int dbs)
 int
 mdb_env_set_maxreaders(MDB_env *env, int readers)
 {
+	if (env->me_map)
+		return EINVAL;
 	env->me_maxreaders = readers;
 	return MDB_SUCCESS;
 }
@@ -1883,7 +1894,7 @@ mdb_search_page(MDB_txn *txn, MDB_dbi dbi, MDB_val *key,
 		return MDB_NOTFOUND;
 	}
 
-	if (rc = mdb_get_page(txn, root, &mpp->mp_page))
+	if ((rc = mdb_get_page(txn, root, &mpp->mp_page)))
 		return rc;
 
 	DPRINTF("db %u root page %lu has flags 0x%X",
@@ -1928,7 +1939,7 @@ mdb_read_data(MDB_txn *txn, MDB_node *leaf, MDB_val *data)
 	 */
 	data->mv_size = leaf->mn_dsize;
 	memcpy(&pgno, NODEDATA(leaf), sizeof(pgno));
-	if (rc = mdb_get_page(txn, pgno, &omp)) {
+	if ((rc = mdb_get_page(txn, pgno, &omp))) {
 		DPRINTF("read overflow page %lu failed", pgno);
 		return rc;
 	}
@@ -2024,7 +2035,7 @@ mdb_sibling(MDB_cursor *cursor, int move_right)
 	assert(IS_BRANCH(parent->mp_page));
 
 	indx = NODEPTR(parent->mp_page, parent->mp_ki);
-	if (rc = mdb_get_page(cursor->mc_txn, NODEPGNO(indx), &mp))
+	if ((rc = mdb_get_page(cursor->mc_txn, NODEPGNO(indx), &mp)))
 		return rc;;
 #if 0
 	mp->parent = parent->mp_page;
@@ -3066,7 +3077,7 @@ mdb_rebalance(MDB_txn *txn, MDB_dbi dbi, MDB_pageparent *mpp)
 		} else if (IS_BRANCH(mpp->mp_page) && NUMKEYS(mpp->mp_page) == 1) {
 			DPUTS("collapsing root page!");
 			txn->mt_dbs[dbi].md_root = NODEPGNO(NODEPTR(mpp->mp_page, 0));
-			if (rc = mdb_get_page(txn, txn->mt_dbs[dbi].md_root, &root))
+			if ((rc = mdb_get_page(txn, txn->mt_dbs[dbi].md_root, &root)))
 				return rc;
 			txn->mt_dbs[dbi].md_depth--;
 			txn->mt_dbs[dbi].md_branch_pages--;
@@ -3092,7 +3103,7 @@ mdb_rebalance(MDB_txn *txn, MDB_dbi dbi, MDB_pageparent *mpp)
 		 */
 		DPUTS("reading right neighbor");
 		node = NODEPTR(mpp->mp_parent, mpp->mp_pi + 1);
-		if (rc = mdb_get_page(txn, NODEPGNO(node), &npp.mp_page))
+		if ((rc = mdb_get_page(txn, NODEPGNO(node), &npp.mp_page)))
 			return rc;
 		npp.mp_pi = mpp->mp_pi + 1;
 		si = 0;
@@ -3102,7 +3113,7 @@ mdb_rebalance(MDB_txn *txn, MDB_dbi dbi, MDB_pageparent *mpp)
 		 */
 		DPUTS("reading left neighbor");
 		node = NODEPTR(mpp->mp_parent, mpp->mp_pi - 1);
-		if (rc = mdb_get_page(txn, NODEPGNO(node), &npp.mp_page))
+		if ((rc = mdb_get_page(txn, NODEPGNO(node), &npp.mp_page)))
 			return rc;
 		npp.mp_pi = mpp->mp_pi - 1;
 		si = NUMKEYS(npp.mp_page) - 1;
@@ -3157,8 +3168,7 @@ mdb_del0(MDB_txn *txn, MDB_dbi dbi, unsigned int ki, MDB_pageparent *mpp, MDB_no
 
 int
 mdb_del(MDB_txn *txn, MDB_dbi dbi,
-    MDB_val *key, MDB_val *data,
-	unsigned int flags)
+    MDB_val *key, MDB_val *data)
 {
 	int		 rc, exact;
 	unsigned int	 ki;
@@ -3174,7 +3184,7 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 		return EINVAL;
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
-		return EINVAL;
+		return EACCES;
 	}
 
 	if (key->mv_size == 0 || key->mv_size > MAXKEYSIZE) {
@@ -3197,8 +3207,8 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 
 		mdb_xcursor_init0(txn, dbi, &mx);
 		mdb_xcursor_init1(txn, dbi, &mx, mpp.mp_page, leaf);
-		if (flags == MDB_DEL_DUP) {
-			rc = mdb_del(&mx.mx_txn, mx.mx_cursor.mc_dbi, data, NULL, 0);
+		if (data) {
+			rc = mdb_del(&mx.mx_txn, mx.mx_cursor.mc_dbi, data, NULL);
 			mdb_xcursor_fini(txn, dbi, &mx);
 			/* If sub-DB still has entries, we're done */
 			if (mx.mx_txn.mt_dbs[mx.mx_cursor.mc_dbi].md_root != P_INVALID) {
@@ -3240,9 +3250,6 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 			}
 		}
 	}
-
-	if (data && (rc = mdb_read_data(txn, leaf, data)) != MDB_SUCCESS)
-		return rc;
 
 	return mdb_del0(txn, dbi, ki, &mpp, leaf);
 }
@@ -3660,7 +3667,7 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 		return EINVAL;
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
-		return EINVAL;
+		return EACCES;
 	}
 
 	if (key->mv_size == 0 || key->mv_size > MAXKEYSIZE) {

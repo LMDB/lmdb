@@ -77,7 +77,7 @@ int main(int argc,char * argv[])
 			txn=NULL;
 			rc = mdb_txn_begin(env, 0, &txn);
 			sprintf(sval, "%03x ", values[i]);
-			rc = mdb_del(txn, dbi, &key, NULL, 0);
+			rc = mdb_del(txn, dbi, &key, NULL);
 			if (rc) {
 				j--;
 				mdb_txn_abort(txn);
