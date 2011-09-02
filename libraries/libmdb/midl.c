@@ -1,4 +1,5 @@
-/* idl.c - ldap bdb back-end ID list functions */
+/**	@file midl.c
+ *	@brief ldap bdb back-end ID List functions */
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
@@ -19,11 +20,15 @@
 #include <assert.h>
 #include "midl.h"
 
-typedef unsigned long pgno_t;
+/** @defgroup internal	MDB Internals
+ *	@{
+ */
+/** @defgroup idls	ID List Management
+ *	@{
+ */
+#define CMP(x,y)	 ( (x) < (y) ? -1 : (x) > (y) )
 
-#define CMP(x,y)	 ( (x) > (y) ? -1 : (x) < (y) )
-
-unsigned mdb_midl_search( ID *ids, ID id )
+static unsigned mdb_midl_search( IDL ids, ID id )
 {
 	/*
 	 * binary search of id in ids
@@ -38,7 +43,7 @@ unsigned mdb_midl_search( ID *ids, ID id )
 	while( 0 < n ) {
 		int pivot = n >> 1;
 		cursor = base + pivot;
-		val = CMP( id, ids[cursor + 1] );
+		val = CMP( ids[cursor + 1], id );
 
 		if( val < 0 ) {
 			n = pivot;
@@ -59,7 +64,7 @@ unsigned mdb_midl_search( ID *ids, ID id )
 	}
 }
 
-int mdb_midl_insert( ID *ids, ID id )
+int mdb_midl_insert( IDL ids, ID id )
 {
 	unsigned x, i;
 
@@ -108,7 +113,7 @@ int mdb_midl_insert( ID *ids, ID id )
 	return 0;
 }
 
-unsigned mdb_midl2_search( MIDL2 *ids, MIDL2 *id )
+unsigned mdb_mid2l_search( ID2L ids, ID id )
 {
 	/*
 	 * binary search of id in ids
@@ -123,7 +128,7 @@ unsigned mdb_midl2_search( MIDL2 *ids, MIDL2 *id )
 	while( 0 < n ) {
 		int pivot = n >> 1;
 		cursor = base + pivot;
-		val = CMP( ids[cursor + 1].mid, id->mid );
+		val = CMP( id, ids[cursor + 1].mid );
 
 		if( val < 0 ) {
 			n = pivot;
@@ -144,11 +149,11 @@ unsigned mdb_midl2_search( MIDL2 *ids, MIDL2 *id )
 	}
 }
 
-int mdb_midl2_insert( MIDL2 *ids, MIDL2 *id )
+int mdb_mid2l_insert( ID2L ids, ID2 *id )
 {
 	unsigned x, i;
 
-	x = mdb_midl2_search( ids, id );
+	x = mdb_mid2l_search( ids, id->mid );
 	assert( x > 0 );
 
 	if( x < 1 ) {
@@ -175,3 +180,5 @@ int mdb_midl2_insert( MIDL2 *ids, MIDL2 *id )
 
 	return 0;
 }
+/** @} */
+/** @} */

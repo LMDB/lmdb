@@ -55,6 +55,20 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+
+#ifndef _WIN32
+#include <pthread.h>
+#endif
+
+#include "mdb.h"
+#include "midl.h"
+
+/** @defgroup internal	MDB Internals
+ *	@{
+ */
+/** @defgroup compat	Windows Compatibility Macros
+ *	@{
+ */
 #ifdef _WIN32
 #define pthread_t	DWORD
 #define pthread_mutex_t	HANDLE
@@ -71,33 +85,25 @@
 #define LOCK_MUTEX_W(env)	pthread_mutex_lock(env->me_wmutex)
 #define UNLOCK_MUTEX_W(env)	pthread_mutex_unlock(env->me_wmutex)
 #define getpid()	GetCurrentProcessId()
-#else
-#include <pthread.h>
-#define LOCK_MUTEX_R(env)	pthread_mutex_lock(&env->me_txns->mti_mutex)
-#define UNLOCK_MUTEX_R(env)	pthread_mutex_unlock(&env->me_txns->mti_mutex)
-#define LOCK_MUTEX_W(env)	pthread_mutex_lock(&env->me_txns->mti_wmutex)
-#define UNLOCK_MUTEX_W(env)	pthread_mutex_unlock(&env->me_txns->mti_wmutex)
-#endif
-
-#ifdef _WIN32
 #define	fdatasync(fd)	!FlushFileBuffers(fd)
 #define	ErrCode()	GetLastError()
 #define GetPageSize(x)	{SYSTEM_INFO si; GetSystemInfo(&si); (x) = si.dwPageSize;}
 #define	close(fd)	CloseHandle(fd)
 #define	munmap(ptr,len)	UnmapViewOfFile(ptr)
 #else
+#define LOCK_MUTEX_R(env)	pthread_mutex_lock(&env->me_txns->mti_mutex)
+#define UNLOCK_MUTEX_R(env)	pthread_mutex_unlock(&env->me_txns->mti_mutex)
+#define LOCK_MUTEX_W(env)	pthread_mutex_lock(&env->me_txns->mti_wmutex)
+#define UNLOCK_MUTEX_W(env)	pthread_mutex_unlock(&env->me_txns->mti_wmutex)
 #define	ErrCode()	errno
 #define	HANDLE	int
 #define INVALID_HANDLE_VALUE	-1
 #define	GetPageSize(x)	(x) = sysconf(_SC_PAGE_SIZE)
 #endif
-#include "mdb.h"
 
-#define ULONG		unsigned long
-typedef ULONG		pgno_t;
+/** @} */
 
-#include "midl.h"
-
+#ifndef _WIN32
 /* Note: If O_DSYNC is undefined but exists in /usr/include,
  * preferably set some compiler flag to get the definition.
  * Otherwise compile with the less efficient -DMDB_DSYNC=O_SYNC.
@@ -105,6 +111,10 @@ typedef ULONG		pgno_t;
 #ifndef MDB_DSYNC
 # define MDB_DSYNC	O_DSYNC
 #endif
+#endif
+
+#define ULONG		unsigned long
+typedef ULONG		pgno_t;
 
 #ifndef DEBUG
 #define DEBUG 0
@@ -382,7 +392,7 @@ struct MDB_txn {
 	MDB_env		*mt_env;	
 	pgno_t		*mt_free_pgs;	/* this is an IDL */
 	union {
-		MIDL2	*dirty_list;	/* modified pages */
+		ID2L	dirty_list;	/* modified pages */
 		MDB_reader	*reader;
 	} mt_u;
 	MDB_dbx		*mt_dbxs;		/* array */
@@ -429,7 +439,7 @@ struct MDB_env {
 	pthread_key_t	me_txkey;	/* thread-key for readers */
 	MDB_dpage	*me_dpages;
 	pgno_t		me_free_pgs[MDB_IDL_UM_SIZE];
-	MIDL2		me_dirty_list[MDB_IDL_DB_SIZE];
+	ID2			me_dirty_list[MDB_IDL_DB_SIZE];
 	LAZY_RWLOCK_DEF(me_dblock);
 #ifdef _WIN32
 	HANDLE		me_rmutex;		/* Windows mutexes don't reside in shared mem */
@@ -643,7 +653,7 @@ mdb_alloc_page(MDB_txn *txn, MDB_dbi dbi, MDB_page *parent, unsigned int parent_
 {
 	MDB_dpage *dp;
 	pgno_t pgno = P_INVALID;
-	MIDL2 mid;
+	ID2 mid;
 
 	if (txn->mt_txnid > 2) {
 
@@ -752,7 +762,7 @@ mdb_alloc_page(MDB_txn *txn, MDB_dbi dbi, MDB_page *parent, unsigned int parent_
 	}
 	mid.mid = dp->p.mp_pgno;
 	mid.mptr = dp;
-	mdb_midl2_insert(txn->mt_u.dirty_list, &mid);
+	mdb_mid2l_insert(txn->mt_u.dirty_list, &mid);
 
 	return dp;
 }
@@ -2059,10 +2069,8 @@ mdb_get_page(MDB_txn *txn, pgno_t pgno, MDB_page **ret)
 
 	if (!F_ISSET(txn->mt_flags, MDB_TXN_RDONLY) && txn->mt_u.dirty_list[0].mid) {
 		MDB_dpage *dp;
-		MIDL2 id;
 		unsigned x;
-		id.mid = pgno;
-		x = mdb_midl2_search(txn->mt_u.dirty_list, &id);
+		x = mdb_mid2l_search(txn->mt_u.dirty_list, pgno);
 		if (x <= txn->mt_u.dirty_list[0].mid && txn->mt_u.dirty_list[x].mid == pgno) {
 			dp = txn->mt_u.dirty_list[x].mptr;
 			p = &dp->p;
@@ -4138,3 +4146,5 @@ int mdb_set_relfunc(MDB_txn *txn, MDB_dbi dbi, MDB_rel_func *rel)
 	txn->mt_dbxs[dbi].md_rel = rel;
 	return MDB_SUCCESS;
 }
+
+/** @} */

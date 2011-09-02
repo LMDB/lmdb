@@ -1,4 +1,13 @@
-/* idl.h - ldap bdb back-end ID list header file */
+/**	@file midl.h
+ *	@brief ldap bdb back-end ID List header file.
+ *
+ *	This file was originally part of back-bdb but has been
+ *	modified for use in libmdb. Most of the macros defined
+ *	in this file are unused, just left over from the original.
+ *
+ *	This file is only used internally in libmdb and its definitions
+ *	are not exposed publicly.
+ */
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
@@ -17,7 +26,24 @@
 #ifndef _MDB_MIDL_H_
 #define _MDB_MIDL_H_
 
+/** @defgroup internal	MDB Internals
+ *	@{
+ */
+/** @defgroup idls	ID List Management
+ *	@{
+ */
+	/** An ID should be the largest integer type supported on a machine.
+	 */
 #define	ID	unsigned long
+
+	/** An IDL is an ID List, a sorted array of IDs. The first
+	 * element of the array is a counter for how many actual
+	 * IDs are in the list. In the original back-bdb code, IDLs are
+	 * sorted in ascending order. For libmdb IDLs are sorted in
+	 * descending order.
+	 */
+typedef ID *IDL;
+
 #define	NOID	(~(ID)0)
 
 /* IDL sizes - likely should be even bigger
@@ -71,14 +97,42 @@
 #define MDB_IDL_N( ids )		( MDB_IDL_IS_RANGE(ids) \
 	? ((ids)[2]-(ids)[1])+1 : (ids)[0] )
 
-int mdb_midl_insert( ID *ids, ID id );
+	/** Insert an ID into an IDL.
+	 * @param[in,out] ids	The IDL to insert into.
+	 * @param[in] id	The ID to insert.
+	 * @return	0 on success, -1 if the ID was already present in the IDL.
+	 */
+int mdb_midl_insert( IDL ids, ID id );
 
-typedef struct MIDL2 {
-	ID mid;
-	void *mptr;
-} MIDL2;
+	/** An ID2 is an ID/pointer pair.
+	 */
+typedef struct ID2 {
+	ID mid;			/**< The ID */
+	void *mptr;		/**< The pointer */
+} ID2;
 
-unsigned mdb_midl2_search( MIDL2 *ids, MIDL2 *id );
-int mdb_midl2_insert( MIDL2 *ids, MIDL2 *id );
+	/** An ID2L is an ID2 List, a sorted array of ID2s.
+	 * The first element's \b mid member is a count of how many actual
+	 * elements are in the array. The \b mptr member of the first element is unused.
+	 * The array is sorted in ascending order by \b mid.
+	 */
+typedef ID2 *ID2L;
 
+	/** Search for an ID in an ID2L.
+	 * @param[in] ids	The ID2L to search.
+	 * @param[in] id	The ID to search for.
+	 * @return	The index of the first ID2 whose \b mid member is greater than or equal to \b id.
+	 */
+unsigned mdb_mid2l_search( ID2L ids, ID id );
+
+
+	/** Insert an ID2 into a ID2L.
+	 * @param[in,out] ids	The ID2L to insert into.
+	 * @param[in] id	The ID2 to insert.
+	 * @return	0 on success, -1 if the ID was already present in the MIDL2.
+	 */
+int mdb_mid2l_insert( ID2L ids, ID2 *id );
+
+/** @} */
+/** @} */
 #endif	/* _MDB_MIDL_H_ */

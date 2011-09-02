@@ -65,6 +65,9 @@
 
 #include <sys/types.h>
 
+/** @defgroup public Public API
+ *	@{
+ */
 /** @defgroup Version Version Macros
  *	@{
  */
@@ -782,4 +785,5 @@ int  mdb_cursor_count(MDB_cursor *cursor, unsigned long *countp);
 	 */
 int  mdb_cmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b);
 
+/**	@} */
 #endif /* _MDB_H_ */
