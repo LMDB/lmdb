@@ -71,7 +71,7 @@
 /** Library major version */
 #define MDB_VERSION_MAJOR	0
 /** Library minor version */
-#define MDB_VERSION_MINOR	8
+#define MDB_VERSION_MINOR	9
 /** Library patch version */
 #define MDB_VERSION_PATCH	0
 
@@ -83,7 +83,7 @@
 	MDB_VERINT(MDB_VERSION_MAJOR,MDB_VERSION_MINOR,MDB_VERSION_PATCH)
 
 /** The release date of this library version */
-#define MDB_VERSION_DATE	"August 11, 2011"
+#define MDB_VERSION_DATE	"September 1, 2011"
 
 /** A stringifier for the version info */
 #define MDB_VERSTR(a,b,c,d)	"MDB " #a "." #b "." #c ": (" #d ")"
@@ -96,21 +96,21 @@
 	MDB_VERFOO(MDB_VERSION_MAJOR,MDB_VERSION_MINOR,MDB_VERSION_PATCH,MDB_VERSION_DATE)
 /**	@} */
 
-/** Opaque structure for navigating through a database */
-typedef struct MDB_cursor MDB_cursor;
+/** Opaque structure for a database environment. A DB environment supports multiple
+ * databases, all residing in the same shared-memory map.
+ */
+typedef struct MDB_env MDB_env;
 
 /** Opaque structure for a transaction handle. All database operations require
  * a transaction handle. Transactions may be read-only or read-write.
  */
 typedef struct MDB_txn MDB_txn;
 
-/** Opaque structure for a database environment. A DB environment supports multiple
- * databases, all residing in the same shared-memory map.
- */
-typedef struct MDB_env MDB_env;
-
 /** A handle for an individual database in the DB environment. */
 typedef unsigned int	MDB_dbi;
+
+/** Opaque structure for navigating through a database */
+typedef struct MDB_cursor MDB_cursor;
 
 /** Generic structure used for passing keys and data in and out of the database. */
 typedef struct MDB_val {
@@ -122,9 +122,41 @@ typedef struct MDB_val {
 typedef int  (MDB_cmp_func)(const MDB_val *a, const MDB_val *b);
 
 /** A callback function used to relocate a position-dependent data item
- * in a fixed-address database. This feature is currently unimplemented.
+ * in a fixed-address database. The \b newptr gives the item's current address in
+ * the memory map, and \b oldptr gives its previous address. This callback is
+ * expected to walk through the fields of the record in newptr and modify any
+ * values based at the \b oldptr address to be relative to the \b newptr address.
+ * @todo This feature is currently unimplemented.
  */
-typedef void (MDB_rel_func)(void *ptr, void *oldptr);
+typedef void (MDB_rel_func)(void *newptr, void *oldptr, size_t size);
+
+/** @defgroup	mdb_env	environment flags
+ *	@{
+ */
+	/** mmap at a fixed address */
+#define MDB_FIXEDMAP	0x01
+	/** don't fsync after commit */
+#define MDB_NOSYNC		0x10000
+	/** read only */
+#define MDB_RDONLY		0x20000
+/** @} */
+
+/**	@defgroup	mdb_open	database flags
+ *	@{
+ */
+	/** use reverse string keys */
+#define MDB_REVERSEKEY	0x02
+	/** use sorted duplicates */
+#define MDB_DUPSORT		0x04
+	/** numeric keys in native byte order */
+#define MDB_INTEGERKEY	0x08
+	/** with #MDB_DUPSORT, sorted dup items have fixed size */
+#define MDB_DUPFIXED	0x10
+	/** with #MDB_DUPSORT, dups are numeric in native byte order */
+#define MDB_INTEGERDUP	0x20
+	/** create DB if not already existing */
+#define MDB_CREATE		0x40000
+/** @} */
 
 /**	@defgroup mdb_put	mdb_put flags
  *	@{
@@ -182,35 +214,6 @@ typedef enum MDB_cursor_op {
 #define MDB_VERSION_MISMATCH	(-30794)
 /** @} */
 
-/**	@defgroup	mdb_open	 mdb_open flags
- *	@{
- */
-	/** use reverse string keys */
-#define MDB_REVERSEKEY	0x02
-	/** use sorted duplicates */
-#define MDB_DUPSORT		0x04
-	/** numeric keys in native byte order */
-#define MDB_INTEGERKEY	0x08
-	/** with #MDB_DUPSORT, sorted dup items have fixed size */
-#define MDB_DUPFIXED	0x10
-	/** with #MDB_DUPSORT, dups are numeric in native byte order */
-#define MDB_INTEGERDUP	0x20
-/** @} */
-
-/** @defgroup	mdb_env	 environment flags
- *	@{
- */
-	/** mmap at a fixed address */
-#define MDB_FIXEDMAP	0x01
-	/** don't fsync after commit */
-#define MDB_NOSYNC		0x10000
-	/** read only */
-#define MDB_RDONLY		0x20000
-/** @} */
-
-	/** create env or DB if not already existing */
-#define MDB_CREATE		0x40000
-
 /** Statistics for a database in the environment */
 typedef struct MDB_stat {
 	unsigned int	ms_psize;			/**< Size of a database page.
@@ -256,7 +259,8 @@ int  mdb_env_create(MDB_env **env);
 	/** Open an environment handle.
 	 * If this function fails, #mdb_env_close() must be called to discard the #MDB_env handle.
 	 * @param[in] env An environment handle returned by #mdb_env_create()
-	 * @param[in] path The directory in which the database files reside
+	 * @param[in] path The directory in which the database files reside. This
+	 * directory must already exist and be writable.
 	 * @param[in] flags Special options for this environment. This parameter
 	 * must be set to 0 or by bitwise OR'ing together one or more of the
 	 * values described here.
@@ -280,10 +284,9 @@ int  mdb_env_create(MDB_env **env);
 	 *		at any time using #mdb_env_set_flags().
 	 *	<li>#MDB_RDONLY
 	 *		Open the environment in read-only mode. No write operations will be allowed.
-	 *	<li>#MDB_CREATE
-	 *		Create the environment if it doesn't already exist.
 	 * </ul>
-	 * @param[in] mode The UNIX permissions to set on created files.
+	 * @param[in] mode The UNIX permissions to set on created files. This parameter
+	 * is ignored on Windows.
 	 * @return A non-zero error value on failure and 0 on success. Some possible
 	 * errors are:
 	 * <ul>
@@ -372,7 +375,8 @@ int  mdb_env_get_path(MDB_env *env, const char **path);
 
 	/** Set the size of the memory map to use for this environment.
 	 * The size should be a multiple of the OS page size. The default is
-	 * 10485760 bytes. The value should be chosen as large as possible,
+	 * 10485760 bytes. The size of the memory map is also the maximum size
+	 * of the database. The value should be chosen as large as possible,
 	 * to accomodate future growth of the database.
 	 * This function may only be called after #mdb_env_create() and before #mdb_env_open().
 	 * @param[in] env An environment handle returned by #mdb_env_create()
