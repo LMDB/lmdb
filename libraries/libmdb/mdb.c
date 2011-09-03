@@ -2781,8 +2781,28 @@ fetchm:
 	case MDB_FIRST:
 		rc = mdb_cursor_first(cursor, key, data);
 		break;
+	case MDB_FIRST_DUP:
+		if (data == NULL ||
+			!(cursor->mc_txn->mt_dbs[cursor->mc_dbi].md_flags & MDB_DUPSORT) ||
+			!cursor->mc_initialized ||
+			!cursor->mc_xcursor->mx_cursor.mc_initialized) {
+			rc = EINVAL;
+			break;
+		}
+		rc = mdb_cursor_first(&cursor->mc_xcursor->mx_cursor, data, NULL);
+		break;
 	case MDB_LAST:
 		rc = mdb_cursor_last(cursor, key, data);
+		break;
+	case MDB_LAST_DUP:
+		if (data == NULL ||
+			!(cursor->mc_txn->mt_dbs[cursor->mc_dbi].md_flags & MDB_DUPSORT) ||
+			!cursor->mc_initialized ||
+			!cursor->mc_xcursor->mx_cursor.mc_initialized) {
+			rc = EINVAL;
+			break;
+		}
+		rc = mdb_cursor_last(&cursor->mc_xcursor->mx_cursor, data, NULL);
 		break;
 	default:
 		DPRINTF("unhandled/unimplemented cursor operation %u", op);

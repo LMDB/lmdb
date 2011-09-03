@@ -175,11 +175,15 @@ typedef void (MDB_rel_func)(void *newptr, void *oldptr, size_t size);
 /** Cursor operations */
 typedef enum MDB_cursor_op {
 	MDB_FIRST,				/**< Position at first key/data item */
+	MDB_FIRST_DUP,			/**< Position at first data item of current key.
+								Only for #MDB_DUPSORT */
 	MDB_GET_BOTH,			/**< Position at key/data pair. Only for #MDB_DUPSORT */
 	MDB_GET_BOTH_RANGE,		/**< position at key, nearest data. Only for #MDB_DUPSORT */
 	MDB_GET_MULTIPLE,		/**< Return all the duplicate data items at the current
 								 cursor position. Only for #MDB_DUPFIXED */
 	MDB_LAST,				/**< Position at last key/data item */
+	MDB_LAST_DUP,			/**< Position at last data item of current key.
+								Only for #MDB_DUPSORT */
 	MDB_NEXT,				/**< Position at next data item */
 	MDB_NEXT_DUP,			/**< Position at next data item of current key.
 								Only for #MDB_DUPSORT */
@@ -760,6 +764,58 @@ void mdb_cursor_close(MDB_cursor *cursor);
 	 */
 int  mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 			    MDB_cursor_op op);
+
+	/** Store by cursor.
+	 * This function stores key/data pairs into the database.
+	 * If the function fails for any reason, the state of the cursor will be
+	 * unchanged. If the function succeeds and an item is inserted into the
+	 * database, the cursor is always positioned to refer to the newly inserted item.
+	 * @param[in] cursor A cursor handle returned by #mdb_cursor_open()
+	 * @param[in] key The key operated on.
+	 * @param[in] data The data operated on.
+	 * @param[in] flags Options for this operation. This parameter
+	 * must be set to 0 or one of the values described here.
+	 * <ul>
+	 *	<li>#MDB_CURRENT - overwrite the data of the key/data pair to which
+	 *		the cursor refers with the specified data item. The \b key
+	 *		parameter is ignored.
+	 *	<li>#MDB_NODUPDATA - enter the new key/data pair only if it does not
+	 *		already appear in the database. This flag may only be specified
+	 *		if the database was opened with #MDB_DUPSORT. The function will
+	 *		return #MDB_KEYEXIST if the key/data pair already appears in the
+	 *		database.
+	 *	<li>#MDB_NOOVERWRITE - enter the new key/data pair only if the key
+	 *		does not already appear in the database. The function will return
+	 *		#MDB_KEYEXIST if the key already appears in the database, even if
+	 *		the database supports duplicates (#MDB_DUPSORT).
+	 * </ul>
+	 * @return A non-zero error value on failure and 0 on success. Some possible
+	 * errors are:
+	 * <ul>
+	 *	<li>EACCES - an attempt was made to modify a read-only database.
+	 *	<li>EINVAL - an invalid parameter was specified.
+	 * </ul>
+	 */
+int  mdb_cursor_put(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
+				unsigned int flags);
+
+	/**  Delete current key/data pair
+	 * This function deletes the key/data pair to which the cursor refers.
+	 * @param[in] cursor A cursor handle returned by #mdb_cursor_open()
+	 * @param[in] flags Options for this operation. This parameter
+	 * must be set to 0 or one of the values described here.
+	 * <ul>
+	 *	<li>#MDB_NODUPDATA - delete all of the data items for the current key.
+	 *		This flag may only be specified if the database was opened with #MDB_DUPSORT.
+	 * </ul>
+	 * @return A non-zero error value on failure and 0 on success. Some possible
+	 * errors are:
+	 * <ul>
+	 *	<li>EACCES - an attempt was made to modify a read-only database.
+	 *	<li>EINVAL - an invalid parameter was specified.
+	 * </ul>
+	 */
+int  mdb_cursor_del(MDB_cursor *cursor, unsigned int flags);
 
 	/** Return count of duplicates for current key.
 	 * This call is only valid on databases that support sorted duplicate
