@@ -2580,6 +2580,7 @@ set2:
 				int ex2, *ex2p;
 				if (op == MDB_GET_BOTH) {
 					ex2p = &ex2;
+					ex2 = 0;
 				} else {
 					ex2p = NULL;
 				}
@@ -3662,34 +3663,32 @@ mdb_split(MDB_txn *txn, MDB_dbi dbi, MDB_page **mpp, unsigned int *newindxp,
 		/* Maximum free space in an empty page */
 		pmax = txn->mt_env->me_psize - PAGEHDRSZ;
 		nsize = mdb_leaf_size(txn->mt_env, newkey, newdata);
-		if (newindx <= split_indx) {
-split1:
+		if (newindx < split_indx) {
 			psize = nsize;
 			for (i=0; i<split_indx; i++) {
 				node = NODEPTR(&mdp->p, i);
-				psize += NODESIZE + NODEKSZ(node);
+				psize += NODESIZE + NODEKSZ(node) + sizeof(indx_t);
 				if (F_ISSET(node->mn_flags, F_BIGDATA))
 					psize += sizeof(pgno_t);
 				else
 					psize += NODEDSZ(node);
 				if (psize > pmax) {
-					split_indx--;
-					goto split1;
+					split_indx = i;
+					break;
 				}
 			}
 		} else {
-split2:
 			psize = nsize;
-			for (i=split_indx; i<nkeys; i++) {
+			for (i=nkeys-1; i>=split_indx; i--) {
 				node = NODEPTR(&mdp->p, i);
-				psize += NODESIZE + NODEKSZ(node);
+				psize += NODESIZE + NODEKSZ(node) + sizeof(indx_t);
 				if (F_ISSET(node->mn_flags, F_BIGDATA))
 					psize += sizeof(pgno_t);
 				else
 					psize += NODEDSZ(node);
 				if (psize > pmax) {
-					split_indx++;
-					goto split2;
+					split_indx = i+1;
+					break;
 				}
 			}
 		}
