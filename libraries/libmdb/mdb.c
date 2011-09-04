@@ -113,7 +113,6 @@
 #endif
 #endif
 
-#define ULONG		unsigned long
 typedef ULONG		pgno_t;
 
 #ifndef DEBUG
@@ -517,7 +516,7 @@ static int		 mdb_cursor_first(MDB_cursor *cursor,
 static int		 mdb_cursor_last(MDB_cursor *cursor,
 			    MDB_val *key, MDB_val *data);
 
-static void		mdb_xcursor_init0(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx);
+static void		mdb_xcursor_init0(MDB_cursor *mc);
 static void		mdb_xcursor_init1(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx,
 					MDB_page *mp, MDB_node *node);
 static void		mdb_xcursor_fini(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx);
@@ -2251,9 +2250,9 @@ int
 mdb_get(MDB_txn *txn, MDB_dbi dbi,
     MDB_val *key, MDB_val *data)
 {
-	int		 rc, exact;
-	MDB_node	*leaf;
-	MDB_pageparent mpp;
+	MDB_cursor	mc;
+	MDB_xcursor	mx;
+	int exact;
 	DKBUF;
 
 	assert(key);
@@ -2267,36 +2266,16 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 		return EINVAL;
 	}
 
-	if ((rc = mdb_search_page(txn, dbi, key, NULL, 0, &mpp)) != MDB_SUCCESS)
-		return rc;
-
-	leaf = mdb_search_node(txn, dbi, mpp.mp_page, key, &exact, NULL);
-	if (leaf && exact) {
-		/* Return first duplicate data item */
-		if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
-			MDB_xcursor mx;
-
-			mdb_xcursor_init0(txn, dbi, &mx);
-			mdb_xcursor_init1(txn, dbi, &mx, mpp.mp_page, leaf);
-			rc = mdb_search_page(&mx.mx_txn, mx.mx_cursor.mc_dbi, NULL, NULL, 0, &mpp);
-			if (rc != MDB_SUCCESS)
-				return rc;
-			if (IS_LEAF2(mpp.mp_page)) {
-				data->mv_size = txn->mt_dbs[dbi].md_pad;
-				data->mv_data = LEAF2KEY(mpp.mp_page, 0, data->mv_size);
-			} else {
-				leaf = NODEPTR(mpp.mp_page, 0);
-				data->mv_size = NODEKSZ(leaf);
-				data->mv_data = NODEKEY(leaf);
-			}
-		} else {
-			rc = mdb_read_data(txn, leaf, data);
-		}
+	mc.mc_txn = txn;
+	mc.mc_dbi = dbi;
+	mc.mc_initialized = 0;
+	if (txn->mt_dbs[dbi].md_flags & MDB_DUPSORT) {
+		mc.mc_xcursor = &mx;
+		mdb_xcursor_init0(&mc);
 	} else {
-		rc = MDB_NOTFOUND;
+		mc.mc_xcursor = NULL;
 	}
-
-	return rc;
+	return mdb_cursor_set(&mc, key, data, MDB_SET, &exact);
 }
 
 static int
@@ -2813,6 +2792,61 @@ fetchm:
 	return rc;
 }
 
+static int
+mdb_cursor_touch(MDB_cursor *cursor)
+{
+	MDB_pageparent mpp;
+	unsigned int i;
+	int rc;
+
+	mpp.mp_parent = NULL;
+	mpp.mp_pi = 0;
+	for(i=0; i<cursor->mc_snum; i++) {
+		mpp.mp_page = cursor->mc_stack[i].mp_page;
+		if (!F_ISSET(mpp.mp_page->mp_flags, P_DIRTY)) {
+			rc = mdb_touch(cursor->mc_txn, cursor->mc_dbi, &mpp);
+			if (rc) return rc;
+			cursor->mc_stack[i].mp_page = mpp.mp_page;
+		}
+		mpp.mp_parent = mpp.mp_page;
+		mpp.mp_pi = cursor->mc_stack[i].mp_ki;
+	}
+	if (cursor->mc_xcursor)
+		return mdb_cursor_touch(&cursor->mc_xcursor->mx_cursor);
+	return MDB_SUCCESS;
+}
+
+int
+mdb_cursor_put(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
+    unsigned int flags)
+{
+	MDB_ppage	*top;
+	MDB_node	*leaf;
+	int rc, exact;
+
+	if (flags == MDB_NODUPDATA) {
+		rc = mdb_cursor_set(cursor, key, data, MDB_GET_BOTH, &exact);
+		if (rc == 0)
+			return MDB_KEYEXIST;
+		if (rc != MDB_NOTFOUND)
+			return rc;
+	} else if (flags != MDB_CURRENT) {
+		rc = mdb_cursor_set(cursor, key, NULL, MDB_SET, &exact);
+		if (flags == MDB_NOOVERWRITE && rc == 0)
+			return MDB_KEYEXIST;
+		if (rc != MDB_NOTFOUND)
+			return rc;
+	} else if (!cursor->mc_initialized) {
+		return EINVAL;
+	}
+	/* Cursor is positioned, now make sure all pages are writable */
+	rc = mdb_cursor_touch(cursor);
+	if (rc) return rc;
+
+	top = CURSOR_TOP(cursor);
+
+}
+
 /* Allocate a page and initialize it
  */
 static MDB_dpage *
@@ -3027,17 +3061,18 @@ mdb_del_node(MDB_page *mp, indx_t indx, int ksize)
 }
 
 static void
-mdb_xcursor_init0(MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx)
+mdb_xcursor_init0(MDB_cursor *mc)
 {
+	MDB_xcursor *mx = mc->mc_xcursor;
 	MDB_dbi dbn;
 
-	mx->mx_txn = *txn;
+	mx->mx_txn = *mc->mc_txn;
 	mx->mx_txn.mt_dbxs = mx->mx_dbxs;
 	mx->mx_txn.mt_dbs = mx->mx_dbs;
-	mx->mx_dbxs[0] = txn->mt_dbxs[0];
-	mx->mx_dbxs[1] = txn->mt_dbxs[1];
-	if (dbi > 1) {
-		mx->mx_dbxs[2] = txn->mt_dbxs[dbi];
+	mx->mx_dbxs[0] = mc->mc_txn->mt_dbxs[0];
+	mx->mx_dbxs[1] = mc->mc_txn->mt_dbxs[1];
+	if (mc->mc_dbi > 1) {
+		mx->mx_dbxs[2] = mc->mc_txn->mt_dbxs[mc->mc_dbi];
 		dbn = 2;
 	} else {
 		dbn = 1;
@@ -3111,7 +3146,7 @@ mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **ret)
 		if (txn->mt_dbs[dbi].md_flags & MDB_DUPSORT) {
 			MDB_xcursor *mx = (MDB_xcursor *)(cursor + 1);
 			cursor->mc_xcursor = mx;
-			mdb_xcursor_init0(txn, dbi, mx);
+			mdb_xcursor_init0(cursor);
 		}
 	} else {
 		return ENOMEM;
@@ -3522,10 +3557,15 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 	}
 
 	if (!IS_LEAF2(mpp.mp_page) && F_ISSET(leaf->mn_flags, F_DUPDATA)) {
+		MDB_cursor mc;
 		MDB_xcursor mx;
 		MDB_pageparent mp2;
 
-		mdb_xcursor_init0(txn, dbi, &mx);
+		mc.mc_txn = txn;
+		mc.mc_dbi = dbi;
+		mc.mc_initialized = 0;
+		mc.mc_xcursor = &mx;
+		mdb_xcursor_init0(&mc);
 		mdb_xcursor_init1(txn, dbi, &mx, mpp.mp_page, leaf);
 		if (data) {
 			rc = mdb_del(&mx.mx_txn, mx.mx_cursor.mc_dbi, data, NULL);
@@ -3946,11 +3986,16 @@ new_sub:
 		 * DB are all zero size.
 		 */
 		if (do_sub) {
+			MDB_cursor mc;
 			MDB_xcursor mx;
 
 			leaf = NODEPTR(mpp.mp_page, ki);
 put_sub:
-			mdb_xcursor_init0(txn, dbi, &mx);
+			mc.mc_txn = txn;
+			mc.mc_dbi = dbi;
+			mc.mc_initialized = 0;
+			mc.mc_xcursor = &mx;
+			mdb_xcursor_init0(&mc);
 			mdb_xcursor_init1(txn, dbi, &mx, mpp.mp_page, leaf);
 			xdata.mv_size = 0;
 			xdata.mv_data = "";
@@ -3978,6 +4023,10 @@ int
 mdb_put(MDB_txn *txn, MDB_dbi dbi,
     MDB_val *key, MDB_val *data, unsigned int flags)
 {
+	MDB_cursor mc;
+	MDB_xcursor mx;
+	int rc;
+
 	assert(key != NULL);
 	assert(data != NULL);
 
@@ -3995,7 +4044,28 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 	if ((flags & (MDB_NOOVERWRITE|MDB_NODUPDATA)) != flags)
 		return EINVAL;
 
-	return mdb_put0(txn, dbi, key, data, flags);
+	mc.mc_txn = txn;
+	mc.mc_dbi = dbi;
+	mc.mc_snum = 0;
+	mc.mc_initialized = 0;
+	mc.mc_eof = 0;
+	if (txn->mt_dbs[dbi].md_flags & MDB_DUPSORT) {
+		mc.mc_xcursor = &mx;
+		mdb_xcursor_init0(&mc);
+	} else {
+		mc.mc_xcursor = NULL;
+	}
+	rc = mdb_cursor_put(&mc, key, data, flags);
+	if (mc.mc_xcursor) {
+		MDB_ppage *top;
+		MDB_node *leaf;
+		mdb_xcursor_fini(txn, dbi, &mx);
+		top = CURSOR_TOP(&mc);
+		leaf = NODEPTR(top->mp_page, top->mp_ki);
+		memcpy(NODEDATA(leaf), &mx.mx_txn.mt_dbs[mx.mx_cursor.mc_dbi],
+			sizeof(MDB_db));
+	}
+	return rc;
 }
 
 int

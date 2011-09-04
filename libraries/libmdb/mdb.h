@@ -133,7 +133,7 @@ typedef int  (MDB_cmp_func)(const MDB_val *a, const MDB_val *b);
  */
 typedef void (MDB_rel_func)(void *newptr, void *oldptr, size_t size);
 
-/** @defgroup	mdb_env	environment flags
+/** @defgroup	mdb_env	Environment Flags
  *	@{
  */
 	/** mmap at a fixed address */
@@ -144,7 +144,7 @@ typedef void (MDB_rel_func)(void *newptr, void *oldptr, size_t size);
 #define MDB_RDONLY		0x20000
 /** @} */
 
-/**	@defgroup	mdb_open	database flags
+/**	@defgroup	mdb_open	Database Flags
  *	@{
  */
 	/** use reverse string keys */
@@ -161,15 +161,18 @@ typedef void (MDB_rel_func)(void *newptr, void *oldptr, size_t size);
 #define MDB_CREATE		0x40000
 /** @} */
 
-/**	@defgroup mdb_put	mdb_put flags
+/**	@defgroup mdb_put	Write Flags
  *	@{
  */
-/** For mdb_put: don't write if the key already exists. */
+/** For put: Don't write if the key already exists. */
 #define MDB_NOOVERWRITE	0x10
-/** For mdb_put: don't write if the key and data pair already exist.
- * Only for #MDB_DUPSORT
+/** Only for #MDB_DUPSORT<br>
+ * For put: don't write if the key and data pair already exist.<br>
+ * For mdb_cursor_del: remove all duplicate data items.
  */
 #define MDB_NODUPDATA	0x20
+/** For mdb_cursor_put: overwrite the current key/data pair */
+#define MDB_CURRENT	0x40
 /*	@} */
 
 /** Cursor operations */
@@ -723,8 +726,6 @@ int  mdb_del(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data);
 	/** Create a cursor handle.
 	 * Cursors are associated with a specific transaction and database and
 	 * may not span threads.
-	 * @todo Cursors only support read operations. Support for cursor_put() and
-	 * cursor_del() needs to be added.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] dbi A database handle returned by #mdb_open()
 	 * @param[out] cursor Address where the new #MDB_cursor handle will be stored
