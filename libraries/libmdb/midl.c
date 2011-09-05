@@ -28,6 +28,7 @@
  */
 #define CMP(x,y)	 ( (x) < (y) ? -1 : (x) > (y) )
 
+#if 0
 static unsigned mdb_midl_search( IDL ids, ID id )
 {
 	/*
@@ -89,6 +90,7 @@ int mdb_midl_insert( IDL ids, ID id )
 
 	if ( x <= ids[0] && ids[x] == id ) {
 		/* duplicate */
+		assert(0);
 		return -1;
 	}
 
@@ -111,6 +113,82 @@ int mdb_midl_insert( IDL ids, ID id )
 	}
 
 	return 0;
+}
+#endif
+
+int mdb_midl_append( IDL ids, ID id )
+{
+	/* Too big? */
+	if (ids[0] >= MDB_IDL_UM_SIZE)
+		return -1;
+	ids[0]++;
+	ids[ids[0]] = id;
+	return 0;
+}
+
+/* Quicksort + Insertion sort for small arrays */
+
+#define SMALL	8
+#define	SWAP(a,b)	itmp=(a);(a)=(b);(b)=itmp
+
+void
+mdb_midl_sort( ID *ids )
+{
+	int istack[16*sizeof(int)];
+	int i,j,k,l,ir,jstack;
+	ID a, itmp;
+
+	ir = ids[0];
+	l = 1;
+	jstack = 0;
+	for(;;) {
+		if (ir - l < SMALL) {	/* Insertion sort */
+			for (j=l+1;j<=ir;j++) {
+				a = ids[j];
+				for (i=j-1;i>=1;i--) {
+					if (ids[i] >= a) break;
+					ids[i+1] = ids[i];
+				}
+				ids[i+1] = a;
+			}
+			if (jstack == 0) break;
+			ir = istack[jstack--];
+			l = istack[jstack--];
+		} else {
+			k = (l + ir) >> 1;	/* Choose median of left, center, right */
+			SWAP(ids[k], ids[l+1]);
+			if (ids[l] < ids[ir]) {
+				SWAP(ids[l], ids[ir]);
+			}
+			if (ids[l+1] < ids[ir]) {
+				SWAP(ids[l+1], ids[ir]);
+			}
+			if (ids[l] < ids[l+1]) {
+				SWAP(ids[l], ids[l+1]);
+			}
+			i = l+1;
+			j = ir;
+			a = ids[l+1];
+			for(;;) {
+				do i++; while(ids[i] > a);
+				do j--; while(ids[j] < a);
+				if (j < i) break;
+				SWAP(ids[i],ids[j]);
+			}
+			ids[l+1] = ids[j];
+			ids[j] = a;
+			jstack += 2;
+			if (ir-i+1 >= j-1) {
+				istack[jstack] = ir;
+				istack[jstack-1] = i;
+				ir = j-1;
+			} else {
+				istack[jstack] = j-1;
+				istack[jstack-1] = l;
+				l = i;
+			}
+		}
+	}
 }
 
 unsigned mdb_mid2l_search( ID2L ids, ID id )

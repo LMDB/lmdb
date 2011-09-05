@@ -578,7 +578,7 @@ mdb_dkey(MDB_val *key, char *buf)
 	unsigned int i;
 	if (key->mv_size > MAXKEYSIZE)
 		return "MAXKEYSIZE";
-#if 0
+#if 1
 	for (i=0; i<key->mv_size; i++)
 		ptr += sprintf(ptr, "%02x", *c++);
 #else
@@ -744,7 +744,7 @@ mdb_touch(MDB_txn *txn, MDB_dbi dbi, MDB_pageparent *pp)
 			return ENOMEM;
 		DPRINTF("touched db %u page %lu -> %lu", dbi, mp->mp_pgno, dp->p.mp_pgno);
 		assert(mp->mp_pgno != dp->p.mp_pgno);
-		mdb_midl_insert(txn->mt_free_pgs, mp->mp_pgno);
+		mdb_midl_append(txn->mt_free_pgs, mp->mp_pgno);
 		pgno = dp->p.mp_pgno;
 		memcpy(&dp->p, mp, txn->mt_env->me_psize);
 		mp = &dp->p;
@@ -1017,6 +1017,7 @@ mdb_txn_commit(MDB_txn *txn)
 		mc.mc_snum = 0;
 		mdb_search_page(txn, FREE_DBI, &key, &mc, 1, &mpp);
 
+		mdb_midl_sort(txn->mt_free_pgs);
 #if DEBUG > 1
 		{
 			unsigned int i;
@@ -3159,7 +3160,7 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 #endif
 						{
 							/* free it */
-							mdb_midl_insert(mc->mc_txn->mt_free_pgs, pg);
+							mdb_midl_append(mc->mc_txn->mt_free_pgs, pg);
 						}
 					}
 					rc = mdb_sibling(&mc->mc_xcursor->mx_cursor, 1);
@@ -3178,7 +3179,7 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 #endif
 			{
 				/* free it */
-				mdb_midl_insert(mc->mc_txn->mt_free_pgs,
+				mdb_midl_append(mc->mc_txn->mt_free_pgs,
 					mc->mc_xcursor->mx_txn.mt_dbs[mc->mc_xcursor->mx_cursor.mc_dbi].md_root);
 			}
 		}
@@ -3814,10 +3815,10 @@ mdb_rebalance(MDB_txn *txn, MDB_dbi dbi, MDB_pageparent *mpp)
 			txn->mt_dbs[dbi].md_root = P_INVALID;
 			txn->mt_dbs[dbi].md_depth = 0;
 			txn->mt_dbs[dbi].md_leaf_pages = 0;
-			mdb_midl_insert(txn->mt_free_pgs, mpp->mp_page->mp_pgno);
+			mdb_midl_append(txn->mt_free_pgs, mpp->mp_page->mp_pgno);
 		} else if (IS_BRANCH(mpp->mp_page) && NUMKEYS(mpp->mp_page) == 1) {
 			DPUTS("collapsing root page!");
-			mdb_midl_insert(txn->mt_free_pgs, mpp->mp_page->mp_pgno);
+			mdb_midl_append(txn->mt_free_pgs, mpp->mp_page->mp_pgno);
 			txn->mt_dbs[dbi].md_root = NODEPGNO(NODEPTR(mpp->mp_page, 0));
 			if ((rc = mdb_get_page(txn, txn->mt_dbs[dbi].md_root, &root)))
 				return rc;
@@ -3895,7 +3896,7 @@ mdb_del0(MDB_cursor *mc, unsigned int ki, MDB_pageparent *mpp, MDB_node *leaf)
 		ovpages = OVPAGES(NODEDSZ(leaf), mc->mc_txn->mt_env->me_psize);
 		for (i=0; i<ovpages; i++) {
 			DPRINTF("freed ov page %lu", pg);
-			mdb_midl_insert(mc->mc_txn->mt_free_pgs, pg);
+			mdb_midl_append(mc->mc_txn->mt_free_pgs, pg);
 			pg++;
 		}
 	}

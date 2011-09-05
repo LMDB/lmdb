@@ -108,6 +108,18 @@ typedef ID *IDL;
 	 */
 int mdb_midl_insert( IDL ids, ID id );
 
+	/** Append an ID onto an IDL.
+	 * @param[in,out] ids	The IDL to append to.
+	 * @param[in] id	The ID to append.
+	 * @return	0 on success, -2 if the IDL is too large.
+	 */
+int mdb_midl_append( IDL ids, ID id );
+
+	/** Sort an IDL.
+	 * @param[in,out] ids	The IDL to sort.
+	 */
+void mdb_midl_sort( IDL ids );
+
 	/** An ID2 is an ID/pointer pair.
 	 */
 typedef struct ID2 {
