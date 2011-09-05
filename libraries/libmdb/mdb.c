@@ -440,7 +440,7 @@ struct MDB_env {
 	pthread_key_t	me_txkey;	/* thread-key for readers */
 	MDB_dpage	*me_dpages;
 	pgno_t		me_free_pgs[MDB_IDL_UM_SIZE];
-	ID2			me_dirty_list[MDB_IDL_DB_SIZE];
+	ID2			me_dirty_list[MDB_IDL_UM_SIZE];
 	LAZY_RWLOCK_DEF(me_dblock);
 #ifdef _WIN32
 	HANDLE		me_rmutex;		/* Windows mutexes don't reside in shared mem */
@@ -2543,11 +2543,17 @@ mdb_cursor_set(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 		}
 		rc = cursor->mc_txn->mt_dbxs[cursor->mc_dbi].md_cmp(key, &nodekey);
 		if (rc == 0) {
+			/* Probably happens rarely, but first node on the page
+			 * was the one we wanted.
+			 */
+			top->mp_ki = 0;
 set1:
-			/* we're already on the right page */
 			mpp.mp_page = top->mp_page;
+			if (exactp)
+				*exactp = 1;
 			rc = 0;
-			goto set2;
+			leaf = NODEPTR(top->mp_page, top->mp_ki);
+			goto set3;
 		}
 		if (rc > 0) {
 			unsigned int i;
@@ -2560,7 +2566,17 @@ set1:
 					MDB_SET_KEY(leaf, &nodekey);
 				}
 				rc = cursor->mc_txn->mt_dbxs[cursor->mc_dbi].md_cmp(key, &nodekey);
-				if (rc <= 0) goto set1;
+				if (rc == 0) {
+					/* last node was the one we wanted */
+					top->mp_ki = NUMKEYS(top->mp_page)-1;
+					goto set1;
+				}
+				if (rc < 0) {
+					/* This is definitely the right page, skip search_page */
+					mpp.mp_page = top->mp_page;
+					rc = 0;
+					goto set2;
+				}
 			}
 			/* If any parents have right-sibs, search.
 			 * Otherwise, there's nothing further.
@@ -2571,7 +2587,8 @@ set1:
 					break;
 			if (i == cursor->mc_snum - 1) {
 				/* There are no other pages */
-				goto set1;
+				top->mp_ki = NUMKEYS(top->mp_page);
+				return MDB_NOTFOUND;
 			}
 		}
 	}
@@ -2603,6 +2620,7 @@ set2:
 		leaf = NODEPTR(mpp.mp_page, 0);
 	}
 
+set3:
 	cursor->mc_flags |= C_INITIALIZED;
 	cursor->mc_flags &= ~C_EOF;
 

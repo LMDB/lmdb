@@ -101,12 +101,14 @@ typedef ID *IDL;
 #define MDB_IDL_N( ids )		( MDB_IDL_IS_RANGE(ids) \
 	? ((ids)[2]-(ids)[1])+1 : (ids)[0] )
 
+#if 0	/* superseded by append/sort */
 	/** Insert an ID into an IDL.
 	 * @param[in,out] ids	The IDL to insert into.
 	 * @param[in] id	The ID to insert.
 	 * @return	0 on success, -1 if the ID was already present in the IDL.
 	 */
 int mdb_midl_insert( IDL ids, ID id );
+#endif
 
 	/** Append an ID onto an IDL.
 	 * @param[in,out] ids	The IDL to append to.

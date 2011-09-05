@@ -28,7 +28,7 @@
  */
 #define CMP(x,y)	 ( (x) < (y) ? -1 : (x) > (y) )
 
-#if 0
+#if 0	/* superseded by append/sort */
 static unsigned mdb_midl_search( IDL ids, ID id )
 {
 	/*
@@ -119,7 +119,7 @@ int mdb_midl_insert( IDL ids, ID id )
 int mdb_midl_append( IDL ids, ID id )
 {
 	/* Too big? */
-	if (ids[0] >= MDB_IDL_UM_SIZE)
+	if (ids[0] >= MDB_IDL_UM_MAX)
 		return -1;
 	ids[0]++;
 	ids[ids[0]] = id;
@@ -244,7 +244,7 @@ int mdb_mid2l_insert( ID2L ids, ID2 *id )
 		return -1;
 	}
 
-	if ( ids[0].mid >= MDB_IDL_DB_MAX ) {
+	if ( ids[0].mid >= MDB_IDL_UM_MAX ) {
 		/* too big */
 		return -2;
 
