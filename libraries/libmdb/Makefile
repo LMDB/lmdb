@@ -4,7 +4,7 @@ OPT = -O2 -g
 CFLAGS	= -pthread $(OPT) $(W) $(XCFLAGS)
 LDLIBS	=
 
-PROGS	= mdb_stat mtest mtest2 mtest3
+PROGS	= mdb_stat mtest mtest2 mtest3 mtest4 mtest5
 all:	libmdb.a libmdb.so $(PROGS)
 
 clean:
@@ -25,6 +25,7 @@ mtest:    mtest.o    libmdb.a
 mtest2:	mtest2.o libmdb.a
 mtest3:	mtest3.o libmdb.a
 mtest4:	mtest4.o libmdb.a
+mtest5:	mtest5.o libmdb.a
 
 mdb.o: mdb.c mdb.h midl.h
 	$(CC) $(CFLAGS) -fPIC $(CPPFLAGS) -c mdb.c
