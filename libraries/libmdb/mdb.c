@@ -1980,7 +1980,7 @@ memnrcmp(const MDB_val *a, const MDB_val *b)
 	else
 		p1_lim = p1 - b->mv_size;
 
-	while (p1 >= p1_lim) {
+	while (p1 > p1_lim) {
 		diff = *p1 - *p2;
 		if (diff)
 			return diff;
