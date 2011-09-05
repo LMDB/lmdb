@@ -529,49 +529,15 @@ static size_t	mdb_leaf_size(MDB_env *env, MDB_val *key,
 			    MDB_val *data);
 static size_t	mdb_branch_size(MDB_env *env, MDB_val *key);
 
-static int	memncmp(const void *s1, size_t n1,
-				 const void *s2, size_t n2);
-static int	memnrcmp(const void *s1, size_t n1,
-				  const void *s2, size_t n2);
+static void mdb_default_cmp(MDB_txn *txn, MDB_dbi dbi);
+
+static MDB_cmp_func	memncmp, memnrcmp, intcmp;
 
 #ifdef _WIN32
 static SECURITY_DESCRIPTOR mdb_null_sd;
 static SECURITY_ATTRIBUTES mdb_all_sa;
 static int mdb_sec_inited;
 #endif
-
-static int
-memncmp(const void *s1, size_t n1, const void *s2, size_t n2)
-{
-	int diff, len_diff = -1;
-
-	if (n1 >= n2) {
-		len_diff = (n1 > n2);
-		n1 = n2;
-	}
-	diff = memcmp(s1, s2, n1);
-	return diff ? diff : len_diff;
-}
-
-static int
-memnrcmp(const void *s1, size_t n1, const void *s2, size_t n2)
-{
-	const unsigned char	*p1, *p2, *p1_lim;
-
-	if (n2 == 0)
-		return n1 != 0;
-	if (n1 == 0)
-		return -1;
-
-	p1 = (const unsigned char *)s1 + n1 - 1;
-	p2 = (const unsigned char *)s2 + n2 - 1;
-
-	for (p1_lim = (n1 <= n2 ? s1 : s2);  *p1 == *p2;  p1--, p2--) {
-		if (p1 == p1_lim)
-			return (p1 != s1) ? (p1 != p2) : (p2 != s2) ? -1 : 0;
-	}
-	return *p1 - *p2;
-}
 
 char *
 mdb_version(int *maj, int *min, int *pat)
@@ -625,17 +591,7 @@ mdb_dkey(MDB_val *key, char *buf)
 int
 mdb_cmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b)
 {
-	if (txn->mt_dbxs[dbi].md_cmp)
-		return txn->mt_dbxs[dbi].md_cmp(a, b);
-
-	if (txn->mt_dbs[dbi].md_flags & (MDB_REVERSEKEY
-#if __BYTE_ORDER == __LITTLE_ENDIAN
-		|MDB_INTEGERKEY
-#endif
-	))
-		return memnrcmp(a->mv_data, a->mv_size, b->mv_data, b->mv_size);
-	else
-		return memncmp((char *)a->mv_data, a->mv_size, b->mv_data, b->mv_size);
+	return txn->mt_dbxs[dbi].md_cmp(a, b);
 }
 
 int
@@ -643,15 +599,8 @@ mdb_dcmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b)
 {
 	if (txn->mt_dbxs[dbi].md_dcmp)
 		return txn->mt_dbxs[dbi].md_dcmp(a, b);
-
-	if (txn->mt_dbs[dbi].md_flags & (0
-#if __BYTE_ORDER == __LITTLE_ENDIAN
-		|MDB_INTEGERDUP
-#endif
-	))
-		return memnrcmp(a->mv_data, a->mv_size, b->mv_data, b->mv_size);
 	else
-		return memncmp((char *)a->mv_data, a->mv_size, b->mv_data, b->mv_size);
+		return EINVAL;	/* too bad you can't distinguish this from a valid result */
 }
 
 /* Allocate new page(s) for writing */
@@ -1979,6 +1928,67 @@ mdb_env_close(MDB_env *env)
 	free(env);
 }
 
+static int
+intcmp(const MDB_val *a, const MDB_val *b)
+{
+	if (a->mv_size == sizeof(long))
+	{
+		unsigned long *la, *lb;
+		la = a->mv_data;
+		lb = b->mv_data;
+		return *la - *lb;
+	} else {
+		unsigned int *ia, *ib;
+		ia = a->mv_data;
+		ib = b->mv_data;
+		return *ia - *ib;
+	}
+}
+
+static int
+memncmp(const MDB_val *a, const MDB_val *b)
+{
+	int diff, len_diff;
+	unsigned int len;
+
+	len = a->mv_size;
+	len_diff = a->mv_size - b->mv_size;
+	if (len_diff > 0)
+		len = b->mv_size;
+	diff = memcmp(a->mv_data, b->mv_data, len);
+	return diff ? diff : len_diff;
+}
+
+static int
+memnrcmp(const MDB_val *a, const MDB_val *b)
+{
+	const unsigned char	*p1, *p2, *p1_lim;
+	int diff, len_diff;
+
+	if (b->mv_size == 0)
+		return a->mv_size != 0;
+	if (a->mv_size == 0)
+		return -1;
+
+	p1 = (const unsigned char *)a->mv_data + a->mv_size - 1;
+	p2 = (const unsigned char *)b->mv_data + b->mv_size - 1;
+
+	len_diff = a->mv_size - b->mv_size;
+	if (len_diff < 0)
+		p1_lim = p1 - a->mv_size;
+	else
+		p1_lim = p1 - b->mv_size;
+
+	while (p1 >= p1_lim) {
+		diff = *p1 - *p2;
+		if (diff)
+			return diff;
+		p1--;
+		p2--;
+	}
+	return len_diff;
+}
+
 /* Search for key within a leaf page, using binary search.
  * Returns the smallest entry larger or equal to the key.
  * If exactp is non-null, stores whether the found entry was an exact match
@@ -1990,29 +2000,33 @@ static MDB_node *
 mdb_search_node(MDB_txn *txn, MDB_dbi dbi, MDB_page *mp, MDB_val *key,
     int *exactp, unsigned int *kip)
 {
-	unsigned int	 i = 0;
+	unsigned int	 i = 0, nkeys;
 	int		 low, high;
 	int		 rc = 0;
 	MDB_node	*node = NULL;
 	MDB_val	 nodekey;
+	MDB_cmp_func *cmp;
 	DKBUF;
 
+	nkeys = NUMKEYS(mp);
+
 	DPRINTF("searching %u keys in %s page %lu",
-	    NUMKEYS(mp),
-	    IS_LEAF(mp) ? "leaf" : "branch",
+	    nkeys, IS_LEAF(mp) ? "leaf" : "branch",
 	    mp->mp_pgno);
 
-	assert(NUMKEYS(mp) > 0);
-
-	memset(&nodekey, 0, sizeof(nodekey));
+	assert(nkeys > 0);
 
 	low = IS_LEAF(mp) ? 0 : 1;
-	high = NUMKEYS(mp) - 1;
+	high = nkeys - 1;
+	cmp = txn->mt_dbxs[dbi].md_cmp;
+	if (IS_LEAF2(mp)) {
+		nodekey.mv_size = txn->mt_dbs[dbi].md_pad;
+		node = NODEPTR(mp, 0);	/* fake */
+	}
 	while (low <= high) {
 		i = (low + high) >> 1;
 
 		if (IS_LEAF2(mp)) {
-			nodekey.mv_size = txn->mt_dbs[dbi].md_pad;
 			nodekey.mv_data = LEAF2KEY(mp, i, nodekey.mv_size);
 		} else {
 			node = NODEPTR(mp, i);
@@ -2021,14 +2035,16 @@ mdb_search_node(MDB_txn *txn, MDB_dbi dbi, MDB_page *mp, MDB_val *key,
 			nodekey.mv_data = NODEKEY(node);
 		}
 
-		rc = mdb_cmp(txn, dbi, key, &nodekey);
+		rc = cmp(key, &nodekey);
 
+#if DEBUG
 		if (IS_LEAF(mp))
 			DPRINTF("found leaf index %u [%s], rc = %i",
 			    i, DKEY(&nodekey), rc);
 		else
 			DPRINTF("found branch index %u [%s -> %lu], rc = %i",
 			    i, DKEY(&nodekey), NODEPGNO(node), rc);
+#endif
 
 		if (rc == 0)
 			break;
@@ -2045,12 +2061,12 @@ mdb_search_node(MDB_txn *txn, MDB_dbi dbi, MDB_page *mp, MDB_val *key,
 		*exactp = (rc == 0);
 	if (kip)	/* Store the key index if requested. */
 		*kip = i;
-	if (i >= NUMKEYS(mp))
+	if (i >= nkeys)
 		/* There is no entry larger or equal to the key. */
 		return NULL;
 
 	/* nodeptr is fake for LEAF2 */
-	return IS_LEAF2(mp) ? NODEPTR(mp, 0) : NODEPTR(mp, i);
+	return node;
 }
 
 static void
@@ -2163,7 +2179,7 @@ mdb_search_page_root(MDB_txn *txn, MDB_dbi dbi, MDB_val *key,
 			return ENOMEM;
 
 		if (modify) {
-			MDB_dhead *dh = ((MDB_dhead *)mp)-1;
+			MDB_dhead *dh;
 			if ((rc = mdb_touch(txn, dbi, mpp)) != 0)
 				return rc;
 			dh = ((MDB_dhead *)mpp->mp_page)-1;
@@ -2524,7 +2540,7 @@ mdb_cursor_set(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 			leaf = NODEPTR(top->mp_page, 0);
 			MDB_SET_KEY(leaf, &nodekey);
 		}
-		rc = mdb_cmp(cursor->mc_txn, cursor->mc_dbi, key, &nodekey);
+		rc = cursor->mc_txn->mt_dbxs[cursor->mc_dbi].md_cmp(key, &nodekey);
 		if (rc == 0) {
 set1:
 			/* we're already on the right page */
@@ -2542,7 +2558,7 @@ set1:
 					leaf = NODEPTR(top->mp_page, NUMKEYS(top->mp_page)-1);
 					MDB_SET_KEY(leaf, &nodekey);
 				}
-				rc = mdb_cmp(cursor->mc_txn, cursor->mc_dbi, key, &nodekey);
+				rc = cursor->mc_txn->mt_dbxs[cursor->mc_dbi].md_cmp(key, &nodekey);
 				if (rc <= 0) goto set1;
 			}
 			/* If any parents have right-sibs, search.
@@ -2618,7 +2634,7 @@ set2:
 			MDB_val d2;
 			if ((rc = mdb_read_data(cursor->mc_txn, leaf, &d2)) != MDB_SUCCESS)
 				return rc;
-			rc = mdb_dcmp(cursor->mc_txn, cursor->mc_dbi, data, &d2);
+			rc = cursor->mc_txn->mt_dbxs[cursor->mc_dbi].md_cmp(data, &d2);
 			if (rc) {
 				if (op == MDB_GET_BOTH || rc > 0)
 					return MDB_NOTFOUND;
@@ -2941,7 +2957,7 @@ top:
 	if (rc == MDB_SUCCESS) {
 		/* there's only a key anyway, so this is a no-op */
 		if (IS_LEAF2(top->mp_page)) {
-			int ksize = mc->mc_txn->mt_dbs[mc->mc_dbi].md_pad;
+			unsigned int ksize = mc->mc_txn->mt_dbs[mc->mc_dbi].md_pad;
 			if (key->mv_size != ksize)
 				return EINVAL;
 			if (flags == MDB_CURRENT) {
@@ -3103,11 +3119,13 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 			NULL, &mc->mc_xcursor->mx_cursor, 0, &mp2);
 		if (rc == MDB_SUCCESS) {
 			MDB_ppage *top, *parent;
-			MDB_dpage *dp;
-			ID2	mid;
 			MDB_node *ni;
 			unsigned int i;
+#if 0
+			MDB_dpage *dp;
+			ID2	mid;
 			int dirty_root = 0;
+#endif
 
 			mc->mc_txn->mt_dbs[mc->mc_dbi].md_entries -=
 				mc->mc_xcursor->mx_txn.mt_dbs[mc->mc_xcursor->mx_cursor.mc_dbi].md_entries;
@@ -4353,7 +4371,6 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 {
 	MDB_cursor mc;
 	MDB_xcursor mx;
-	int rc;
 
 	assert(key != NULL);
 	assert(data != NULL);
@@ -4443,6 +4460,38 @@ mdb_env_stat(MDB_env *env, MDB_stat *arg)
 	return mdb_stat0(env, &env->me_metas[toggle]->mm_dbs[MAIN_DBI], arg);
 }
 
+static void
+mdb_default_cmp(MDB_txn *txn, MDB_dbi dbi)
+{
+	if (txn->mt_dbs[dbi].md_flags & (MDB_REVERSEKEY
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+		|MDB_INTEGERKEY
+#endif
+	))
+		txn->mt_dbxs[dbi].md_cmp = memnrcmp;
+	else
+		txn->mt_dbxs[dbi].md_cmp = memncmp;
+
+	if (txn->mt_dbs[dbi].md_flags & MDB_DUPSORT) {
+		if (txn->mt_dbs[dbi].md_flags & MDB_INTEGERDUP) {
+			if (txn->mt_dbs[dbi].md_flags & MDB_DUPFIXED)
+				txn->mt_dbxs[dbi].md_dcmp = intcmp;
+			else
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+				txn->mt_dbxs[dbi].md_dcmp = memnrcmp;
+#else
+				txn->mt_dbxs[dbi].md_dcmp = memncmp;
+#endif
+		} else if (txn->mt_dbs[dbi].md_flags & MDB_REVERSEDUP) {
+			txn->mt_dbxs[dbi].md_dcmp = memnrcmp;
+		} else {
+			txn->mt_dbxs[dbi].md_dcmp = memncmp;
+		}
+	} else {
+		txn->mt_dbxs[dbi].md_dcmp = NULL;
+	}
+}
+
 int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 {
 	MDB_val key, data;
@@ -4450,12 +4499,21 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 	int rc, dirty = 0;
 	size_t len;
 
+	if (txn->mt_dbxs[FREE_DBI].md_cmp == NULL) {
+		mdb_default_cmp(txn, FREE_DBI);
+	}
+
 	/* main DB? */
 	if (!name) {
 		*dbi = MAIN_DBI;
 		if (flags & (MDB_DUPSORT|MDB_REVERSEKEY|MDB_INTEGERKEY))
 			txn->mt_dbs[MAIN_DBI].md_flags |= (flags & (MDB_DUPSORT|MDB_REVERSEKEY|MDB_INTEGERKEY));
+		mdb_default_cmp(txn, MAIN_DBI);
 		return MDB_SUCCESS;
+	}
+
+	if (txn->mt_dbxs[MAIN_DBI].md_cmp == NULL) {
+		mdb_default_cmp(txn, MAIN_DBI);
 	}
 
 	/* Is the DB already open? */
@@ -4496,8 +4554,6 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 	if (rc == MDB_SUCCESS) {
 		txn->mt_dbxs[txn->mt_numdbs].md_name.mv_data = strdup(name);
 		txn->mt_dbxs[txn->mt_numdbs].md_name.mv_size = len;
-		txn->mt_dbxs[txn->mt_numdbs].md_cmp = NULL;
-		txn->mt_dbxs[txn->mt_numdbs].md_dcmp = NULL;
 		txn->mt_dbxs[txn->mt_numdbs].md_rel = NULL;
 		txn->mt_dbxs[txn->mt_numdbs].md_parent = MAIN_DBI;
 		txn->mt_dbxs[txn->mt_numdbs].md_dirty = dirty;
@@ -4505,6 +4561,7 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 		*dbi = txn->mt_numdbs;
 		txn->mt_env->me_dbs[0][txn->mt_numdbs] = txn->mt_dbs[txn->mt_numdbs];
 		txn->mt_env->me_dbs[1][txn->mt_numdbs] = txn->mt_dbs[txn->mt_numdbs];
+		mdb_default_cmp(txn, txn->mt_numdbs);
 		txn->mt_numdbs++;
 	}
 

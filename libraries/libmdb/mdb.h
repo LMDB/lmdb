@@ -157,6 +157,8 @@ typedef void (MDB_rel_func)(void *newptr, void *oldptr, size_t size);
 #define MDB_DUPFIXED	0x10
 	/** with #MDB_DUPSORT, dups are numeric in native byte order */
 #define MDB_INTEGERDUP	0x20
+	/** with #MDB_DUPSORT, use reverse string dups */
+#define MDB_REVERSEDUP	0x40
 	/** create DB if not already existing */
 #define MDB_CREATE		0x40000
 /** @} */
