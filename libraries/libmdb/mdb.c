@@ -539,7 +539,7 @@ static size_t	mdb_branch_size(MDB_env *env, MDB_val *key);
 
 static void mdb_default_cmp(MDB_txn *txn, MDB_dbi dbi);
 
-static MDB_cmp_func	memncmp, memnrcmp, intcmp;
+static MDB_cmp_func	memncmp, memnrcmp, intcmp, cintcmp;
 
 #ifdef _WIN32
 static SECURITY_DESCRIPTOR mdb_null_sd;
@@ -1937,6 +1937,7 @@ mdb_env_close(MDB_env *env)
 	free(env);
 }
 
+/* only for aligned ints */
 static int
 intcmp(const MDB_val *a, const MDB_val *b)
 {
@@ -1952,6 +1953,26 @@ intcmp(const MDB_val *a, const MDB_val *b)
 		ib = b->mv_data;
 		return *ia - *ib;
 	}
+}
+
+/* ints must always be the same size */
+static int
+cintcmp(const MDB_val *a, const MDB_val *b)
+{
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+	unsigned char *u, *c;
+	int x;
+
+	u = a->mv_data + a->mv_size;
+	c = b->mv_data + a->mv_size;
+	while(u > (unsigned char *)a->mv_data) {
+		x = *--u - *--c;
+		if (x) break;
+	}
+	return x;
+#else
+	return memcmp(a->mv_data, b->mv_data, a->mv_size);
+#endif
 }
 
 static int
@@ -2065,6 +2086,8 @@ mdb_search_node(MDB_txn *txn, MDB_dbi dbi, MDB_page *mp, MDB_val *key,
 
 	if (rc > 0) {	/* Found entry is less than the key. */
 		i++;	/* Skip to get the smallest entry larger than key. */
+		if (!IS_LEAF2(mp))
+			node = NODEPTR(mp, i);
 	}
 	if (exactp)
 		*exactp = (rc == 0);
@@ -4337,12 +4360,10 @@ mdb_env_stat(MDB_env *env, MDB_stat *arg)
 static void
 mdb_default_cmp(MDB_txn *txn, MDB_dbi dbi)
 {
-	if (txn->mt_dbs[dbi].md_flags & (MDB_REVERSEKEY
-#if __BYTE_ORDER == __LITTLE_ENDIAN
-		|MDB_INTEGERKEY
-#endif
-	))
+	if (txn->mt_dbs[dbi].md_flags & MDB_REVERSEKEY)
 		txn->mt_dbxs[dbi].md_cmp = memnrcmp;
+	else if (txn->mt_dbs[dbi].md_flags & MDB_INTEGERKEY)
+		txn->mt_dbxs[dbi].md_cmp = cintcmp;
 	else
 		txn->mt_dbxs[dbi].md_cmp = memncmp;
 
@@ -4351,11 +4372,7 @@ mdb_default_cmp(MDB_txn *txn, MDB_dbi dbi)
 			if (txn->mt_dbs[dbi].md_flags & MDB_DUPFIXED)
 				txn->mt_dbxs[dbi].md_dcmp = intcmp;
 			else
-#if __BYTE_ORDER == __LITTLE_ENDIAN
-				txn->mt_dbxs[dbi].md_dcmp = memnrcmp;
-#else
-				txn->mt_dbxs[dbi].md_dcmp = memncmp;
-#endif
+				txn->mt_dbxs[dbi].md_dcmp = cintcmp;
 		} else if (txn->mt_dbs[dbi].md_flags & MDB_REVERSEDUP) {
 			txn->mt_dbxs[dbi].md_dcmp = memnrcmp;
 		} else {
