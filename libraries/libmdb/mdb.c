@@ -2661,7 +2661,7 @@ set3:
 			MDB_val d2;
 			if ((rc = mdb_read_data(cursor->mc_txn, leaf, &d2)) != MDB_SUCCESS)
 				return rc;
-			rc = cursor->mc_txn->mt_dbxs[cursor->mc_dbi].md_cmp(data, &d2);
+			rc = cursor->mc_txn->mt_dbxs[cursor->mc_dbi].md_dcmp(data, &d2);
 			if (rc) {
 				if (op == MDB_GET_BOTH || rc > 0)
 					return MDB_NOTFOUND;
@@ -3125,7 +3125,7 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 		MDB_pageparent mp2;
 
 		if (flags != MDB_NODUPDATA) {
-/*			mdb_xcursor_init2(mc); */
+			mdb_xcursor_init2(mc);
 			rc = mdb_cursor_del(&mc->mc_xcursor->mx_cursor, 0);
 			mdb_xcursor_fini(mc);
 			/* If sub-DB still has entries, we're done */
@@ -3251,6 +3251,7 @@ mdb_leaf_size(MDB_env *env, MDB_val *key, MDB_val *data)
 		/* put on overflow page */
 		sz -= data->mv_size - sizeof(pgno_t);
 	}
+	sz += sz & 1;
 
 	return sz + sizeof(indx_t);
 }
@@ -3326,6 +3327,7 @@ mdb_add_node(MDB_txn *txn, MDB_dbi dbi, MDB_page *mp, indx_t indx,
 			node_size += data->mv_size;
 		}
 	}
+	node_size += node_size & 1;
 
 	if (node_size + sizeof(indx_t) > SIZELEFT(mp)) {
 		DPRINTF("not enough room in page %lu, got %u ptrs",
@@ -3408,6 +3410,7 @@ mdb_del_node(MDB_page *mp, indx_t indx, int ksize)
 		else
 			sz += NODEDSZ(node);
 	}
+	sz += sz & 1;
 
 	ptr = mp->mp_ptrs[indx];
 	numkeys = NUMKEYS(mp);
@@ -3465,6 +3468,7 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_page *mp, MDB_node *node)
 	mx->mx_dbs[1] = mc->mc_txn->mt_dbs[1];
 	if (mc->mc_dbi > 1) {
 		mx->mx_dbs[2] = mc->mc_txn->mt_dbs[mc->mc_dbi];
+		mx->mx_dbxs[2].md_dirty = mc->mc_txn->mt_dbxs[mc->mc_dbi].md_dirty;
 		dbn = 3;
 	} else {
 		dbn = 2;
@@ -3490,6 +3494,7 @@ mdb_xcursor_init2(MDB_cursor *mc)
 	mx->mx_dbs[1] = mc->mc_txn->mt_dbs[1];
 	if (mc->mc_dbi > 1) {
 		mx->mx_dbs[2] = mc->mc_txn->mt_dbs[mc->mc_dbi];
+		mx->mx_dbxs[2].md_dirty = mc->mc_txn->mt_dbxs[mc->mc_dbi].md_dirty;
 		dbn = 3;
 	} else {
 		dbn = 2;
@@ -3506,8 +3511,6 @@ mdb_xcursor_fini(MDB_cursor *mc)
 	mc->mc_txn->mt_next_pgno = mx->mx_txn.mt_next_pgno;
 	mc->mc_txn->mt_dbs[0] = mx->mx_dbs[0];
 	mc->mc_txn->mt_dbs[1] = mx->mx_dbs[1];
-	mc->mc_txn->mt_dbxs[0].md_dirty = mx->mx_dbxs[0].md_dirty;
-	mc->mc_txn->mt_dbxs[1].md_dirty = mx->mx_dbxs[1].md_dirty;
 	if (mc->mc_dbi > 1) {
 		mc->mc_txn->mt_dbs[mc->mc_dbi] = mx->mx_dbs[2];
 		mc->mc_txn->mt_dbxs[mc->mc_dbi].md_dirty = mx->mx_dbxs[2].md_dirty;
@@ -4104,6 +4107,7 @@ mdb_split(MDB_txn *txn, MDB_dbi dbi, MDB_page **mpp, unsigned int *newindxp,
 					psize += sizeof(pgno_t);
 				else
 					psize += NODEDSZ(node);
+				psize += psize & 1;
 				if (psize > pmax) {
 					split_indx = i;
 					break;
@@ -4118,6 +4122,7 @@ mdb_split(MDB_txn *txn, MDB_dbi dbi, MDB_page **mpp, unsigned int *newindxp,
 					psize += sizeof(pgno_t);
 				else
 					psize += NODEDSZ(node);
+				psize += psize & 1;
 				if (psize > pmax) {
 					split_indx = i+1;
 					break;
