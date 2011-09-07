@@ -2322,7 +2322,7 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 {
 	MDB_cursor	mc;
 	MDB_xcursor	mx;
-	int exact;
+	int exact = 0;
 	DKBUF;
 
 	assert(key);
@@ -3475,6 +3475,7 @@ mdb_xcursor_init0(MDB_cursor *mc)
 	mx->mx_dbxs[dbn+1].md_rel = mx->mx_dbxs[dbn].md_rel;
 	mx->mx_dbxs[dbn+1].md_dirty = 0;
 	mx->mx_txn.mt_numdbs = dbn+2;
+	mx->mx_txn.mt_u = mc->mc_txn->mt_u;
 
 	mx->mx_cursor.mc_xcursor = NULL;
 	mx->mx_cursor.mc_txn = &mx->mx_txn;
@@ -3503,7 +3504,6 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_page *mp, MDB_node *node)
 	mx->mx_dbxs[dbn].md_name.mv_data = NODEKEY(node);
 	mx->mx_dbxs[dbn].md_name.mv_size = node->mn_ksize;
 	mx->mx_txn.mt_next_pgno = mc->mc_txn->mt_next_pgno;
-	mx->mx_txn.mt_u = mc->mc_txn->mt_u;
 	mx->mx_cursor.mc_snum = 0;
 	mx->mx_cursor.mc_flags = 0;
 }
@@ -3697,7 +3697,16 @@ mdb_move_node(MDB_txn *txn, MDB_dbi dbi, MDB_pageparent *src, indx_t srcindx,
 		data.mv_size = 0;
 		data.mv_data = NULL;
 	} else {
-		srcnode = NODEPTR(src->mp_page, srcindx);
+		if (srcindx == 0 && IS_BRANCH(src->mp_page)) {
+			/* must find the lowest key below src */
+			MDB_pageparent mpp;
+			mpp.mp_page = src->mp_page;
+			mpp.mp_pi = 0;
+			mdb_search_page_root(txn, dbi, NULL, NULL, 0, &mpp);
+			srcnode = NODEPTR(mpp.mp_page, 0);
+		} else {
+			srcnode = NODEPTR(src->mp_page, srcindx);
+		}
 		key.mv_size = NODEKSZ(srcnode);
 		key.mv_data = NODEKEY(srcnode);
 		data.mv_size = NODEDSZ(srcnode);
@@ -3721,17 +3730,17 @@ mdb_move_node(MDB_txn *txn, MDB_dbi dbi, MDB_pageparent *src, indx_t srcindx,
 	 */
 	mdb_del_node(src->mp_page, srcindx, key.mv_size);
 
-	/* The key value just changed due to del_node, find it again.
-	 */
-	if (!IS_LEAF2(src->mp_page)) {
-		srcnode = NODEPTR(src->mp_page, srcindx);
-		key.mv_data = NODEKEY(srcnode);
-	}
-
 	/* Update the parent separators.
 	 */
 	if (srcindx == 0) {
 		if (src->mp_pi != 0) {
+			if (IS_LEAF2(src->mp_page)) {
+				key.mv_data = LEAF2KEY(src->mp_page, srcindx, key.mv_size);
+			} else {
+				srcnode = NODEPTR(src->mp_page, srcindx);
+				key.mv_size = NODEKSZ(srcnode);
+				key.mv_data = NODEKEY(srcnode);
+			}
 			DPRINTF("update separator for source page %lu to [%s]",
 				src->mp_page->mp_pgno, DKEY(&key));
 			if ((rc = mdb_update_key(src->mp_parent, src->mp_pi,
@@ -3747,6 +3756,13 @@ mdb_move_node(MDB_txn *txn, MDB_dbi dbi, MDB_pageparent *src, indx_t srcindx,
 
 	if (dstindx == 0) {
 		if (dst->mp_pi != 0) {
+			if (IS_LEAF2(src->mp_page)) {
+				key.mv_data = LEAF2KEY(dst->mp_page, 0, key.mv_size);
+			} else {
+				srcnode = NODEPTR(dst->mp_page, 0);
+				key.mv_size = NODEKSZ(srcnode);
+				key.mv_data = NODEKEY(srcnode);
+			}
 			DPRINTF("update separator for destination page %lu to [%s]",
 				dst->mp_page->mp_pgno, DKEY(&key));
 			if ((rc = mdb_update_key(dst->mp_parent, dst->mp_pi,
