@@ -3171,22 +3171,12 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 			MDB_ppage *top, *parent;
 			MDB_node *ni;
 			unsigned int i;
-#if 0
-			MDB_dpage *dp;
-			ID2	mid;
-			int dirty_root = 0;
-#endif
 
 			mc->mc_txn->mt_dbs[mc->mc_dbi].md_entries -=
 				mc->mc_xcursor->mx_txn.mt_dbs[mc->mc_xcursor->mx_cursor.mc_dbi].md_entries;
 
 			cursor_pop_page(&mc->mc_xcursor->mx_cursor);
 			if (mc->mc_xcursor->mx_cursor.mc_snum) {
-#if 0
-				if (mc->mc_xcursor->mx_cursor.mc_stack[0].mp_page->mp_flags & P_DIRTY) {
-					dirty_root = 1;
-				}
-#endif
 				while (mc->mc_xcursor->mx_cursor.mc_snum > 1) {
 					top = CURSOR_TOP(&mc->mc_xcursor->mx_cursor);
 					parent = CURSOR_PARENT(&mc->mc_xcursor->mx_cursor);
@@ -3197,40 +3187,16 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 						pg = NODEPGNO(ni);
 						if ((rc = mdb_get_page(mc->mc_txn, pg, &mp)))
 							return rc;
-#if 0
-						if (mp->mp_flags & P_DIRTY) {
-							/* drop it */
-							mid.mid = pg;
-							mdb_mid2l_delete(mc->mc_txn->mt_u.dirty_list, &mid);
-							dp = mid.mptr;
-							dp->h.md_parent = (MDB_page *)mc->mc_txn->mt_env->me_dpages;
-							mc->mc_txn->mt_env->me_dpages = dp;
-						} else
-#endif
-						{
-							/* free it */
-							mdb_midl_append(mc->mc_txn->mt_free_pgs, pg);
-						}
+						/* free it */
+						mdb_midl_append(mc->mc_txn->mt_free_pgs, pg);
 					}
 					rc = mdb_sibling(&mc->mc_xcursor->mx_cursor, 1);
 					if (rc) break;
 				}
 			}
-#if 0
-			if (dirty_root) {
-				/* drop it */
-				mid.mid = mc->mc_xcursor->mx_txn.mt_dbs[mc->mc_xcursor->mx_cursor.mc_dbi].md_root;
-				mdb_mid2l_delete(mc->mc_txn->mt_u.dirty_list, &mid);
-				dp = mid.mptr;
-				dp->h.md_parent = (MDB_page *)mc->mc_txn->mt_env->me_dpages;
-				mc->mc_txn->mt_env->me_dpages = dp;
-			} else
-#endif
-			{
-				/* free it */
-				mdb_midl_append(mc->mc_txn->mt_free_pgs,
-					mc->mc_xcursor->mx_txn.mt_dbs[mc->mc_xcursor->mx_cursor.mc_dbi].md_root);
-			}
+			/* free it */
+			mdb_midl_append(mc->mc_txn->mt_free_pgs,
+				mc->mc_xcursor->mx_txn.mt_dbs[mc->mc_xcursor->mx_cursor.mc_dbi].md_root);
 		}
 	}
 
