@@ -67,6 +67,10 @@
  *	@{
  */
 /** @defgroup compat	Windows Compatibility Macros
+ *	A bunch of macros to minimize the amount of platform-specific ifdefs
+ *	needed throughout the rest of the code. When the features this library
+ *	needs are similar enough to POSIX to be hidden in a one-or-two line
+ *	replacement, this macro approach is used.
  *	@{
  */
 #ifdef _WIN32
@@ -91,20 +95,54 @@
 #define	close(fd)	CloseHandle(fd)
 #define	munmap(ptr,len)	UnmapViewOfFile(ptr)
 #else
+	/** Lock the reader mutex.
+	 */
 #define LOCK_MUTEX_R(env)	pthread_mutex_lock(&env->me_txns->mti_mutex)
+	/** Unlock the reader mutex.
+	 */
 #define UNLOCK_MUTEX_R(env)	pthread_mutex_unlock(&env->me_txns->mti_mutex)
+
+	/** Lock the writer mutex.
+	 *	Only a single write transaction is allowed at a time. Other writers
+	 *	will block waiting for this mutex.
+	 */
 #define LOCK_MUTEX_W(env)	pthread_mutex_lock(&env->me_txns->mti_wmutex)
+	/** Unlock the writer mutex.
+	 */
 #define UNLOCK_MUTEX_W(env)	pthread_mutex_unlock(&env->me_txns->mti_wmutex)
+
+	/** Get the error code for the last failed system function.
+	 */
 #define	ErrCode()	errno
+
+	/** An abstraction for a file handle.
+	 *	On POSIX systems file handles are small integers. On Windows
+	 *	they're opaque pointers.
+	 */
 #define	HANDLE	int
+
+	/**	A value for an invalid file handle.
+	 *	Mainly used to initialize file variables and signify that they are
+	 *	unused.
+	 */
 #define INVALID_HANDLE_VALUE	-1
+
+	/** Get the size of a memory page for the system.
+	 *	This is the basic size that the platform's memory manager uses, and is
+	 *	fundamental to the use of memory-mapped files.
+	 */
 #define	GetPageSize(x)	(x) = sysconf(_SC_PAGE_SIZE)
 #endif
 
 /** @} */
 
 #ifndef _WIN32
-/* Note: If O_DSYNC is undefined but exists in /usr/include,
+/**	A flag for opening a file and requesting synchronous data writes.
+ *	This is only used when writing a meta page. It's not strictly needed;
+ *	we could just do a normal write and then immediately perform a flush.
+ *	But if this flag is available it saves us an extra system call.
+ *
+ *	@note If O_DSYNC is undefined but exists in /usr/include,
  * preferably set some compiler flag to get the definition.
  * Otherwise compile with the less efficient -DMDB_DSYNC=O_SYNC.
  */
@@ -113,50 +151,128 @@
 #endif
 #endif
 
+	/** A page number in the database.
+	 *	Note that 64 bit page numbers are overkill, since pages themselves
+	 *	already represent 12-13 bits of addressable memory, and the OS will
+	 *	always limit applications to a maximum of 63 bits of address space.
+	 *
+	 *	@note In the #MDB_node structure, we only store 48 bits of this value,
+	 *	which thus limits us to only 60 bits of addressable data.
+	 */
 typedef ULONG		pgno_t;
 
+/** @defgroup debug	Debug Macros
+ *	@{
+ */
 #ifndef DEBUG
+	/**	Enable debug output.
+	 *	Set this to 1 for copious tracing. Set to 2 to add dumps of all IDLs
+	 *	read from and written to the database (used for free space management).
+	 */
 #define DEBUG 0
 #endif
 
 #if !(__STDC_VERSION__ >= 199901L || defined(__GNUC__))
 # define DPRINTF	(void)	/* Vararg macros may be unsupported */
 #elif DEBUG
-# define DPRINTF(fmt, ...)	/* Requires 2 or more args */ \
+	/**	Print a debug message with printf formatting. */
+# define DPRINTF(fmt, ...)	/**< Requires 2 or more args */ \
 	fprintf(stderr, "%s:%d:(%p) " fmt "\n", __func__, __LINE__, pthread_self(), __VA_ARGS__)
 #else
 # define DPRINTF(fmt, ...)	((void) 0)
 #endif
+	/**	Print a debug string.
+	 *	The string is printed literally, with no format processing.
+	 */
 #define DPUTS(arg)	DPRINTF("%s", arg)
+/** @} */
 
+	/** A default memory page size.
+	 *	The actual size is platform-dependent, but we use this for
+	 *	boot-strapping. We probably should not be using this any more.
+	 *	The #GetPageSize() macro is used to get the actual size.
+	 *
+	 *	Note that we don't currently support Huge pages. On Linux,
+	 *	regular data files cannot use Huge pages, and in general
+	 *	Huge pages aren't actually pageable. We rely on the OS
+	 *	demand-pager to read our data and page it out when memory
+	 *	pressure from other processes is high. So until OSs have
+	 *	actual paging support for Huge pages, they're not viable.
+	 */
 #define PAGESIZE	 4096
+
+	/** The minimum number of keys required in a database page.
+	 *	Setting this to a larger value will place a smaller bound on the
+	 *	maximum size of a data item. Data items larger than this size will
+	 *	be pushed into overflow pages instead of being stored directly in
+	 *	the B-tree node. This value used to default to 4. With a page size
+	 *	of 4096 bytes that meant that any item larger than 1024 bytes would
+	 *	go into an overflow page. That also meant that on average 2-3KB of
+	 *	each overflow page was wasted space. The value cannot be lower than
+	 *	2 because then there would no longer be a tree structure. With this
+	 *	value, items larger than 2KB will go into overflow pages, and on
+	 *	average only 1KB will be wasted.
+	 */
 #define MDB_MINKEYS	 2
+
+	/**	A stamp that identifies a file as an MDB file.
+	 *	There's nothing special about this value other than that it is easily
+	 *	recognizable, and it will reflect any byte order mismatches.
+	 */
 #define MDB_MAGIC	 0xBEEFC0DE
+
+	/**	The version number for a database's file format. */
 #define MDB_VERSION	 1
+
+	/**	The maximum size of a key in the database.
+	 *	While data items have essentially unbounded size, we require that
+	 *	keys all fit onto a regular page. This limit could be raised a bit
+	 *	further if needed; to something just under #PAGESIZE / #MDB_MINKEYS.
+	 */
 #define MAXKEYSIZE	 511
+
 #if DEBUG
-#define	KBUF	(MAXKEYSIZE*2+1)
-#define DKBUF	char kbuf[KBUF]
+	/**	A key buffer.
+	 *	@ingroup debug
+	 *	This is used for printing a hex dump of a key's contents.
+	 */
+#define DKBUF	char kbuf[(MAXKEYSIZE*2+1)]
+	/**	Display a key in hex.
+	 *	@ingroup debug
+	 *	Invoke a function to display a key in hex.
+	 */
 #define	DKEY(x)	mdb_dkey(x, kbuf)
 #else
 #define	DKBUF
 #define DKEY(x)
 #endif
 
-/* The DB view is always consistent because all writes are wrapped in
- * the wmutex. Finer-grained locks aren't necessary.
+/**	@defgroup lazylock	Lazy Locking
+ *	Macros for locks that are't actually needed.
+ *	The DB view is always consistent because all writes are wrapped in
+ *	the wmutex. Finer-grained locks aren't necessary.
+ *	@{
  */
 #ifndef	LAZY_LOCKS
+	/**	Use lazy locking. I.e., don't lock these accesses at all. */
 #define	LAZY_LOCKS	1
 #endif
 #if	LAZY_LOCKS
+	/** Grab the reader lock */
 #define	LAZY_MUTEX_LOCK(x)
+	/** Release the reader lock */
 #define	LAZY_MUTEX_UNLOCK(x)
+	/** Release the DB table reader/writer lock */
 #define	LAZY_RWLOCK_UNLOCK(x)
+	/** Grab the DB table write lock */
 #define	LAZY_RWLOCK_WRLOCK(x)
+	/** Grab the DB table read lock */
 #define	LAZY_RWLOCK_RDLOCK(x)
+	/** Declare the DB table rwlock */
 #define	LAZY_RWLOCK_DEF(x)
+	/** Initialize the DB table rwlock */
 #define	LAZY_RWLOCK_INIT(x,y)
+	/**	Destroy the DB table rwlock */
 #define	LAZY_RWLOCK_DESTROY(x)
 #else
 #define	LAZY_MUTEX_LOCK(x)		pthread_mutex_lock(x)
@@ -168,56 +284,160 @@ typedef ULONG		pgno_t;
 #define	LAZY_RWLOCK_INIT(x,y)	pthread_rwlock_init(x,y)
 #define	LAZY_RWLOCK_DESTROY(x)	pthread_rwlock_destroy(x)
 #endif
+/** @} */
 
+	/** An invalid page number.
+	 *	Mainly used to denote an empty tree.
+	 */
 #define P_INVALID	 (~0UL)
 
+	/** Test if a flag \b f is set in a flag word \b w. */
 #define F_ISSET(w, f)	 (((w) & (f)) == (f))
 
+	/**	Used for offsets within a single page.
+	 *	Since memory pages are typically 4 or 8KB in size, 12-13 bits,
+	 *	this is plenty.
+	 */
 typedef uint16_t	 indx_t;
 
-#define DEFAULT_READERS	126
+	/**	Default size of memory map.
+	 *	This is certainly too small for any actual applications. Apps should always set
+	 *	the size explicitly using #mdb_env_set_mapsize().
+	 */
 #define DEFAULT_MAPSIZE	1048576
 
-/* Lock descriptor stuff */
+/**	@defgroup readers	Reader Lock Table
+ *	Readers don't acquire any locks for their data access. Instead, they
+ *	simply record their transaction ID in the reader table. The reader
+ *	mutex is needed just to find an empty slot in the reader table. The
+ *	slot's address is saved in thread-specific data so that subsequent read
+ *	transactions started by the same thread need no further locking to proceed.
+ *
+ *	Since the database uses multi-version concurrency control, readers don't
+ *	actually need any locking. This table is used to keep track of which
+ *	readers are using data from which old transactions, so that we'll know
+ *	when a particular old transaction is no longer in use, Old transactions
+ *	that have freed any data pages can then have their freed pages reclaimed
+ *	for use by a later write transaction.
+ *
+ *	The lock table is constructed such that reader slots are aligned with the
+ *	processor's cache line size. Any slot is only ever used by one thread.
+ *	This alignment guarantees that there will be no contention or cache
+ *	thrashing as threads update their own slot info, and also eliminates
+ *	any need for locking when accessing a slot.
+ *
+ *	A writer thread will scan every slot in the table to determine the oldest
+ *	outstanding reader transaction. Any freed pages older than this will be
+ *	reclaimed by the writer. The writer doesn't use any locks when scanning
+ *	this table. This means that there's no guarantee that the writer will
+ *	see the most up-to-date reader info, but that's not required for correct
+ *	operation - all we need is to know the upper bound on the oldest reader,
+ *	we don't care at all about the newest reader. So the only consequence of
+ *	reading stale information here is that old pages might hang around a
+ *	while longer before being reclaimed. That's actually good anyway, because
+ *	the longer we delay reclaiming old pages, the more likely it is that a
+ *	string of contiguous pages can be found after coalescing old pages from
+ *	many old transactions together.
+ *
+ *	@todo We don't actually do such coalescing yet, we grab pages from one
+ *	old transaction at a time.
+ *	@{
+ */
+	/**	Number of slots in the reader table.
+	 *	This value was chosen somewhat arbitrarily. 126 readers plus a
+	 *	couple mutexes fit exactly into 8KB on my development machine.
+	 *	Applications should set the table size using #mdb_env_set_maxreaders().
+	 */
+#define DEFAULT_READERS	126
+
+	/**	The size of a CPU cache line in bytes. We want our lock structures
+	 *	aligned to this size to avoid false cache line sharing in the
+	 *	lock table.
+	 *	This value works for most CPUs. For Itanium this should be 128.
+	 */
 #ifndef CACHELINE
-#define CACHELINE	64	/* most CPUs. Itanium uses 128 */
+#define CACHELINE	64
 #endif
 
+	/**	The information we store in a single slot of the reader table.
+	 *	In addition to a transaction ID, we also record the process and
+	 *	thread ID that owns a slot, so that we can detect stale information,
+	 *	e.g. threads or processes that went away without cleaning up.
+	 *	@note We currently don't check for stale records. We simply re-init
+	 *	the table when we know that we're the only process opening the
+	 *	lock file.
+	 */
 typedef struct MDB_rxbody {
+	/**	The current Transaction ID when this transaction began.
+	 *	Multiple readers that start at the same time will probably have the
+	 *	same ID here. Again, it's not important to exclude them from
+	 *	anything; all we need to know is which version of the DB they
+	 *	started from so we can avoid overwriting any data used in that
+	 *	particular version.
+	 */
 	ULONG		mrb_txnid;
+	/** The process ID of the process owning this reader txn. */
 	pid_t		mrb_pid;
+	/** The thread ID of the thread owning this txn. */
 	pthread_t	mrb_tid;
 } MDB_rxbody;
 
+	/** The actual reader record, with cacheline padding. */
 typedef struct MDB_reader {
 	union {
 		MDB_rxbody mrx;
+		/** shorthand for mrb_txnid */
 #define	mr_txnid	mru.mrx.mrb_txnid
 #define	mr_pid	mru.mrx.mrb_pid
 #define	mr_tid	mru.mrx.mrb_tid
-		/* cache line alignment */
+		/** cache line alignment */
 		char pad[(sizeof(MDB_rxbody)+CACHELINE-1) & ~(CACHELINE-1)];
 	} mru;
 } MDB_reader;
 
+	/** The header for the reader table.
+	 *	The table resides in a memory-mapped file. (This is a different file
+	 *	than is used for the main database.)
+	 *
+	 *	For POSIX the actual mutexes reside in the shared memory of this
+	 *	mapped file. On Windows, mutexes are named objects allocated by the
+	 *	kernel; we store the mutex names in this mapped file so that other
+	 *	processes can grab them. This same approach will also be used on
+	 *	MacOSX/Darwin (using named semaphores) since MacOSX doesn't support
+	 *	process-shared POSIX mutexes.
+	 */
 typedef struct MDB_txbody {
+		/** Stamp identifying this as an MDB lock file. It must be set
+		 *	to #MDB_MAGIC. */
 	uint32_t	mtb_magic;
+		/** Version number of this lock file. Must be set to #MDB_VERSION. */
 	uint32_t	mtb_version;
-/* For POSIX the actual mutexes reside in shared memory.
- * On Windows, mutexes are allocated by the kernel; we store
- * the name in shared memory so that other processes can
- * grab them.
- */
 #ifdef _WIN32
 	char	mtb_rmname[32];
 #else
+		/** Mutex protecting access to this table.
+		 *	This is the reader lock that #LOCK_MUTEX_R acquires.
+		 */
 	pthread_mutex_t	mtb_mutex;
 #endif
+		/**	The ID of the last transaction committed to the database.
+		 *	This is recorded here only for convenience; the value can always
+		 *	be determined by reading the main database meta pages.
+		 */
 	ULONG		mtb_txnid;
+		/** The number of slots that have been used in the reader table.
+		 *	This always records the maximum count, it is not decremented
+		 *	when readers release their slots.
+		 */
 	uint32_t	mtb_numreaders;
+		/**	The ID of the most recent meta page in the database.
+		 *	This is recorded here only for convenience; the value can always
+		 *	be determined by reading the main database meta pages.
+		 */
 	uint32_t	mtb_me_toggle;
 } MDB_txbody;
 
+	/** The actual reader table definition. */
 typedef struct MDB_txninfo {
 	union {
 		MDB_txbody mtb;
@@ -242,87 +462,226 @@ typedef struct MDB_txninfo {
 	} mt2;
 	MDB_reader	mti_readers[1];
 } MDB_txninfo;
+/** @} */
 
-/* Common header for all page types. Overflow pages
- * occupy a number of contiguous pages with no
+/** Common header for all page types.
+ * Overflow pages occupy a number of contiguous pages with no
  * headers on any page after the first.
  */
-typedef struct MDB_page {		/* represents a page of storage */
-#define	mp_pgno		mp_p.p_pgno
-#define	mp_next		mp_p.p_align
-	union padded {
-		pgno_t		p_pgno;		/* page number */
-		void *		p_align;	/* for IL32P64 */
-	} mp_p;
-#define	P_BRANCH	 0x01		/* branch page */
-#define	P_LEAF		 0x02		/* leaf page */
-#define	P_OVERFLOW	 0x04		/* overflow page */
-#define	P_META		 0x08		/* meta page */
-#define	P_DIRTY		 0x10		/* dirty page */
-#define	P_LEAF2		 0x20		/* DB with small, fixed size keys and no data */
+typedef struct MDB_page {
+	union {
+		pgno_t		mp_pgno;	/**< page number */
+		void *		mp_next;	/**< for in-memory list of freed structs */
+	};
+#define	P_BRANCH	 0x01		/**< branch page */
+#define	P_LEAF		 0x02		/**< leaf page */
+#define	P_OVERFLOW	 0x04		/**< overflow page */
+#define	P_META		 0x08		/**< meta page */
+#define	P_DIRTY		 0x10		/**< dirty page */
+#define	P_LEAF2		 0x20		/**< for #MDB_DUPFIXED records */
 	uint32_t	mp_flags;
-#define mp_lower	mp_pb.pb.pb_lower
-#define mp_upper	mp_pb.pb.pb_upper
-#define mp_pages	mp_pb.pb_pages
-	union page_bounds {
+	union {
 		struct {
-			indx_t		pb_lower;		/* lower bound of free space */
-			indx_t		pb_upper;		/* upper bound of free space */
-		} pb;
-		uint32_t	pb_pages;	/* number of overflow pages */
-	} mp_pb;
-	indx_t		mp_ptrs[1];		/* dynamic size */
+			indx_t		mp_lower;		/**< lower bound of free space */
+			indx_t		mp_upper;		/**< upper bound of free space */
+		};
+		uint32_t	mp_pages;	/**< number of overflow pages */
+	};
+	indx_t		mp_ptrs[1];		/**< dynamic size */
 } MDB_page;
 
+	/** Size of the page header, excluding dynamic data at the end */
 #define PAGEHDRSZ	 ((unsigned) offsetof(MDB_page, mp_ptrs))
 
+	/** Address of first usable data byte in a page, after the header */
+#define METADATA(p)	 ((void *)((char *)(p) + PAGEHDRSZ))
+
+	/** Number of nodes on a page */
 #define NUMKEYS(p)	 (((p)->mp_lower - PAGEHDRSZ) >> 1)
+
+	/** The amount of space remaining in the page */
 #define SIZELEFT(p)	 (indx_t)((p)->mp_upper - (p)->mp_lower)
+
+	/** The percentage of space used in the page, in tenths of a percent. */
 #define PAGEFILL(env, p) (1000L * ((env)->me_psize - PAGEHDRSZ - SIZELEFT(p)) / \
 				((env)->me_psize - PAGEHDRSZ))
+	/** The minimum page fill factor, in tenths of a percent.
+	 *	Pages emptier than this are candidates for merging.
+	 */
+#define FILL_THRESHOLD	 250
+
+	/** Test if a page is a leaf page */
 #define IS_LEAF(p)	 F_ISSET((p)->mp_flags, P_LEAF)
+	/** Test if a page is a LEAF2 page */
 #define IS_LEAF2(p)	 F_ISSET((p)->mp_flags, P_LEAF2)
+	/** Test if a page is a branch page */
 #define IS_BRANCH(p)	 F_ISSET((p)->mp_flags, P_BRANCH)
+	/** Test if a page is an overflow page */
 #define IS_OVERFLOW(p)	 F_ISSET((p)->mp_flags, P_OVERFLOW)
 
+	/** The number of overflow pages needed to store the given size. */
 #define OVPAGES(size, psize)	((PAGEHDRSZ-1 + (size)) / (psize) + 1)
 
+	/** Header for a single key/data pair within a page.
+	 * We guarantee 2-byte alignment for nodes.
+	 */
+typedef struct MDB_node {
+	/** lo and hi are used for data size on leaf nodes and for
+	 * child pgno on branch nodes. On 64 bit platforms, flags
+	 * is also used for pgno. (branch nodes ignore flags)
+	 */
+	unsigned short	mn_lo;
+	unsigned short	mn_hi;			/**< part of dsize or pgno */
+	unsigned short	mn_flags;		/**< flags for special node types */
+#define F_BIGDATA	 0x01			/**< data put on overflow page */
+#define F_SUBDATA	 0x02			/**< data is a sub-database */
+#define F_DUPDATA	 0x04			/**< data has duplicates */
+	unsigned short	mn_ksize;		/**< key size */
+	char		mn_data[1];			/**< key and data are appended here */
+} MDB_node;
+
+	/** Size of the node header, excluding dynamic data at the end */
+#define NODESIZE	 offsetof(MDB_node, mn_data)
+
+	/** Size of a node in a branch page.
+	 *	This is just the node header plus the key, there is no data.
+	 */
+#define INDXSIZE(k)	 (NODESIZE + ((k) == NULL ? 0 : (k)->mv_size))
+
+	/** Size of a node in a leaf page.
+	 *	This is node header plus key plus data size.
+	 */
+#define LEAFSIZE(k, d)	 (NODESIZE + (k)->mv_size + (d)->mv_size)
+
+	/** Address of node \i in page \p */
+#define NODEPTR(p, i)	 ((MDB_node *)((char *)(p) + (p)->mp_ptrs[i]))
+
+	/** Address of the key for the node */
+#define NODEKEY(node)	 (void *)((node)->mn_data)
+
+	/** Address of the data for a node */
+#define NODEDATA(node)	 (void *)((char *)(node)->mn_data + (node)->mn_ksize)
+
+	/** Get the page number pointed to by a branch node */
+#if LONG_MAX == 0x7fffffff
+#define NODEPGNO(node)	 ((node)->mn_lo | ((node)->mn_hi << 16))
+	/** Set the page number in a branch node */
+#define SETPGNO(node,pgno)	do { \
+	(node)->mn_lo = (pgno) & 0xffff; (node)->mn_hi = (pgno) >> 16;} while(0)
+#else
+#define NODEPGNO(node)	 ((node)->mn_lo | ((node)->mn_hi << 16) | ((unsigned long)(node)->mn_flags << 32))
+	/** Set the page number in a branch node */
+#define SETPGNO(node,pgno)	do { \
+	(node)->mn_lo = (pgno) & 0xffff; (node)->mn_hi = (pgno) >> 16; \
+	(node)->mn_flags = (pgno) >> 32; } while(0)
+#endif
+
+	/** Get the size of the data in a leaf node */
+#define NODEDSZ(node)	 ((node)->mn_lo | ((unsigned)(node)->mn_hi << 16))
+	/** Set the size of the data for a leaf node */
+#define SETDSZ(node,size)	do { \
+	(node)->mn_lo = (size) & 0xffff; (node)->mn_hi = (size) >> 16;} while(0)
+	/** The size of a key in a node */
+#define NODEKSZ(node)	 ((node)->mn_ksize)
+
+	/** The address of a key in a LEAF2 page.
+	 *	LEAF2 pages are used for #MDB_DUPFIXED sorted-duplicate sub-DBs.
+	 *	There are no node headers, keys are stored contiguously.
+	 */
+#define LEAF2KEY(p, i, ks)	((char *)(p) + PAGEHDRSZ + ((i)*(ks)))
+
+	/** Set the \b node's key into \b key, if requested. */
+#define MDB_SET_KEY(node, key)	if (key!=NULL) {(key)->mv_size = NODEKSZ(node); (key)->mv_data = NODEKEY(node);}
+
+	/** Information about a single database in the environment. */
 typedef struct MDB_db {
-	uint32_t	md_pad;		/* also ksize for LEAF2 pages */
-	uint16_t	md_flags;
-	uint16_t	md_depth;
-	ULONG		md_branch_pages;
-	ULONG		md_leaf_pages;
-	ULONG		md_overflow_pages;
-	ULONG		md_entries;
-	pgno_t		md_root;
+	uint32_t	md_pad;		/**< also ksize for LEAF2 pages */
+	uint16_t	md_flags;	/**< @ref mdb_open */
+	uint16_t	md_depth;	/**< depth of this tree */
+	ULONG		md_branch_pages;	/**< number of internal pages */
+	ULONG		md_leaf_pages;		/**< number of leaf pages */
+	ULONG		md_overflow_pages;	/**< number of overflow pages */
+	ULONG		md_entries;		/**< number of data items */
+	pgno_t		md_root;		/**< the root page of this tree */
 } MDB_db;
 
+	/** Handle for the DB used to track free pages. */
 #define	FREE_DBI	0
+	/** Handle for the default DB. */
 #define	MAIN_DBI	1
 
-typedef struct MDB_meta {			/* meta (footer) page content */
+	/** Meta page content. */
+typedef struct MDB_meta {
+		/** Stamp identifying this as an MDB data file. It must be set
+		 *	to #MDB_MAGIC. */
 	uint32_t	mm_magic;
+		/** Version number of this lock file. Must be set to #MDB_VERSION. */
 	uint32_t	mm_version;
-	void		*mm_address;		/* address for fixed mapping */
-	size_t		mm_mapsize;			/* size of mmap region */
-	MDB_db		mm_dbs[2];			/* first is free space, 2nd is main db */
+	void		*mm_address;		/**< address for fixed mapping */
+	size_t		mm_mapsize;			/**< size of mmap region */
+	MDB_db		mm_dbs[2];			/**< first is free space, 2nd is main db */
+	/** The size of pages used in this DB */
 #define	mm_psize	mm_dbs[0].md_pad
+	/** Any persistent environment flags. @ref mdb_env */
 #define	mm_flags	mm_dbs[0].md_flags
-	pgno_t		mm_last_pg;			/* last used page in file */
-	ULONG		mm_txnid;			/* txnid that committed this page */
+	pgno_t		mm_last_pg;			/**< last used page in file */
+	ULONG		mm_txnid;			/**< txnid that committed this page */
 } MDB_meta;
 
-typedef struct MDB_oldpages {
-	struct MDB_oldpages *mo_next;
-	ULONG		mo_txnid;
-	pgno_t		mo_pages[1];	/* dynamic */
-} MDB_oldpages;
+	/** Auxiliary DB info.
+	 *	The information here is mostly static/read-only. There is
+	 *	only a single copy of this record in the environment.
+	 *	The \b md_dirty flag is not read-only, but only a write
+	 *	transaction can ever update it, and only write transactions
+	 *	need to worry about it.
+	 */
+typedef struct MDB_dbx {
+	MDB_val		md_name;		/**< name of the database */
+	MDB_cmp_func	*md_cmp;	/**< function for comparing keys */
+	MDB_cmp_func	*md_dcmp;	/**< function for comparing data items */
+	MDB_rel_func	*md_rel;	/**< user relocate function */
+	MDB_dbi	md_parent;			/**< parent DB of a sub-DB */
+	unsigned int	md_dirty;	/**< TRUE if DB was written in this txn */
+} MDB_dbx;
 
-static MDB_page *mdb_alloc_page(MDB_cursor *mc, int num);
-static int 		mdb_touch(MDB_cursor *mc);
+	/** A database transaction.
+	 *	Every operation requires a transaction handle.
+	 */
+struct MDB_txn {
+	pgno_t		mt_next_pgno;	/**< next unallocated page */
+	/** The ID of this transaction. IDs are integers incrementing from 1.
+	 *	Only committed write transactions increment the ID. If a transaction
+	 *	aborts, the ID may be re-used by the next writer.
+	 */
+	ULONG		mt_txnid;
+	MDB_env		*mt_env;		/**< the DB environment */
+	/** The list of pages that became unused during this transaction.
+	 *	This is an #IDL.
+	 */
+	pgno_t		*mt_free_pgs;
+	union {
+		ID2L	dirty_list;	/**< modified pages */
+		MDB_reader	*reader;	/**< this thread's slot in the reader table */
+	} mt_u;
+	/** Array of records for each DB known in the environment. */
+	MDB_dbx		*mt_dbxs;
+	/** Array of MDB_db records for each known DB */
+	MDB_db		*mt_dbs;
+	/**	Number of DB records in use. This number only ever increments;
+	 *	we don't decrement it when individual DB handles are closed.
+	 */
+	unsigned int	mt_numdbs;
 
-/* Enough space for 2^32 nodes with minimum of 2 keys per node. I.e., plenty.
+#define MDB_TXN_RDONLY		0x01		/**< read-only transaction */
+#define MDB_TXN_ERROR		0x02		/**< an error has occurred */
+	unsigned int	mt_flags;
+	/** Tracks which of the two meta pages was used at the start
+	 * 	of this transaction.
+	 */
+	unsigned int	mt_toggle;
+};
+
+/** Enough space for 2^32 nodes with minimum of 2 keys per node. I.e., plenty.
  * At 4 keys per node, enough for 2^64 nodes, so there's probably no need to
  * raise this on a 64 bit machine.
  */
@@ -330,134 +689,102 @@ static int 		mdb_touch(MDB_cursor *mc);
 
 struct MDB_xcursor;
 
+	/** Cursors are used for all DB operations */
 struct MDB_cursor {
+	/** Context used for databases with #MDB_DUPSORT, otherwise NULL */
 	struct MDB_xcursor	*mc_xcursor;
+	/** The transaction that owns this cursor */
 	MDB_txn		*mc_txn;
+	/** The database handle this cursor operates on */
 	MDB_dbi		mc_dbi;
-	unsigned short 	mc_snum;		/* number of pushed pages */
-	unsigned short	mc_top;		/* index of top page, mc_snum-1 */
+	unsigned short 	mc_snum;	/**< number of pushed pages */
+	unsigned short	mc_top;		/**< index of top page, mc_snum-1 */
 	unsigned int	mc_flags;
-#define C_INITIALIZED	0x01
-#define C_EOF	0x02
-#define C_XDIRTY	0x04
-	MDB_page	*mc_pg[CURSOR_STACK];	/* stack of pushed pages */
-	indx_t		mc_ki[CURSOR_STACK];	/* stack of page indices */
+#define C_INITIALIZED	0x01	/**< cursor has been initialized and is valid */
+#define C_EOF	0x02			/**< No more data */
+#define C_XDIRTY	0x04		/**< @deprecated mc_xcursor needs to be flushed */
+	MDB_page	*mc_pg[CURSOR_STACK];	/**< stack of pushed pages */
+	indx_t		mc_ki[CURSOR_STACK];	/**< stack of page indices */
 };
 
-#define METADATA(p)	 ((void *)((char *)(p) + PAGEHDRSZ))
-
-/* We guarantee 2-byte alignment for nodes */
-typedef struct MDB_node {
-	/* lo and hi are used for data size on leaf nodes and for
-	 * child pgno on branch nodes. On 64 bit platforms, flags
-	 * is also used for pgno. (branch nodes ignore flags)
+	/** Context for sorted-dup records.
+	 *	We could have gone to a fully recursive design, with arbitrarily
+	 *	deep nesting of sub-databases. But for now we only handle these
+	 *	levels - main DB, optional sub-DB, sorted-duplicate DB.
 	 */
-	unsigned short	mn_lo;
-	unsigned short	mn_hi;
-	unsigned short	mn_flags;
-#define F_BIGDATA	 0x01			/* data put on overflow page */
-#define F_SUBDATA	 0x02			/* data is a sub-database */
-#define F_DUPDATA	 0x04			/* data has duplicates */
-	unsigned short	mn_ksize;				/* key size */
-	char		mn_data[1];
-} MDB_node;
-
-typedef struct MDB_dbx {
-	MDB_val		md_name;
-	MDB_cmp_func	*md_cmp;		/* user compare function */
-	MDB_cmp_func	*md_dcmp;		/* user dupsort function */
-	MDB_rel_func	*md_rel;		/* user relocate function */
-	MDB_dbi	md_parent;
-	unsigned int	md_dirty;
-} MDB_dbx;
-
-struct MDB_txn {
-	pgno_t		mt_next_pgno;	/* next unallocated page */
-	ULONG		mt_txnid;
-	MDB_env		*mt_env;	
-	pgno_t		*mt_free_pgs;	/* this is an IDL */
-	union {
-		ID2L	dirty_list;	/* modified pages */
-		MDB_reader	*reader;
-	} mt_u;
-	MDB_dbx		*mt_dbxs;		/* array */
-	MDB_db		*mt_dbs;
-	unsigned int	mt_numdbs;
-
-#define MDB_TXN_RDONLY		0x01		/* read-only transaction */
-#define MDB_TXN_ERROR		0x02		/* an error has occurred */
-	unsigned int	mt_flags;
-	unsigned int	mt_toggle;
-};
-
-/* Context for sorted-dup records */
 typedef struct MDB_xcursor {
+	/** A sub-cursor for traversing the Dup DB */
 	MDB_cursor mx_cursor;
+	/** A fake transaction struct for pointing to our own table
+	 *	of DB info.
+	 */
 	MDB_txn mx_txn;
+	/**	Our private DB information tables. Slots 0 and 1 are always
+	 *	copies of the corresponding slots in the main transaction. These
+	 *	hold the FREEDB and MAINDB, respectively. If the main cursor is
+	 *	on a sub-database, that will be copied to slot 2, and the duplicate
+	 *	database info will be in slot 3. If the main cursor is on the MAINDB
+	 *	then the duplicate DB info will be in slot 2 and slot 3 will be unused.
+	 */
 	MDB_dbx	mx_dbxs[4];
+	/** MDB_db table */
 	MDB_db	mx_dbs[4];
 } MDB_xcursor;
 
+	/** A set of pages freed by an earlier transaction. */
+typedef struct MDB_oldpages {
+	/** Usually we only read one record from the FREEDB at a time, but
+	 *	in case we read more, this will chain them together.
+	 */
+	struct MDB_oldpages *mo_next;
+	/**	The ID of the transaction in which these pages were freed. */
+	ULONG		mo_txnid;
+	/** An #IDL of the pages */
+	pgno_t		mo_pages[1];	/* dynamic */
+} MDB_oldpages;
+
+	/** The database environment. */
 struct MDB_env {
-	HANDLE		me_fd;
-	HANDLE		me_lfd;
-	HANDLE		me_mfd;			/* just for writing the meta pages */
+	HANDLE		me_fd;		/**< The main data file */
+	HANDLE		me_lfd;		/**< The lock file */
+	HANDLE		me_mfd;			/**< just for writing the meta pages */
 #define	MDB_FATAL_ERROR	0x80000000U
 	uint32_t 	me_flags;
-	uint32_t	me_extrapad;	/* unused for now */
-	unsigned int	me_maxreaders;
-	unsigned int	me_numdbs;
-	unsigned int	me_maxdbs;
-	char		*me_path;
-	char		*me_map;
-	MDB_txninfo	*me_txns;
-	MDB_meta	*me_metas[2];
-	MDB_txn		*me_txn;		/* current write transaction */
-	size_t		me_mapsize;
-	off_t		me_size;		/* current file size */
-	pgno_t		me_maxpg;		/* me_mapsize / me_psize */
-	unsigned int	me_psize;
-	unsigned int	me_db_toggle;
-	MDB_dbx		*me_dbxs;		/* array */
-	MDB_db		*me_dbs[2];
-	MDB_oldpages *me_pghead;
-	pthread_key_t	me_txkey;	/* thread-key for readers */
-	MDB_page	*me_dpages;
+	uint32_t	me_extrapad;	/**< unused for now */
+	unsigned int	me_maxreaders;	/**< size of the reader table */
+	unsigned int	me_numdbs;		/**< number of DBs opened */
+	unsigned int	me_maxdbs;		/**< size of the DB table */
+	char		*me_path;		/**< path to the DB files */
+	char		*me_map;		/**< the memory map of the data file */
+	MDB_txninfo	*me_txns;		/**< the memory map of the lock file */
+	MDB_meta	*me_metas[2];	/**< pointers to the two meta pages */
+	MDB_txn		*me_txn;		/**< current write transaction */
+	size_t		me_mapsize;		/**< size of the data memory map */
+	off_t		me_size;		/**< current file size */
+	pgno_t		me_maxpg;		/**< me_mapsize / me_psize */
+	unsigned int	me_psize;	/**< size of a page, from #GetPageSize */
+	unsigned int	me_db_toggle;	/**< which DB table is current */
+	MDB_dbx		*me_dbxs;		/**< array of static DB info */
+	MDB_db		*me_dbs[2];		/**< two arrays of MDB_db info */
+	MDB_oldpages *me_pghead;	/**< list of old page records */
+	pthread_key_t	me_txkey;	/**< thread-key for readers */
+	MDB_page	*me_dpages;		/**< list of malloc'd blocks for re-use */
+	/** IDL of pages that became unused in a write txn */
 	pgno_t		me_free_pgs[MDB_IDL_UM_SIZE];
+	/** ID2L of pages that were written during a write txn */
 	ID2			me_dirty_list[MDB_IDL_UM_SIZE];
+	/** rwlock for the DB tables, if #LAZY_LOCKS is false */
 	LAZY_RWLOCK_DEF(me_dblock);
 #ifdef _WIN32
 	HANDLE		me_rmutex;		/* Windows mutexes don't reside in shared mem */
 	HANDLE		me_wmutex;
 #endif
 };
+	/** max number of pages to commit in one writev() call */
+#define MDB_COMMIT_PAGES	 64
 
-#define NODESIZE	 offsetof(MDB_node, mn_data)
-
-#define INDXSIZE(k)	 (NODESIZE + ((k) == NULL ? 0 : (k)->mv_size))
-#define LEAFSIZE(k, d)	 (NODESIZE + (k)->mv_size + (d)->mv_size)
-#define NODEPTR(p, i)	 ((MDB_node *)((char *)(p) + (p)->mp_ptrs[i]))
-#define NODEKEY(node)	 (void *)((node)->mn_data)
-#define NODEDATA(node)	 (void *)((char *)(node)->mn_data + (node)->mn_ksize)
-#if LONG_MAX == 0x7fffffff
-#define NODEPGNO(node)	 ((node)->mn_lo | ((node)->mn_hi << 16))
-#define SETPGNO(node,pgno)	do { \
-	(node)->mn_lo = (pgno) & 0xffff; (node)->mn_hi = (pgno) >> 16;} while(0)
-#else
-#define NODEPGNO(node)	 ((node)->mn_lo | ((node)->mn_hi << 16) | ((unsigned long)(node)->mn_flags << 32))
-#define SETPGNO(node,pgno)	do { \
-	(node)->mn_lo = (pgno) & 0xffff; (node)->mn_hi = (pgno) >> 16; \
-	(node)->mn_flags = (pgno) >> 32; } while(0)
-#endif
-#define NODEDSZ(node)	 ((node)->mn_lo | ((unsigned)(node)->mn_hi << 16))
-#define SETDSZ(node,size)	do { \
-	(node)->mn_lo = (size) & 0xffff; (node)->mn_hi = (size) >> 16;} while(0)
-#define NODEKSZ(node)	 ((node)->mn_ksize)
-#define LEAF2KEY(p, i, ks)	((char *)(p) + PAGEHDRSZ + ((i)*(ks)))
-
-#define MDB_SET_KEY(node, key)	if (key!=NULL) {(key)->mv_size = NODEKSZ(node); (key)->mv_data = NODEKEY(node);}
-
-#define MDB_COMMIT_PAGES	 64	/* max number of pages to write in one commit */
+static MDB_page *mdb_alloc_page(MDB_cursor *mc, int num);
+static int 		mdb_touch(MDB_cursor *mc);
 
 static int  mdb_search_page_root(MDB_cursor *mc,
 			    MDB_val *key, int modify);
@@ -505,7 +832,9 @@ static size_t	mdb_branch_size(MDB_env *env, MDB_val *key);
 
 static void mdb_default_cmp(MDB_txn *txn, MDB_dbi dbi);
 
+/** @cond */
 static MDB_cmp_func	memncmp, memnrcmp, intcmp, cintcmp;
+/** @endcond */
 
 #ifdef _WIN32
 static SECURITY_DESCRIPTOR mdb_null_sd;
@@ -514,14 +843,15 @@ static int mdb_sec_inited;
 #endif
 
 char *
-mdb_version(int *maj, int *min, int *pat)
+mdb_version(int *major, int *minor, int *patch)
 {
-	if (maj) *maj = MDB_VERSION_MAJOR;
-	if (min) *min = MDB_VERSION_MINOR;
-	if (pat) *pat = MDB_VERSION_PATCH;
+	if (major) *major = MDB_VERSION_MAJOR;
+	if (minor) *minor = MDB_VERSION_MINOR;
+	if (patch) *patch = MDB_VERSION_PATCH;
 	return MDB_VERSION_STRING;
 }
 
+	/** Table of descriptions for MDB @ref error codes */
 static char *const mdb_errstr[] = {
 	"MDB_KEYEXIST: Key/data pair already exists",
 	"MDB_NOTFOUND: No matching key/data pair found",
@@ -1759,7 +2089,9 @@ fail:
 
 }
 
+	/** The name of the lock file in the DB environment */
 #define LOCKNAME	"/lock.mdb"
+	/** The name of the data file in the DB environment */
 #define DATANAME	"/data.mdb"
 int
 mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
@@ -3673,8 +4005,6 @@ mdb_cursor_copy(const MDB_cursor *csrc, MDB_cursor *cdst)
 		cdst->mc_ki[i] = csrc->mc_ki[i];
 	}
 }
-
-#define FILL_THRESHOLD	 250
 
 static int
 mdb_rebalance(MDB_cursor *mc)
