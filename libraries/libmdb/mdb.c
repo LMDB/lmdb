@@ -4105,7 +4105,8 @@ newsep:
 		rc = mdb_add_node(mc, j, &rkey, &rdata, pgno, flags);
 	}
 
-	if (mc->mc_pg[mc->mc_top] == copy)
+	/* reset back to original page */
+	if (newindx < split_indx)
 		mc->mc_pg[mc->mc_top] = mp;
 
 	nkeys = NUMKEYS(copy);
