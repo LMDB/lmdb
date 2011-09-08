@@ -1912,14 +1912,14 @@ static int
 cintcmp(const MDB_val *a, const MDB_val *b)
 {
 #if __BYTE_ORDER == __LITTLE_ENDIAN
-	unsigned char *u, *c;
+	unsigned short *u, *c;
 	int x;
 
 	u = a->mv_data + a->mv_size;
 	c = b->mv_data + a->mv_size;
 	do {
 		x = *--u - *--c;
-	} while(!x && u > (unsigned char *)a->mv_data);
+	} while(!x && u > (unsigned short *)a->mv_data);
 	return x;
 #else
 	return memcmp(a->mv_data, b->mv_data, a->mv_size);
