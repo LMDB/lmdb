@@ -469,10 +469,12 @@ typedef struct MDB_txninfo {
  * headers on any page after the first.
  */
 typedef struct MDB_page {
-	union {
-		pgno_t		mp_pgno;	/**< page number */
-		void *		mp_next;	/**< for in-memory list of freed structs */
-	};
+#define	mp_pgno	mp_p.p_pgno
+#define	mp_next	mp_p.p_next
+	union padded {
+		pgno_t		p_pgno;	/**< page number */
+		void *		p_next;	/**< for in-memory list of freed structs */
+	} mp_p;
 #define	P_BRANCH	 0x01		/**< branch page */
 #define	P_LEAF		 0x02		/**< leaf page */
 #define	P_OVERFLOW	 0x04		/**< overflow page */
@@ -480,13 +482,16 @@ typedef struct MDB_page {
 #define	P_DIRTY		 0x10		/**< dirty page */
 #define	P_LEAF2		 0x20		/**< for #MDB_DUPFIXED records */
 	uint32_t	mp_flags;
-	union {
+#define mp_lower	mp_pb.pb.pb_lower
+#define mp_upper	mp_pb.pb.pb_upper
+#define mp_pages	mp_pb.pb_pages
+	union page_bounds {
 		struct {
-			indx_t		mp_lower;		/**< lower bound of free space */
-			indx_t		mp_upper;		/**< upper bound of free space */
-		};
-		uint32_t	mp_pages;	/**< number of overflow pages */
-	};
+			indx_t		pb_lower;		/**< lower bound of free space */
+			indx_t		pb_upper;		/**< upper bound of free space */
+		} pb;
+		uint32_t	pb_pages;	/**< number of overflow pages */
+	} mp_pb;
 	indx_t		mp_ptrs[1];		/**< dynamic size */
 } MDB_page;
 
@@ -2897,7 +2902,6 @@ mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 set1:
 			if (exactp)
 				*exactp = 1;
-			rc = 0;
 			leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
 			goto set3;
 		}
@@ -3336,6 +3340,9 @@ top:
 				rdata = &xdata;
 				xdata.mv_size = sizeof(MDB_db);
 				xdata.mv_data = &dummy;
+				/* new sub-DB, must fully init xcursor */
+				if (flags == MDB_CURRENT)
+					flags = 0;
 				goto new_sub;
 			}
 			goto put_sub;
