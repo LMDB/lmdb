@@ -152,11 +152,7 @@ typedef void (MDB_rel_func)(void *newptr, void *oldptr, size_t size);
 	/** use sorted duplicates */
 #define MDB_DUPSORT		0x04
 	/** numeric keys in native byte order.
-	 *	@note The keys size must actually be equal to
-	 *	sizeof(int) or sizeof(long) otherwise there will be
-	 *	alignment issues. On some processors, accessing misaligned
-	 *	data will cause a SIGBUS.
-	 */
+	 *  The keys must all be of the same size. */
 #define MDB_INTEGERKEY	0x08
 	/** with #MDB_DUPSORT, sorted dup items have fixed size */
 #define MDB_DUPFIXED	0x10
@@ -205,7 +201,7 @@ typedef enum MDB_cursor_op {
 	MDB_PREV_DUP,			/**< Position at previous data item of current key.
 								Only for #MDB_DUPSORT */
 	MDB_PREV_NODUP,			/**< Position at last data item of previous key.
-								only for #MDB_DUPSORT */
+								Only for #MDB_DUPSORT */
 	MDB_SET,				/**< Position at specified key */
 	MDB_SET_RANGE			/**< Position at first key greater than or equal to specified key. */
 } MDB_cursor_op;
@@ -498,7 +494,7 @@ void mdb_txn_abort(MDB_txn *txn);
 	/** Reset a read-only transaction.
 	 * This releases the current reader lock but doesn't free the
 	 * transaction handle, allowing it to be used again later by #mdb_txn_renew().
-	 * It otherwise has the same affect as #mdb_txn_abort() but saves some memory
+	 * It otherwise has the same effect as #mdb_txn_abort() but saves some memory
 	 * allocation/deallocation overhead if a thread is going to start a new
 	 * read-only transaction again soon.
 	 * All cursors opened within the transaction must be closed before the transaction
@@ -544,11 +540,9 @@ int  mdb_txn_renew(MDB_txn *txn);
 	 *		keys may have multiple data items, stored in sorted order.) By default
 	 *		keys must be unique and may have only a single data item.
 	 *	<li>#MDB_INTEGERKEY
-	 *		Keys are binary integers in native byte order. On Big-Endian systems
-	 *		this flag has no effect. On Little-Endian systems this flag behaves
-	 *		the same as #MDB_REVERSEKEY. This flag is simply provided as a
-	 *		convenience so that applications don't need to detect Endianness themselves
-	 *		when using integers as keys.
+	 *		Keys are binary integers in native byte order. Setting this option
+	 *		requires all keys to be the same size, typically sizeof(int)
+	 *		or sizeof(long).
 	 *	<li>#MDB_DUPFIXED
 	 *		This flag may only be used in combination with #MDB_DUPSORT. This option
 	 *		tells the library that the data items for this database are all the same
@@ -558,6 +552,9 @@ int  mdb_txn_renew(MDB_txn *txn);
 	 *	<li>#MDB_INTEGERDUP
 	 *		This option specifies that duplicate data items are also integers, and
 	 *		should be sorted as such.
+	 *	<li>#MDB_REVERSEDUP
+	 *		This option specifies that duplicate data items should be compared as
+	 *		strings in reverse order.
 	 *	<li>#MDB_CREATE
 	 *		Create the named database if it doesn't exist. This option is not
 	 *		allowed in a read-only transaction or a read-only environment.
@@ -660,6 +657,11 @@ int  mdb_set_relfunc(MDB_txn *txn, MDB_dbi dbi, MDB_rel_func *rel);
 	 * If the database supports duplicate keys (#MDB_DUPSORT) then the
 	 * first data item for the key will be returned. Retrieval of other
 	 * items requires the use of #mdb_cursor_get().
+	 *
+	 * @note The memory pointed to by the returned values is owned by the
+	 * database. The caller need not dispose of the memory, and may not
+	 * modify it in any way. For values returned in a read-only transaction
+	 * any modification attempts will cause a SIGSEGV.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] dbi A database handle returned by #mdb_open()
 	 * @param[in] key The key to search for in the database

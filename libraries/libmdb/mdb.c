@@ -316,8 +316,8 @@ typedef uint16_t	 indx_t;
  *	Since the database uses multi-version concurrency control, readers don't
  *	actually need any locking. This table is used to keep track of which
  *	readers are using data from which old transactions, so that we'll know
- *	when a particular old transaction is no longer in use, Old transactions
- *	that have freed any data pages can then have their freed pages reclaimed
+ *	when a particular old transaction is no longer in use. Old transactions
+ *	that have discarded any data pages can then have those pages reclaimed
  *	for use by a later write transaction.
  *
  *	The lock table is constructed such that reader slots are aligned with the
@@ -886,7 +886,7 @@ mdb_strerror(int err)
  * @param[in] buf the buffer to write into. Should always be #DKBUF.
  * @return The key in hexadecimal form.
  */
-static char *
+char *
 mdb_dkey(MDB_val *key, char *buf)
 {
 	char *ptr = buf;
