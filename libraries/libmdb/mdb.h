@@ -151,7 +151,12 @@ typedef void (MDB_rel_func)(void *newptr, void *oldptr, size_t size);
 #define MDB_REVERSEKEY	0x02
 	/** use sorted duplicates */
 #define MDB_DUPSORT		0x04
-	/** numeric keys in native byte order */
+	/** numeric keys in native byte order.
+	 *	@note The keys size must actually be equal to
+	 *	sizeof(int) or sizeof(long) otherwise there will be
+	 *	alignment issues. On some processors, accessing misaligned
+	 *	data will cause a SIGBUS.
+	 */
 #define MDB_INTEGERKEY	0x08
 	/** with #MDB_DUPSORT, sorted dup items have fixed size */
 #define MDB_DUPFIXED	0x10

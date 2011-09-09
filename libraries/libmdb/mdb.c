@@ -543,17 +543,17 @@ typedef struct MDB_node {
 	/** Size of the node header, excluding dynamic data at the end */
 #define NODESIZE	 offsetof(MDB_node, mn_data)
 
-	/** Size of a node in a branch page.
+	/** Size of a node in a branch page with a given key.
 	 *	This is just the node header plus the key, there is no data.
 	 */
 #define INDXSIZE(k)	 (NODESIZE + ((k) == NULL ? 0 : (k)->mv_size))
 
-	/** Size of a node in a leaf page.
+	/** Size of a node in a leaf page with a given key and data.
 	 *	This is node header plus key plus data size.
 	 */
 #define LEAFSIZE(k, d)	 (NODESIZE + (k)->mv_size + (d)->mv_size)
 
-	/** Address of node \i in page \p */
+	/** Address of node \b i in page \b p */
 #define NODEPTR(p, i)	 ((MDB_node *)((char *)(p) + (p)->mp_ptrs[i]))
 
 	/** Address of the key for the node */
@@ -748,6 +748,7 @@ struct MDB_env {
 	HANDLE		me_fd;		/**< The main data file */
 	HANDLE		me_lfd;		/**< The lock file */
 	HANDLE		me_mfd;			/**< just for writing the meta pages */
+	/** Failed to update the meta page. Probably an I/O error. */
 #define	MDB_FATAL_ERROR	0x80000000U
 	uint32_t 	me_flags;
 	uint32_t	me_extrapad;	/**< unused for now */
@@ -805,8 +806,8 @@ static int  mdb_read_data(MDB_txn *txn, MDB_node *leaf, MDB_val *data);
 
 static int	mdb_rebalance(MDB_cursor *mc);
 static int	mdb_update_key(MDB_page *mp, indx_t indx, MDB_val *key);
-static int	mdb_move_node(MDB_cursor *csrcrc, MDB_cursor *cdstst);
-static int	mdb_merge(MDB_cursor *csrcrc, MDB_cursor *cdstst);
+static int	mdb_move_node(MDB_cursor *csrc, MDB_cursor *cdst);
+static int	mdb_merge(MDB_cursor *csrc, MDB_cursor *cdst);
 static int	mdb_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata,
 				pgno_t newpgno);
 static MDB_page *mdb_new_page(MDB_cursor *mc, uint32_t flags, int num);
@@ -842,6 +843,7 @@ static SECURITY_ATTRIBUTES mdb_all_sa;
 static int mdb_sec_inited;
 #endif
 
+/** Return the library version info. */
 char *
 mdb_version(int *major, int *minor, int *patch)
 {
@@ -851,7 +853,7 @@ mdb_version(int *major, int *minor, int *patch)
 	return MDB_VERSION_STRING;
 }
 
-	/** Table of descriptions for MDB @ref error codes */
+/** Table of descriptions for MDB @ref errors */
 static char *const mdb_errstr[] = {
 	"MDB_KEYEXIST: Key/data pair already exists",
 	"MDB_NOTFOUND: No matching key/data pair found",
@@ -874,6 +876,11 @@ mdb_strerror(int err)
 }
 
 #if DEBUG
+/** Display a key in hexadecimal and return the address of the result.
+ * @param[in] key the key to display
+ * @param[in] buf the buffer to write into. Should always be #DKBUF.
+ * @return The key in hexadecimal form.
+ */
 static char *
 mdb_dkey(MDB_val *key, char *buf)
 {
@@ -882,6 +889,9 @@ mdb_dkey(MDB_val *key, char *buf)
 	unsigned int i;
 	if (key->mv_size > MAXKEYSIZE)
 		return "MAXKEYSIZE";
+	/* may want to make this a dynamic check: if the key is mostly
+	 * printable characters, print it as-is instead of converting to hex.
+	 */
 #if 1
 	for (i=0; i<key->mv_size; i++)
 		ptr += sprintf(ptr, "%02x", *c++);
@@ -898,6 +908,15 @@ mdb_cmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b)
 	return txn->mt_dbxs[dbi].md_cmp(a, b);
 }
 
+/** Compare two data items according to a particular database.
+ * This returns a comparison as if the two items were data items of
+ * a sorted duplicates #MDB_DUPSORT database.
+ * @param[in] txn A transaction handle returned by #mdb_txn_begin()
+ * @param[in] dbi A database handle returned by #mdb_open()
+ * @param[in] a The first item to compare
+ * @param[in] b The second item to compare
+ * @return < 0 if a < b, 0 if a == b, > 0 if a > b
+ */
 int
 mdb_dcmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b)
 {
@@ -907,7 +926,15 @@ mdb_dcmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b)
 		return EINVAL;	/* too bad you can't distinguish this from a valid result */
 }
 
-/* Allocate new page(s) for writing */
+/** Allocate pages for writing.
+ * If there are free pages available from older transactions, they
+ * will be re-used first. Otherwise a new page will be allocated.
+ * @param[in] mc cursor A cursor handle identifying the transaction and
+ *	database for which we are allocating.
+ * @param[in] num the number of pages to allocate.
+ * @return Address of the allocated page(s). Requests for multiple pages
+ *  will always be satisfied by a single contiguous chunk of memory.
+ */
 static MDB_page *
 mdb_alloc_page(MDB_cursor *mc, int num)
 {
@@ -1025,7 +1052,9 @@ mdb_alloc_page(MDB_cursor *mc, int num)
 	return np;
 }
 
-/* Touch a page: make it dirty and re-insert into tree with updated pgno.
+/** Touch a page: make it dirty and re-insert into tree with updated pgno.
+ * @param[in] mc cursor pointing to the page to be touched
+ * @return 0 on success, non-zero on failure.
  */
 static int
 mdb_touch(MDB_cursor *mc)
@@ -1047,7 +1076,9 @@ mdb_touch(MDB_cursor *mc)
 		mp->mp_flags |= P_DIRTY;
 
 		mc->mc_pg[mc->mc_top] = mp;
-		/* Update the page number to new touched page. */
+		/** If this page has a parent, update the parent to point to
+		 * this new page.
+		 */
 		if (mc->mc_top)
 			SETPGNO(NODEPTR(mc->mc_pg[mc->mc_top-1], mc->mc_ki[mc->mc_top-1]), mp->mp_pgno);
 	}
@@ -1068,6 +1099,12 @@ mdb_env_sync(MDB_env *env, int force)
 static inline void
 mdb_txn_reset0(MDB_txn *txn);
 
+/** Common code for #mdb_txn_begin() and #mdb_txn_renew().
+ * @param[in] txn the transaction handle to initialize
+ * @return 0 on success, non-zero on failure. This can only
+ * fail for read-only transactions, and then only if the
+ * reader table is full.
+ */
 static inline int
 mdb_txn_renew0(MDB_txn *txn)
 {
@@ -1181,6 +1218,9 @@ mdb_txn_begin(MDB_env *env, unsigned int flags, MDB_txn **ret)
 	return rc;
 }
 
+/** Common code for #mdb_txn_reset() and #mdb_txn_abort().
+ * @param[in] txn the transaction handle to reset
+ */
 static inline void
 mdb_txn_reset0(MDB_txn *txn)
 {
@@ -1213,6 +1253,7 @@ mdb_txn_reset0(MDB_txn *txn)
 		env->me_txn = NULL;
 		for (i=2; i<env->me_numdbs; i++)
 			env->me_dbxs[i].md_dirty = 0;
+		/* The writer mutex was locked in mdb_txn_begin. */
 		UNLOCK_MUTEX_W(env);
 	}
 }
@@ -1510,6 +1551,12 @@ done:
 	return MDB_SUCCESS;
 }
 
+/** Read the environment parameters of a DB environment before
+ * mapping it into memory.
+ * @param[in] env the environment handle
+ * @param[out] meta address of where to store the meta information
+ * @return 0 on success, non-zero on failure.
+ */
 static int
 mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 {
@@ -1560,6 +1607,11 @@ mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 	return 0;
 }
 
+/** Write the environment parameters of a freshly created DB environment.
+ * @param[in] env the environment handle
+ * @param[out] meta address of where to store the meta information
+ * @return 0 on success, non-zero on failure.
+ */
 static int
 mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 {
@@ -1610,6 +1662,10 @@ mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 	return rc;
 }
 
+/** Update the environment info to commit a transaction.
+ * @param[in] txn the transaction that's being committed
+ * @return 0 on success, non-zero on failure.
+ */
 static int
 mdb_env_write_meta(MDB_txn *txn)
 {
@@ -1690,6 +1746,11 @@ mdb_env_write_meta(MDB_txn *txn)
 	return MDB_SUCCESS;
 }
 
+/** Check both meta pages to see which one is newer.
+ * @param[in] env the environment handle
+ * @param[out] which address of where to store the meta toggle ID
+ * @return 0 on success, non-zero on failure.
+ */
 static int
 mdb_env_read_meta(MDB_env *env, int *which)
 {
@@ -1759,6 +1820,8 @@ mdb_env_get_maxreaders(MDB_env *env, int *readers)
 	return MDB_SUCCESS;
 }
 
+/** Further setup required for opening an MDB environment
+ */
 static int
 mdb_env_open2(MDB_env *env, unsigned int flags)
 {
@@ -4493,6 +4556,10 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 int
 mdb_env_set_flags(MDB_env *env, unsigned int flag, int onoff)
 {
+	/** Only a subset of the @ref mdb_env flags can be changed
+	 *	at runtime. Changing other flags requires closing the environment
+	 *	and re-opening it with the new flags.
+	 */
 #define	CHANGEABLE	(MDB_NOSYNC)
 	if ((flag & CHANGEABLE) != flag)
 		return EINVAL;
