@@ -243,7 +243,7 @@ typedef ULONG		pgno_t;
 	 */
 #define	DKEY(x)	mdb_dkey(x, kbuf)
 #else
-#define	DKBUF
+#define	DKBUF	typedef int dummy_kbuf	/* so we can put ';' after */
 #define DKEY(x)
 #endif
 
@@ -268,7 +268,7 @@ typedef ULONG		pgno_t;
 #define	LAZY_RWLOCK_WRLOCK(x)
 	/** Grab the DB table read lock */
 #define	LAZY_RWLOCK_RDLOCK(x)
-	/** Declare the DB table rwlock */
+	/** Declare the DB table rwlock.  Should not be followed by ';'. */
 #define	LAZY_RWLOCK_DEF(x)
 	/** Initialize the DB table rwlock */
 #define	LAZY_RWLOCK_INIT(x,y)
@@ -781,7 +781,7 @@ struct MDB_env {
 	/** ID2L of pages that were written during a write txn */
 	ID2			me_dirty_list[MDB_IDL_UM_SIZE];
 	/** rwlock for the DB tables, if #LAZY_LOCKS is false */
-	LAZY_RWLOCK_DEF(me_dblock);
+	LAZY_RWLOCK_DEF(me_dblock)
 #ifdef _WIN32
 	HANDLE		me_rmutex;		/* Windows mutexes don't reside in shared mem */
 	HANDLE		me_wmutex;
@@ -2316,8 +2316,8 @@ cintcmp(const MDB_val *a, const MDB_val *b)
 	unsigned short *u, *c;
 	int x;
 
-	u = a->mv_data + a->mv_size;
-	c = b->mv_data + a->mv_size;
+	u = (unsigned short *) ((char *) a->mv_data + a->mv_size);
+	c = (unsigned short *) ((char *) b->mv_data + a->mv_size);
 	do {
 		x = *--u - *--c;
 	} while(!x && u > (unsigned short *)a->mv_data);
