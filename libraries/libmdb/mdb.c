@@ -78,38 +78,38 @@
 #define pthread_mutex_t	HANDLE
 #define pthread_key_t	DWORD
 #define pthread_self()	GetCurrentThreadId()
-#define pthread_key_create(x,y)	*(x) = TlsAlloc()
+#define pthread_key_create(x,y)	(*(x) = TlsAlloc())
 #define pthread_key_delete(x)	TlsFree(x)
 #define pthread_getspecific(x)	TlsGetValue(x)
 #define pthread_setspecific(x,y)	TlsSetValue(x,y)
 #define pthread_mutex_unlock(x)	ReleaseMutex(x)
 #define pthread_mutex_lock(x)	WaitForSingleObject(x, INFINITE)
-#define LOCK_MUTEX_R(env)	pthread_mutex_lock(env->me_rmutex)
-#define UNLOCK_MUTEX_R(env)	pthread_mutex_unlock(env->me_rmutex)
-#define LOCK_MUTEX_W(env)	pthread_mutex_lock(env->me_wmutex)
-#define UNLOCK_MUTEX_W(env)	pthread_mutex_unlock(env->me_wmutex)
+#define LOCK_MUTEX_R(env)	pthread_mutex_lock((env)->me_rmutex)
+#define UNLOCK_MUTEX_R(env)	pthread_mutex_unlock((env)->me_rmutex)
+#define LOCK_MUTEX_W(env)	pthread_mutex_lock((env)->me_wmutex)
+#define UNLOCK_MUTEX_W(env)	pthread_mutex_unlock((env)->me_wmutex)
 #define getpid()	GetCurrentProcessId()
-#define	fdatasync(fd)	!FlushFileBuffers(fd)
+#define	fdatasync(fd)	(!FlushFileBuffers(fd))
 #define	ErrCode()	GetLastError()
-#define GetPageSize(x)	{SYSTEM_INFO si; GetSystemInfo(&si); (x) = si.dwPageSize;}
+#define GET_PAGESIZE(x) {SYSTEM_INFO si; GetSystemInfo(&si); (x) = si.dwPageSize;}
 #define	close(fd)	CloseHandle(fd)
 #define	munmap(ptr,len)	UnmapViewOfFile(ptr)
 #else
 	/** Lock the reader mutex.
 	 */
-#define LOCK_MUTEX_R(env)	pthread_mutex_lock(&env->me_txns->mti_mutex)
+#define LOCK_MUTEX_R(env)	pthread_mutex_lock(&(env)->me_txns->mti_mutex)
 	/** Unlock the reader mutex.
 	 */
-#define UNLOCK_MUTEX_R(env)	pthread_mutex_unlock(&env->me_txns->mti_mutex)
+#define UNLOCK_MUTEX_R(env)	pthread_mutex_unlock(&(env)->me_txns->mti_mutex)
 
 	/** Lock the writer mutex.
 	 *	Only a single write transaction is allowed at a time. Other writers
 	 *	will block waiting for this mutex.
 	 */
-#define LOCK_MUTEX_W(env)	pthread_mutex_lock(&env->me_txns->mti_wmutex)
+#define LOCK_MUTEX_W(env)	pthread_mutex_lock(&(env)->me_txns->mti_wmutex)
 	/** Unlock the writer mutex.
 	 */
-#define UNLOCK_MUTEX_W(env)	pthread_mutex_unlock(&env->me_txns->mti_wmutex)
+#define UNLOCK_MUTEX_W(env)	pthread_mutex_unlock(&(env)->me_txns->mti_wmutex)
 
 	/** Get the error code for the last failed system function.
 	 */
@@ -125,13 +125,13 @@
 	 *	Mainly used to initialize file variables and signify that they are
 	 *	unused.
 	 */
-#define INVALID_HANDLE_VALUE	-1
+#define INVALID_HANDLE_VALUE	(-1)
 
 	/** Get the size of a memory page for the system.
 	 *	This is the basic size that the platform's memory manager uses, and is
 	 *	fundamental to the use of memory-mapped files.
 	 */
-#define	GetPageSize(x)	(x) = sysconf(_SC_PAGE_SIZE)
+#define	GET_PAGESIZE(x)	((x) = sysconf(_SC_PAGE_SIZE))
 #endif
 
 /** @} */
@@ -190,7 +190,7 @@ typedef ULONG		pgno_t;
 	/** A default memory page size.
 	 *	The actual size is platform-dependent, but we use this for
 	 *	boot-strapping. We probably should not be using this any more.
-	 *	The #GetPageSize() macro is used to get the actual size.
+	 *	The #GET_PAGESIZE() macro is used to get the actual size.
 	 *
 	 *	Note that we don't currently support Huge pages. On Linux,
 	 *	regular data files cannot use Huge pages, and in general
@@ -596,7 +596,8 @@ typedef struct MDB_node {
 #define LEAF2KEY(p, i, ks)	((char *)(p) + PAGEHDRSZ + ((i)*(ks)))
 
 	/** Set the \b node's key into \b key, if requested. */
-#define MDB_SET_KEY(node, key)	if (key!=NULL) {(key)->mv_size = NODEKSZ(node); (key)->mv_data = NODEKEY(node);}
+#define MDB_SET_KEY(node, key)	{ if ((key) != NULL) { \
+	(key)->mv_size = NODEKSZ(node); (key)->mv_data = NODEKEY(node); } }
 
 	/** Information about a single database in the environment. */
 typedef struct MDB_db {
@@ -768,7 +769,7 @@ struct MDB_env {
 	size_t		me_mapsize;		/**< size of the data memory map */
 	off_t		me_size;		/**< current file size */
 	pgno_t		me_maxpg;		/**< me_mapsize / me_psize */
-	unsigned int	me_psize;	/**< size of a page, from #GetPageSize */
+	unsigned int	me_psize;	/**< size of a page, from #GET_PAGESIZE */
 	unsigned int	me_db_toggle;	/**< which DB table is current */
 	MDB_dbx		*me_dbxs;		/**< array of static DB info */
 	MDB_db		*me_dbs[2];		/**< two arrays of MDB_db info */
@@ -1627,7 +1628,7 @@ mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 
 	DPUTS("writing new meta page");
 
-	GetPageSize(psize);
+	GET_PAGESIZE(psize);
 
 	meta->mm_magic = MDB_MAGIC;
 	meta->mm_version = MDB_VERSION;

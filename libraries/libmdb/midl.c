@@ -129,7 +129,7 @@ int mdb_midl_append( IDL ids, ID id )
 /* Quicksort + Insertion sort for small arrays */
 
 #define SMALL	8
-#define	SWAP(a,b)	itmp=(a);(a)=(b);(b)=itmp
+#define	SWAP(a,b)	{ itmp=(a); (a)=(b); (b)=itmp; }
 
 void
 mdb_midl_sort( ID *ids )
