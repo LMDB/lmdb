@@ -168,6 +168,11 @@
 	 */
 typedef ULONG		pgno_t;
 
+	/** A transaction ID.
+	 *	See struct MDB_txn.mt_txnid for details.
+	 */
+typedef ULONG		txnid_t;
+
 /** @defgroup debug	Debug Macros
  *	@{
  */
@@ -382,7 +387,7 @@ typedef struct MDB_rxbody {
 	 *	started from so we can avoid overwriting any data used in that
 	 *	particular version.
 	 */
-	ULONG		mrb_txnid;
+	txnid_t		mrb_txnid;
 	/** The process ID of the process owning this reader txn. */
 	pid_t		mrb_pid;
 	/** The thread ID of the thread owning this txn. */
@@ -431,7 +436,7 @@ typedef struct MDB_txbody {
 		 *	This is recorded here only for convenience; the value can always
 		 *	be determined by reading the main database meta pages.
 		 */
-	ULONG		mtb_txnid;
+	txnid_t		mtb_txnid;
 		/** The number of slots that have been used in the reader table.
 		 *	This always records the maximum count, it is not decremented
 		 *	when readers release their slots.
@@ -641,7 +646,7 @@ typedef struct MDB_meta {
 	/** Any persistent environment flags. @ref mdb_env */
 #define	mm_flags	mm_dbs[0].md_flags
 	pgno_t		mm_last_pg;			/**< last used page in file */
-	ULONG		mm_txnid;			/**< txnid that committed this page */
+	txnid_t		mm_txnid;			/**< txnid that committed this page */
 } MDB_meta;
 
 	/** Auxiliary DB info.
@@ -669,7 +674,7 @@ struct MDB_txn {
 	 *	Only committed write transactions increment the ID. If a transaction
 	 *	aborts, the ID may be re-used by the next writer.
 	 */
-	ULONG		mt_txnid;
+	txnid_t		mt_txnid;
 	MDB_env		*mt_env;		/**< the DB environment */
 	/** The list of pages that became unused during this transaction.
 	 *	This is an #IDL.
@@ -754,7 +759,7 @@ typedef struct MDB_oldpages {
 	 */
 	struct MDB_oldpages *mo_next;
 	/**	The ID of the transaction in which these pages were freed. */
-	ULONG		mo_txnid;
+	txnid_t		mo_txnid;
 	/** An #IDL of the pages */
 	pgno_t		mo_pages[1];	/* dynamic */
 } MDB_oldpages;
@@ -966,7 +971,7 @@ mdb_alloc_page(MDB_cursor *mc, int num)
 			/* See if there's anything in the free DB */
 			MDB_cursor m2;
 			MDB_node *leaf;
-			ULONG *kptr, oldest;
+			txnid_t *kptr, oldest;
 
 			m2.mc_txn = txn;
 			m2.mc_dbi = FREE_DBI;
@@ -974,13 +979,13 @@ mdb_alloc_page(MDB_cursor *mc, int num)
 			m2.mc_flags = 0;
 			mdb_search_page(&m2, NULL, 0);
 			leaf = NODEPTR(m2.mc_pg[m2.mc_top], 0);
-			kptr = (ULONG *)NODEKEY(leaf);
+			kptr = (txnid_t *)NODEKEY(leaf);
 
 			{
 				unsigned int i;
 				oldest = txn->mt_txnid - 1;
 				for (i=0; i<txn->mt_env->me_txns->mti_numreaders; i++) {
-					ULONG mr = txn->mt_env->me_txns->mti_readers[i].mr_txnid;
+					txnid_t mr = txn->mt_env->me_txns->mti_readers[i].mr_txnid;
 					if (mr && mr < oldest)
 						oldest = mr;
 				}
@@ -1374,7 +1379,7 @@ mdb_txn_commit(MDB_txn *txn)
 #endif
 		/* write to last page of freeDB */
 		key.mv_size = sizeof(pgno_t);
-		key.mv_data = (char *)&txn->mt_txnid;
+		key.mv_data = &txn->mt_txnid;
 		data.mv_data = txn->mt_free_pgs;
 		/* The free list can still grow during this call,
 		 * despite the pre-emptive touches above. So check
@@ -1397,7 +1402,7 @@ mdb_txn_commit(MDB_txn *txn)
 
 		mop = env->me_pghead;
 		key.mv_size = sizeof(pgno_t);
-		key.mv_data = (char *)&mop->mo_txnid;
+		key.mv_data = &mop->mo_txnid;
 		data.mv_size = MDB_IDL_SIZEOF(mop->mo_pages);
 		data.mv_data = mop->mo_pages;
 		mdb_cursor_put(&mc, &key, &data, 0);
