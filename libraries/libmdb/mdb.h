@@ -440,7 +440,7 @@ int  mdb_env_get_maxreaders(MDB_env *env, unsigned int *readers);
 	 *	<li>EINVAL - an invalid parameter was specified, or the environment is already open.
 	 * </ul>
 	 */
-int  mdb_env_set_maxdbs(MDB_env *env, int dbs);
+int  mdb_env_set_maxdbs(MDB_env *env, MDB_dbi dbs);
 
 	/** Create a transaction for use with the environment.
 	 * The transaction handle may be discarded using #mdb_txn_abort() or #mdb_txn_commit().

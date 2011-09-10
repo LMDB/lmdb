@@ -689,7 +689,7 @@ struct MDB_txn {
 	/**	Number of DB records in use. This number only ever increments;
 	 *	we don't decrement it when individual DB handles are closed.
 	 */
-	unsigned int	mt_numdbs;
+	MDB_dbi		mt_numdbs;
 
 #define MDB_TXN_RDONLY		0x01		/**< read-only transaction */
 #define MDB_TXN_ERROR		0x02		/**< an error has occurred */
@@ -772,8 +772,8 @@ struct MDB_env {
 	uint32_t 	me_flags;
 	uint32_t	me_extrapad;	/**< unused for now */
 	unsigned int	me_maxreaders;	/**< size of the reader table */
-	unsigned int	me_numdbs;		/**< number of DBs opened */
-	unsigned int	me_maxdbs;		/**< size of the DB table */
+	MDB_dbi		me_numdbs;		/**< number of DBs opened */
+	MDB_dbi		me_maxdbs;		/**< size of the DB table */
 	char		*me_path;		/**< path to the DB files */
 	char		*me_map;		/**< the memory map of the data file */
 	MDB_txninfo	*me_txns;		/**< the memory map of the lock file */
@@ -1250,6 +1250,7 @@ mdb_txn_reset0(MDB_txn *txn)
 	} else {
 		MDB_oldpages *mop;
 		MDB_page *dp;
+		MDB_dbi dbi;
 		unsigned int i;
 
 		/* return all dirty pages to dpage list */
@@ -1270,8 +1271,8 @@ mdb_txn_reset0(MDB_txn *txn)
 		}
 
 		env->me_txn = NULL;
-		for (i=2; i<env->me_numdbs; i++)
-			env->me_dbxs[i].md_dirty = 0;
+		for (dbi=2; dbi<env->me_numdbs; dbi++)
+			env->me_dbxs[dbi].md_dirty = 0;
 		/* The writer mutex was locked in mdb_txn_begin. */
 		UNLOCK_MUTEX_W(env);
 	}
@@ -1412,6 +1413,7 @@ mdb_txn_commit(MDB_txn *txn)
 	 * touched so this is all in-place and cannot fail.
 	 */
 	{
+		MDB_dbi i;
 		MDB_val data;
 		data.mv_size = sizeof(MDB_db);
 
@@ -1545,6 +1547,7 @@ done:
 	{
 		int toggle = !env->me_db_toggle;
 		MDB_db *ip, *jp;
+		MDB_dbi i;
 
 		ip = &env->me_dbs[toggle][2];
 		jp = &txn->mt_dbs[2];
@@ -1813,7 +1816,7 @@ mdb_env_set_mapsize(MDB_env *env, size_t size)
 }
 
 int
-mdb_env_set_maxdbs(MDB_env *env, int dbs)
+mdb_env_set_maxdbs(MDB_env *env, MDB_dbi dbs)
 {
 	if (env->me_map)
 		return EINVAL;
