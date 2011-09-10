@@ -436,7 +436,7 @@ typedef struct MDB_txbody {
 		 *	This always records the maximum count, it is not decremented
 		 *	when readers release their slots.
 		 */
-	uint32_t	mtb_numreaders;
+	unsigned	mtb_numreaders;
 		/**	The ID of the most recent meta page in the database.
 		 *	This is recorded here only for convenience; the value can always
 		 *	be determined by reading the main database meta pages.
@@ -1819,16 +1819,16 @@ mdb_env_set_maxdbs(MDB_env *env, int dbs)
 }
 
 int
-mdb_env_set_maxreaders(MDB_env *env, int readers)
+mdb_env_set_maxreaders(MDB_env *env, unsigned int readers)
 {
-	if (env->me_map)
+	if (env->me_map || readers < 1)
 		return EINVAL;
 	env->me_maxreaders = readers;
 	return MDB_SUCCESS;
 }
 
 int
-mdb_env_get_maxreaders(MDB_env *env, int *readers)
+mdb_env_get_maxreaders(MDB_env *env, unsigned int *readers)
 {
 	if (!env || !readers)
 		return EINVAL;

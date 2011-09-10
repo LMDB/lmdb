@@ -414,7 +414,7 @@ int  mdb_env_set_mapsize(MDB_env *env, size_t size);
 	 *	<li>EINVAL - an invalid parameter was specified, or the environment is already open.
 	 * </ul>
 	 */
-int  mdb_env_set_maxreaders(MDB_env *env, int readers);
+int  mdb_env_set_maxreaders(MDB_env *env, unsigned int readers);
 
 	/** Get the maximum number of threads for the environment.
 	 * @param[in] env An environment handle returned by #mdb_env_create()
@@ -425,7 +425,7 @@ int  mdb_env_set_maxreaders(MDB_env *env, int readers);
 	 *	<li>EINVAL - an invalid parameter was specified.
 	 * </ul>
 	 */
-int  mdb_env_get_maxreaders(MDB_env *env, int *readers);
+int  mdb_env_get_maxreaders(MDB_env *env, unsigned int *readers);
 
 	/** Set the maximum number of databases for the environment.
 	 * This function is only needed if multiple databases will be used in the
