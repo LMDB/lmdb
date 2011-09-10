@@ -533,10 +533,13 @@ typedef struct MDB_page {
 typedef struct MDB_node {
 	/** lo and hi are used for data size on leaf nodes and for
 	 * child pgno on branch nodes. On 64 bit platforms, flags
-	 * is also used for pgno. (branch nodes ignore flags)
+	 * is also used for pgno. (Branch nodes have no flags).
+	 * They are in in host byte order in case that lets some
+	 * accesses be optimized into a 32-bit word access.
 	 */
-	unsigned short	mn_lo;
-	unsigned short	mn_hi;			/**< part of dsize or pgno */
+#define mn_lo mn_offset[__BYTE_ORDER!=__LITTLE_ENDIAN]
+#define mn_hi mn_offset[__BYTE_ORDER==__LITTLE_ENDIAN] /**< part of dsize or pgno */
+	unsigned short	mn_offset[2];
 	unsigned short	mn_flags;		/**< flags for special node types */
 #define F_BIGDATA	 0x01			/**< data put on overflow page */
 #define F_SUBDATA	 0x02			/**< data is a sub-database */
