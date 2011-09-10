@@ -2340,45 +2340,44 @@ cintcmp(const MDB_val *a, const MDB_val *b)
 static int
 memncmp(const MDB_val *a, const MDB_val *b)
 {
-	int diff, len_diff;
+	int diff;
+	ssize_t len_diff;
 	unsigned int len;
 
 	len = a->mv_size;
-	len_diff = a->mv_size - b->mv_size;
-	if (len_diff > 0)
+	len_diff = (ssize_t) a->mv_size - (ssize_t) b->mv_size;
+	if (len_diff > 0) {
 		len = b->mv_size;
+		len_diff = 1;
+	}
+
 	diff = memcmp(a->mv_data, b->mv_data, len);
-	return diff ? diff : len_diff;
+	return diff ? diff : len_diff<0 ? -1 : len_diff;
 }
 
 static int
 memnrcmp(const MDB_val *a, const MDB_val *b)
 {
 	const unsigned char	*p1, *p2, *p1_lim;
-	int diff, len_diff;
+	ssize_t len_diff;
+	int diff;
 
-	if (b->mv_size == 0)
-		return a->mv_size != 0;
-	if (a->mv_size == 0)
-		return -1;
+	p1_lim = (const unsigned char *)a->mv_data;
+	p1 = (const unsigned char *)a->mv_data + a->mv_size;
+	p2 = (const unsigned char *)b->mv_data + b->mv_size;
 
-	p1 = (const unsigned char *)a->mv_data + a->mv_size - 1;
-	p2 = (const unsigned char *)b->mv_data + b->mv_size - 1;
-
-	len_diff = a->mv_size - b->mv_size;
-	if (len_diff < 0)
-		p1_lim = p1 - a->mv_size;
-	else
-		p1_lim = p1 - b->mv_size;
+	len_diff = (ssize_t) a->mv_size - (ssize_t) b->mv_size;
+	if (len_diff > 0) {
+		p1_lim += len_diff;
+		len_diff = 1;
+	}
 
 	while (p1 > p1_lim) {
-		diff = *p1 - *p2;
+		diff = *--p1 - *--p2;
 		if (diff)
 			return diff;
-		p1--;
-		p2--;
 	}
-	return len_diff;
+	return len_diff<0 ? -1 : len_diff;
 }
 
 /* Search for key within a leaf page, using binary search.
