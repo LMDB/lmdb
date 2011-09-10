@@ -3283,9 +3283,11 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 		goto top;
 	} else {
 		int exact = 0;
-		rc = mdb_cursor_set(mc, key, NULL, MDB_SET, &exact);
+		MDB_val d2;
+		rc = mdb_cursor_set(mc, key, &d2, MDB_SET, &exact);
 		if (flags == MDB_NOOVERWRITE && rc == 0) {
 			DPRINTF("duplicate key [%s]", DKEY(key));
+			*data = d2;
 			return MDB_KEYEXIST;
 		}
 		if (rc && rc != MDB_NOTFOUND)

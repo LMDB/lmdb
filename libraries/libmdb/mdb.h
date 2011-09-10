@@ -683,7 +683,7 @@ int  mdb_get(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data);
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] dbi A database handle returned by #mdb_open()
 	 * @param[in] key The key to store in the database
-	 * @param[in] data The data to store
+	 * @param[in,out] data The data to store
 	 * @param[in] flags Special options for this operation. This parameter
 	 * must be set to 0 or by bitwise OR'ing together one or more of the
 	 * values described here.
@@ -696,7 +696,8 @@ int  mdb_get(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data);
 	 *	<li>#MDB_NOOVERWRITE - enter the new key/data pair only if the key
 	 *		does not already appear in the database. The function will return
 	 *		#MDB_KEYEXIST if the key already appears in the database, even if
-	 *		the database supports duplicates (#MDB_DUPSORT).
+	 *		the database supports duplicates (#MDB_DUPSORT). The \b data
+	 *		parameter will be set to point to the existing item.
 	 * </ul>
 	 * @return A non-zero error value on failure and 0 on success. Some possible
 	 * errors are:
