@@ -48,6 +48,7 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -62,6 +63,12 @@
 
 #include "mdb.h"
 #include "midl.h"
+
+#if (__BYTE_ORDER == __LITTLE_ENDIAN) == (__BYTE_ORDER == __BIG_ENDIAN)
+# error "Unknown or unsupported endianness (__BYTE_ORDER)"
+#elif (-6 & 5) || CHAR_BIT != 8 || UINT_MAX < 0xffffffff || ULONG_MAX % 0xFFFF
+# error "Two's complement, reasonably sized integer types, please"
+#endif
 
 /** @defgroup internal	MDB Internals
  *	@{
