@@ -292,7 +292,7 @@ typedef ID	txnid_t;
 #define	LAZY_RWLOCK_UNLOCK(x)	pthread_rwlock_unlock(x)
 #define	LAZY_RWLOCK_WRLOCK(x)	pthread_rwlock_wrlock(x)
 #define	LAZY_RWLOCK_RDLOCK(x)	pthread_rwlock_rdlock(x)
-#define	LAZY_RWLOCK_DEF(x)		pthread_rwlock_t	x
+#define	LAZY_RWLOCK_DEF(x)		pthread_rwlock_t	x;
 #define	LAZY_RWLOCK_INIT(x,y)	pthread_rwlock_init(x,y)
 #define	LAZY_RWLOCK_DESTROY(x)	pthread_rwlock_destroy(x)
 #endif
