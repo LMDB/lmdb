@@ -189,7 +189,8 @@ typedef ID	txnid_t;
 #elif DEBUG
 	/**	Print a debug message with printf formatting. */
 # define DPRINTF(fmt, ...)	/**< Requires 2 or more args */ \
-	fprintf(stderr, "%s:%d:(%p) " fmt "\n", __func__, __LINE__, pthread_self(), __VA_ARGS__)
+	fprintf(stderr, "%s:%d:(%zx) " fmt "\n", __func__, __LINE__, \
+		(size_t) pthread_self(), __VA_ARGS__)
 #else
 # define DPRINTF(fmt, ...)	((void) 0)
 #endif
@@ -1198,8 +1199,8 @@ mdb_txn_renew(MDB_txn *txn)
 	rc = mdb_txn_renew0(txn);
 	if (rc == MDB_SUCCESS) {
 		DPRINTF("renew txn %zu%c %p on mdbenv %p, root page %zu",
-			txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w', txn,
-			(void *)txn->mt_env, txn->mt_dbs[MAIN_DBI].md_root);
+			txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w',
+			(void *)txn, (void *)txn->mt_env, txn->mt_dbs[MAIN_DBI].md_root);
 	}
 	return rc;
 }
@@ -1230,8 +1231,8 @@ mdb_txn_begin(MDB_env *env, unsigned int flags, MDB_txn **ret)
 	else {
 		*ret = txn;
 		DPRINTF("begin txn %zu%c %p on mdbenv %p, root page %zu",
-			txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w', txn,
-			(void *) env, txn->mt_dbs[MAIN_DBI].md_root);
+			txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w',
+			(void *) txn, (void *) env, txn->mt_dbs[MAIN_DBI].md_root);
 	}
 
 	return rc;
@@ -1285,8 +1286,8 @@ mdb_txn_reset(MDB_txn *txn)
 		return;
 
 	DPRINTF("reset txn %zu%c %p on mdbenv %p, root page %zu",
-		txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w', txn,
-		(void *)txn->mt_env, txn->mt_dbs[MAIN_DBI].md_root);
+		txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w',
+		(void *) txn, (void *)txn->mt_env, txn->mt_dbs[MAIN_DBI].md_root);
 
 	mdb_txn_reset0(txn);
 }
@@ -1298,8 +1299,8 @@ mdb_txn_abort(MDB_txn *txn)
 		return;
 
 	DPRINTF("abort txn %zu%c %p on mdbenv %p, root page %zu",
-		txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w', txn,
-		(void *)txn->mt_env, txn->mt_dbs[MAIN_DBI].md_root);
+		txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w',
+		(void *)txn, (void *)txn->mt_env, txn->mt_dbs[MAIN_DBI].md_root);
 
 	mdb_txn_reset0(txn);
 	free(txn);
@@ -1343,7 +1344,7 @@ mdb_txn_commit(MDB_txn *txn)
 		goto done;
 
 	DPRINTF("committing txn %zu %p on mdbenv %p, root page %zu",
-	    txn->mt_txnid, txn, (void *)env, txn->mt_dbs[MAIN_DBI].md_root);
+	    txn->mt_txnid, (void *)txn, (void *)env, txn->mt_dbs[MAIN_DBI].md_root);
 
 	mc.mc_txn = txn;
 	mc.mc_dbi = FREE_DBI;
