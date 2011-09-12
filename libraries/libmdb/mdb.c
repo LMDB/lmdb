@@ -3010,6 +3010,9 @@ set3:
 			}
 
 		} else {
+			if (mc->mc_db->md_flags & MDB_DUPSORT) {
+				mc->mc_xcursor->mx_cursor.mc_flags &= ~C_INITIALIZED;
+			}
 			if ((rc = mdb_read_data(mc->mc_txn, leaf, data)) != MDB_SUCCESS)
 				return rc;
 		}
