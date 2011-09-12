@@ -662,6 +662,7 @@ typedef struct MDB_dbx {
 	MDB_cmp_func	*md_cmp;	/**< function for comparing keys */
 	MDB_cmp_func	*md_dcmp;	/**< function for comparing data items */
 	MDB_rel_func	*md_rel;	/**< user relocate function */
+	void		*md_relctx;		/**< user-provided context for md_rel */
 	MDB_dbi	md_parent;			/**< parent DB of a sub-DB */
 	unsigned int	md_dirty;	/**< TRUE if DB was written in this txn */
 } MDB_dbx;
@@ -923,15 +924,6 @@ mdb_cmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b)
 	return txn->mt_dbxs[dbi].md_cmp(a, b);
 }
 
-/** Compare two data items according to a particular database.
- * This returns a comparison as if the two items were data items of
- * a sorted duplicates #MDB_DUPSORT database.
- * @param[in] txn A transaction handle returned by #mdb_txn_begin()
- * @param[in] dbi A database handle returned by #mdb_open()
- * @param[in] a The first item to compare
- * @param[in] b The second item to compare
- * @return < 0 if a < b, 0 if a == b, > 0 if a > b
- */
 int
 mdb_dcmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b)
 {
@@ -4728,6 +4720,15 @@ int mdb_set_relfunc(MDB_txn *txn, MDB_dbi dbi, MDB_rel_func *rel)
 		return EINVAL;
 
 	txn->mt_dbxs[dbi].md_rel = rel;
+	return MDB_SUCCESS;
+}
+
+int mdb_set_relctx(MDB_txn *txn, MDB_dbi dbi, void *ctx)
+{
+	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs)
+		return EINVAL;
+
+	txn->mt_dbxs[dbi].md_relctx = ctx;
 	return MDB_SUCCESS;
 }
 

@@ -125,13 +125,18 @@ typedef struct MDB_val {
 typedef int  (MDB_cmp_func)(const MDB_val *a, const MDB_val *b);
 
 /** A callback function used to relocate a position-dependent data item
- * in a fixed-address database. The \b newptr gives the item's current address in
- * the memory map, and \b oldptr gives its previous address. This callback is
- * expected to walk through the fields of the record in newptr and modify any
+ * in a fixed-address database. The \b newptr gives the item's desired address in
+ * the memory map, and \b oldptr gives its previous address. The item's actual
+ * data resides at the address in \b item.  This callback is expected to walk
+ * through the fields of the record in \b item and modify any
  * values based at the \b oldptr address to be relative to the \b newptr address.
+ * @param[in,out] item The item that is to be relocated.
+ * @param[in] oldptr The previous address.
+ * @param[in] newptr The new address to relocate to.
+ * @param[in] relctx An application-provided context, set by #mdb_set_relctx().
  * @todo This feature is currently unimplemented.
  */
-typedef void (MDB_rel_func)(void *newptr, void *oldptr, size_t size);
+typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *relctx);
 
 /** @defgroup	mdb_env	Environment Flags
  *	@{
@@ -178,7 +183,10 @@ typedef void (MDB_rel_func)(void *newptr, void *oldptr, size_t size);
 #define MDB_CURRENT	0x40
 /*	@} */
 
-/** Cursor operations */
+/** Cursor Get operations
+ *	This is the set of all operations for retrieving data
+ *	using a cursor.
+ */
 typedef enum MDB_cursor_op {
 	MDB_FIRST,				/**< Position at first key/data item */
 	MDB_FIRST_DUP,			/**< Position at first data item of current key.
@@ -596,8 +604,8 @@ void mdb_close(MDB_txn *txn, MDB_dbi dbi);
 	 * with #mdb_open(), the keys are compared lexically, with shorter keys collating
 	 * before longer keys.
 	 * @warning This function must be called before any data access functions are used,
-	 * otherwise data corruption may occur. The same function must be used by every
-	 * process accessing the database, every time the database is used.
+	 * otherwise data corruption may occur. The same comparison function must be used by every
+	 * program accessing the database, every time the database is used.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] dbi A database handle returned by #mdb_open()
 	 * @param[in] cmp A #MDB_cmp_func function
@@ -618,8 +626,8 @@ int  mdb_set_compare(MDB_txn *txn, MDB_dbi dbi, MDB_cmp_func *cmp);
 	 * with #mdb_open(), the data items are compared lexically, with shorter items collating
 	 * before longer items.
 	 * @warning This function must be called before any data access functions are used,
-	 * otherwise data corruption may occur. The same function must be used by every
-	 * process accessing the database, every time the database is used.
+	 * otherwise data corruption may occur. The same comparison function must be used by every
+	 * program accessing the database, every time the database is used.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] dbi A database handle returned by #mdb_open()
 	 * @param[in] cmp A #MDB_cmp_func function
@@ -649,6 +657,21 @@ int  mdb_set_dupsort(MDB_txn *txn, MDB_dbi dbi, MDB_cmp_func *cmp);
 	 * </ul>
 	 */
 int  mdb_set_relfunc(MDB_txn *txn, MDB_dbi dbi, MDB_rel_func *rel);
+
+	/** Set a context pointer for a #MDB_FIXEDMAP database's relocation function.
+	 * See #mdb_set_relfunc and #MDB_rel_func for more details.
+	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
+	 * @param[in] dbi A database handle returned by #mdb_open()
+	 * @param[in] ctx An arbitrary pointer for whatever the application needs.
+	 * It will be passed to the callback function set by #mdb_set_relfunc
+	 * as its \b relctx parameter whenever the callback is invoked.
+	 * @return A non-zero error value on failure and 0 on success. Some possible
+	 * errors are:
+	 * <ul>
+	 *	<li>EINVAL - an invalid parameter was specified.
+	 * </ul>
+	 */
+int  mdb_set_relctx(MDB_txn *txn, MDB_dbi dbi, void *ctx);
 
 	/** Get items from a database.
 	 * This function retrieves key/data pairs from the database. The address
@@ -852,5 +875,15 @@ int  mdb_cursor_count(MDB_cursor *cursor, size_t *countp);
 	 */
 int  mdb_cmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b);
 
+	/** Compare two data items according to a particular database.
+	 * This returns a comparison as if the two items were data items of
+	 * a sorted duplicates #MDB_DUPSORT database.
+	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
+	 * @param[in] dbi A database handle returned by #mdb_open()
+	 * @param[in] a The first item to compare
+	 * @param[in] b The second item to compare
+	 * @return < 0 if a < b, 0 if a == b, > 0 if a > b
+	 */
+int  mdb_dcmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b);
 /**	@} */
 #endif /* _MDB_H_ */
