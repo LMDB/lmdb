@@ -26,6 +26,7 @@ mtest2:	mtest2.o libmdb.a
 mtest3:	mtest3.o libmdb.a
 mtest4:	mtest4.o libmdb.a
 mtest5:	mtest5.o libmdb.a
+mtest6:	mtest6.o libmdb.a
 
 mdb.o: mdb.c mdb.h midl.h
 	$(CC) $(CFLAGS) -fPIC $(CPPFLAGS) -c mdb.c
