@@ -52,10 +52,10 @@ int main(int argc,char * argv[])
 	rc = mdb_stat(txn, dbi, &mst);
 	printf("Page size: %u\n", mst.ms_psize);
 	printf("Tree depth: %u\n", mst.ms_depth);
-	printf("Branch pages: %lu\n", mst.ms_branch_pages);
-	printf("Leaf pages: %lu\n", mst.ms_leaf_pages);
-	printf("Overflow pages: %lu\n", mst.ms_overflow_pages);
-	printf("Entries: %lu\n", mst.ms_entries);
+	printf("Branch pages: %zu\n", mst.ms_branch_pages);
+	printf("Leaf pages: %zu\n", mst.ms_leaf_pages);
+	printf("Overflow pages: %zu\n", mst.ms_overflow_pages);
+	printf("Entries: %zu\n", mst.ms_entries);
 	mdb_close(txn, dbi);
 	mdb_txn_abort(txn);
 	mdb_env_close(env);

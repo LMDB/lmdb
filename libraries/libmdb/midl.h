@@ -26,19 +26,20 @@
 #ifndef _MDB_MIDL_H_
 #define _MDB_MIDL_H_
 
+#include <stddef.h>
+
 /** @defgroup internal	MDB Internals
  *	@{
  */
-	/**	ULONG should be the largest integer type supported on a machine.
-	 * It should be equal to the size of a pointer.
-	 */
-#define ULONG		unsigned long
+
 /** @defgroup idls	ID List Management
  *	@{
  */
 	/** A generic ID number. These were entryIDs in back-bdb.
+	 *	It should be the largest integer type supported on a machine.
+	 *	It should be equal to the size of a pointer.
 	 */
-typedef ULONG ID;
+typedef size_t ID;
 
 	/** An IDL is an ID List, a sorted array of IDs. The first
 	 * element of the array is a counter for how many actual

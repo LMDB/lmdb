@@ -232,10 +232,10 @@ typedef struct MDB_stat {
 	unsigned int	ms_psize;			/**< Size of a database page.
 											This is currently the same for all databases. */
 	unsigned int	ms_depth;			/**< Depth (height) of the B-tree */
-	unsigned long	ms_branch_pages;	/**< Number of internal (non-leaf) pages */
-	unsigned long	ms_leaf_pages;		/**< Number of leaf pages */
-	unsigned long	ms_overflow_pages;	/**< Number of overflow pages */
-	unsigned long	ms_entries;			/**< Number of data items */
+	size_t		ms_branch_pages;	/**< Number of internal (non-leaf) pages */
+	size_t		ms_leaf_pages;		/**< Number of leaf pages */
+	size_t		ms_overflow_pages;	/**< Number of overflow pages */
+	size_t		ms_entries;			/**< Number of data items */
 } MDB_stat;
 
 	/** Return the mdb library version information.
@@ -414,7 +414,7 @@ int  mdb_env_set_mapsize(MDB_env *env, size_t size);
 	 *	<li>EINVAL - an invalid parameter was specified, or the environment is already open.
 	 * </ul>
 	 */
-int  mdb_env_set_maxreaders(MDB_env *env, int readers);
+int  mdb_env_set_maxreaders(MDB_env *env, unsigned int readers);
 
 	/** Get the maximum number of threads for the environment.
 	 * @param[in] env An environment handle returned by #mdb_env_create()
@@ -425,7 +425,7 @@ int  mdb_env_set_maxreaders(MDB_env *env, int readers);
 	 *	<li>EINVAL - an invalid parameter was specified.
 	 * </ul>
 	 */
-int  mdb_env_get_maxreaders(MDB_env *env, int *readers);
+int  mdb_env_get_maxreaders(MDB_env *env, unsigned int *readers);
 
 	/** Set the maximum number of databases for the environment.
 	 * This function is only needed if multiple databases will be used in the
@@ -440,7 +440,7 @@ int  mdb_env_get_maxreaders(MDB_env *env, int *readers);
 	 *	<li>EINVAL - an invalid parameter was specified, or the environment is already open.
 	 * </ul>
 	 */
-int  mdb_env_set_maxdbs(MDB_env *env, int dbs);
+int  mdb_env_set_maxdbs(MDB_env *env, MDB_dbi dbs);
 
 	/** Create a transaction for use with the environment.
 	 * The transaction handle may be discarded using #mdb_txn_abort() or #mdb_txn_commit().
@@ -542,7 +542,7 @@ int  mdb_txn_renew(MDB_txn *txn);
 	 *	<li>#MDB_INTEGERKEY
 	 *		Keys are binary integers in native byte order. Setting this option
 	 *		requires all keys to be the same size, typically sizeof(int)
-	 *		or sizeof(long).
+	 *		or sizeof(size_t).
 	 *	<li>#MDB_DUPFIXED
 	 *		This flag may only be used in combination with #MDB_DUPSORT. This option
 	 *		tells the library that the data items for this database are all the same
@@ -839,7 +839,7 @@ int  mdb_cursor_del(MDB_cursor *cursor, unsigned int flags);
 	 *	<li>EINVAL - cursor is not initialized, or an invalid parameter was specified.
 	 * </ul>
 	 */
-int  mdb_cursor_count(MDB_cursor *cursor, unsigned long *countp);
+int  mdb_cursor_count(MDB_cursor *cursor, size_t *countp);
 
 	/** Compare two data items according to a particular database.
 	 * This returns a comparison as if the two data items were keys in the

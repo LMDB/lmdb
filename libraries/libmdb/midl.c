@@ -15,6 +15,7 @@
  * <http://www.OpenLDAP.org/license.html>.
  */
 
+#include <limits.h>
 #include <string.h>
 #include <sys/types.h>
 #include <assert.h>
@@ -129,12 +130,13 @@ int mdb_midl_append( IDL ids, ID id )
 /* Quicksort + Insertion sort for small arrays */
 
 #define SMALL	8
-#define	SWAP(a,b)	itmp=(a);(a)=(b);(b)=itmp
+#define	SWAP(a,b)	{ itmp=(a); (a)=(b); (b)=itmp; }
 
 void
 mdb_midl_sort( ID *ids )
 {
-	int istack[16*sizeof(int)];
+	/* Max possible depth of int-indexed tree * 2 items/level */
+	int istack[sizeof(int)*CHAR_BIT * 2];
 	int i,j,k,l,ir,jstack;
 	ID a, itmp;
 

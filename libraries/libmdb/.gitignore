@@ -11,3 +11,5 @@ mdb_stat
 core
 core.*
 valgrind.*
+man/
+html/
