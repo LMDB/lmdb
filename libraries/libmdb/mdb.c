@@ -839,7 +839,7 @@ static int	mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_curso
 static int	mdb_cursor_first(MDB_cursor *mc, MDB_val *key, MDB_val *data);
 static int	mdb_cursor_last(MDB_cursor *mc, MDB_val *key, MDB_val *data);
 
-static void	mdb_cursor_init(MDB_cursor *mc, MDB_txn *txn, MDB_dbi dbi);
+static void	mdb_cursor_init(MDB_cursor *mc, MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx);
 static void	mdb_xcursor_init0(MDB_cursor *mc);
 static void	mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node);
 
@@ -967,7 +967,7 @@ mdb_alloc_page(MDB_cursor *mc, int num)
 			MDB_node *leaf;
 			txnid_t *kptr, oldest;
 
-			mdb_cursor_init(&m2, txn, FREE_DBI);
+			mdb_cursor_init(&m2, txn, FREE_DBI, NULL);
 			mdb_search_page(&m2, NULL, 0);
 			leaf = NODEPTR(m2.mc_pg[m2.mc_top], 0);
 			kptr = (txnid_t *)NODEKEY(leaf);
@@ -1340,7 +1340,7 @@ mdb_txn_commit(MDB_txn *txn)
 	DPRINTF("committing txn %zu %p on mdbenv %p, root page %zu",
 	    txn->mt_txnid, (void *)txn, (void *)env, txn->mt_dbs[MAIN_DBI].md_root);
 
-	mdb_cursor_init(&mc, txn, FREE_DBI);
+	mdb_cursor_init(&mc, txn, FREE_DBI, NULL);
 
 	/* should only be one record now */
 	if (env->me_pghead) {
@@ -1410,7 +1410,7 @@ mdb_txn_commit(MDB_txn *txn)
 		MDB_val data;
 		data.mv_size = sizeof(MDB_db);
 
-		mdb_cursor_init(&mc, txn, MAIN_DBI);
+		mdb_cursor_init(&mc, txn, MAIN_DBI, NULL);
 		for (i = 2; i < txn->mt_numdbs; i++) {
 			if (txn->mt_dbxs[i].md_dirty) {
 				data.mv_data = &txn->mt_dbs[i];
@@ -2619,7 +2619,7 @@ mdb_search_page(MDB_cursor *mc, MDB_val *key, int modify)
 		/* For sub-databases, update main root first */
 		if (mc->mc_dbi > MAIN_DBI && !mc->mc_dbx->md_dirty) {
 			MDB_cursor mc2;
-			mdb_cursor_init(&mc2, mc->mc_txn, MAIN_DBI);
+			mdb_cursor_init(&mc2, mc->mc_txn, MAIN_DBI, NULL);
 			rc = mdb_search_page(&mc2, &mc->mc_dbx->md_name, 1);
 			if (rc)
 				return rc;
@@ -2681,13 +2681,7 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 		return EINVAL;
 	}
 
-	mdb_cursor_init(&mc, txn, dbi);
-	if (txn->mt_dbs[dbi].md_flags & MDB_DUPSORT) {
-		mc.mc_xcursor = &mx;
-		mdb_xcursor_init0(&mc);
-	} else {
-		mc.mc_xcursor = NULL;
-	}
+	mdb_cursor_init(&mc, txn, dbi, &mx);
 	return mdb_cursor_set(&mc, key, data, MDB_SET, &exact);
 }
 
@@ -3010,9 +3004,8 @@ set3:
 			}
 
 		} else {
-			if (mc->mc_db->md_flags & MDB_DUPSORT) {
-				mc->mc_xcursor->mx_cursor.mc_flags &= ~C_INITIALIZED;
-			}
+			if (mc->mc_xcursor)
+				mc->mc_xcursor->mx_cursor.mc_flags = 0;
 			if ((rc = mdb_read_data(mc->mc_txn, leaf, data)) != MDB_SUCCESS)
 				return rc;
 		}
@@ -3100,6 +3093,8 @@ mdb_cursor_last(MDB_cursor *mc, MDB_val *key, MDB_val *data)
 			if (rc)
 				return rc;
 		} else {
+			if (mc->mc_xcursor)
+				mc->mc_xcursor->mx_cursor.mc_flags = 0;
 			if ((rc = mdb_read_data(mc->mc_txn, leaf, data)) != MDB_SUCCESS)
 				return rc;
 		}
@@ -3229,7 +3224,7 @@ mdb_cursor_touch(MDB_cursor *mc)
 
 	if (mc->mc_dbi > MAIN_DBI && !mc->mc_dbx->md_dirty) {
 		MDB_cursor mc2;
-		mdb_cursor_init(&mc2, mc->mc_txn, MAIN_DBI);
+		mdb_cursor_init(&mc2, mc->mc_txn, MAIN_DBI, NULL);
 		rc = mdb_search_page(&mc2, &mc->mc_dbx->md_name, 1);
 		if (rc)
 			 return rc;
@@ -3747,7 +3742,7 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
 }
 
 static void
-mdb_cursor_init(MDB_cursor *mc, MDB_txn *txn, MDB_dbi dbi)
+mdb_cursor_init(MDB_cursor *mc, MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx)
 {
 	mc->mc_dbi = dbi;
 	mc->mc_txn = txn;
@@ -3755,12 +3750,20 @@ mdb_cursor_init(MDB_cursor *mc, MDB_txn *txn, MDB_dbi dbi)
 	mc->mc_dbx = &txn->mt_dbxs[dbi];
 	mc->mc_snum = 0;
 	mc->mc_flags = 0;
+	if (txn->mt_dbs[dbi].md_flags & MDB_DUPSORT) {
+		assert(mx != NULL);
+		mc->mc_xcursor = mx;
+		mdb_xcursor_init0(mc);
+	} else {
+		mc->mc_xcursor = NULL;
+	}
 }
 
 int
 mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **ret)
 {
 	MDB_cursor	*mc;
+	MDB_xcursor	*mx = NULL;
 	size_t size = sizeof(MDB_cursor);
 
 	if (txn == NULL || ret == NULL || !dbi || dbi >= txn->mt_numdbs)
@@ -3770,12 +3773,10 @@ mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **ret)
 		size += sizeof(MDB_xcursor);
 
 	if ((mc = malloc(size)) != NULL) {
-		mdb_cursor_init(mc, txn, dbi);
 		if (txn->mt_dbs[dbi].md_flags & MDB_DUPSORT) {
-			MDB_xcursor *mx = (MDB_xcursor *)(mc + 1);
-			mc->mc_xcursor = mx;
-			mdb_xcursor_init0(mc);
+			mx = (MDB_xcursor *)(mc + 1);
 		}
+		mdb_cursor_init(mc, txn, dbi, mx);
 	} else {
 		return ENOMEM;
 	}
@@ -4203,13 +4204,7 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 		return EINVAL;
 	}
 
-	mdb_cursor_init(&mc, txn, dbi);
-	if (txn->mt_dbs[dbi].md_flags & MDB_DUPSORT) {
-		mc.mc_xcursor = &mx;
-		mdb_xcursor_init0(&mc);
-	} else {
-		mc.mc_xcursor = NULL;
-	}
+	mdb_cursor_init(&mc, txn, dbi, &mx);
 
 	exact = 0;
 	if (data) {
@@ -4524,13 +4519,7 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 	if ((flags & (MDB_NOOVERWRITE|MDB_NODUPDATA)) != flags)
 		return EINVAL;
 
-	mdb_cursor_init(&mc, txn, dbi);
-	if (txn->mt_dbs[dbi].md_flags & MDB_DUPSORT) {
-		mc.mc_xcursor = &mx;
-		mdb_xcursor_init0(&mc);
-	} else {
-		mc.mc_xcursor = NULL;
-	}
+	mdb_cursor_init(&mc, txn, dbi, &mx);
 	return mdb_cursor_put(&mc, key, data, flags);
 }
 
@@ -4673,7 +4662,7 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 		memset(&dummy, 0, sizeof(dummy));
 		dummy.md_root = P_INVALID;
 		dummy.md_flags = flags & 0xffff;
-		mdb_cursor_init(&mc, txn, MAIN_DBI);
+		mdb_cursor_init(&mc, txn, MAIN_DBI, NULL);
 		rc = mdb_cursor_put(&mc, &key, &data, F_SUBDATA);
 		dirty = 1;
 	}
