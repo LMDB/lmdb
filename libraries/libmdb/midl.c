@@ -39,32 +39,31 @@ static unsigned mdb_midl_search( IDL ids, ID id )
 	 * if not found, returns first position greater than id
 	 */
 	unsigned base = 0;
-	unsigned cursor = 0;
+	unsigned cursor = 1;
 	int val = 0;
 	unsigned n = ids[0];
 
 	while( 0 < n ) {
-		int pivot = n >> 1;
-		cursor = base + pivot;
-		val = CMP( ids[cursor + 1], id );
+		unsigned pivot = n >> 1;
+		cursor = base + pivot + 1;
+		val = CMP( ids[cursor], id );
 
 		if( val < 0 ) {
 			n = pivot;
 
 		} else if ( val > 0 ) {
-			base = cursor + 1;
+			base = cursor;
 			n -= pivot + 1;
 
 		} else {
-			return cursor + 1;
+			return cursor;
 		}
 	}
 	
 	if( val > 0 ) {
-		return cursor + 2;
-	} else {
-		return cursor + 1;
+		++cursor;
 	}
+	return cursor;
 }
 
 int mdb_midl_insert( IDL ids, ID id )
@@ -73,11 +72,11 @@ int mdb_midl_insert( IDL ids, ID id )
 
 	if (MDB_IDL_IS_RANGE( ids )) {
 		/* if already in range, treat as a dup */
-		if (id >= MDB_IDL_FIRST(ids) && id <= MDB_IDL_LAST(ids))
+		if (id >= MDB_IDL_RANGE_FIRST(ids) && id <= MDB_IDL_RANGE_LAST(ids))
 			return -1;
-		if (id < MDB_IDL_FIRST(ids))
+		if (id < MDB_IDL_RANGE_FIRST(ids))
 			ids[1] = id;
-		else if (id > MDB_IDL_LAST(ids))
+		else if (id > MDB_IDL_RANGE_LAST(ids))
 			ids[2] = id;
 		return 0;
 	}
@@ -235,32 +234,31 @@ unsigned mdb_mid2l_search( ID2L ids, ID id )
 	 * if not found, returns first position greater than id
 	 */
 	unsigned base = 0;
-	unsigned cursor = 0;
+	unsigned cursor = 1;
 	int val = 0;
 	unsigned n = ids[0].mid;
 
 	while( 0 < n ) {
-		int pivot = n >> 1;
-		cursor = base + pivot;
-		val = CMP( id, ids[cursor + 1].mid );
+		unsigned pivot = n >> 1;
+		cursor = base + pivot + 1;
+		val = CMP( id, ids[cursor].mid );
 
 		if( val < 0 ) {
 			n = pivot;
 
 		} else if ( val > 0 ) {
-			base = cursor + 1;
+			base = cursor;
 			n -= pivot + 1;
 
 		} else {
-			return cursor + 1;
+			return cursor;
 		}
 	}
 
 	if( val > 0 ) {
-		return cursor + 2;
-	} else {
-		return cursor + 1;
+		++cursor;
 	}
+	return cursor;
 }
 
 int mdb_mid2l_insert( ID2L ids, ID2 *id )
