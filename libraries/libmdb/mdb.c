@@ -850,7 +850,7 @@ static size_t	mdb_branch_size(MDB_env *env, MDB_val *key);
 static void mdb_default_cmp(MDB_txn *txn, MDB_dbi dbi);
 
 /** @cond */
-static MDB_cmp_func	memncmp, memnrcmp, intcmp, cintcmp;
+static MDB_cmp_func	memncmp, memnrcmp, intcmp, cintcmp, longcmp;
 /** @endcond */
 
 #ifdef _WIN32
@@ -2291,22 +2291,20 @@ mdb_env_close(MDB_env *env)
 	free(env);
 }
 
+/* only for aligned size_t's */
+static int
+longcmp(const MDB_val *a, const MDB_val *b)
+{
+	return (*(size_t *)a->mv_data < *(size_t *)b->mv_data) ? -1 :
+		*(size_t *)a->mv_data > *(size_t *)b->mv_data;
+}
+
 /* only for aligned ints */
 static int
 intcmp(const MDB_val *a, const MDB_val *b)
 {
-	if (a->mv_size == sizeof(long))
-	{
-		unsigned long *la, *lb;
-		la = a->mv_data;
-		lb = b->mv_data;
-		return *la - *lb;
-	} else {
-		unsigned int *ia, *ib;
-		ia = a->mv_data;
-		ib = b->mv_data;
-		return *ia - *ib;
-	}
+	return (*(unsigned int *)a->mv_data < *(unsigned int *)b->mv_data) ? -1 :
+		*(unsigned int *)a->mv_data > *(unsigned int *)b->mv_data;
 }
 
 /* ints must always be the same size */
@@ -2401,6 +2399,17 @@ mdb_search_node(MDB_cursor *mc, MDB_val *key, int *exactp)
 	low = IS_LEAF(mp) ? 0 : 1;
 	high = nkeys - 1;
 	cmp = mc->mc_dbx->md_cmp;
+
+	/* Branch pages have no data, so if using integer keys,
+	 * alignment is guaranteed. Use faster intcmp.
+	 */
+	if (cmp == cintcmp && IS_BRANCH(mp)) {
+		if (NODEPTR(mp, 1)->mn_ksize == sizeof(size_t))
+			cmp = longcmp;
+		else
+			cmp = intcmp;
+	}
+
 	if (IS_LEAF2(mp)) {
 		nodekey.mv_size = mc->mc_db->md_pad;
 		node = NODEPTR(mp, 0);	/* fake */
@@ -2867,6 +2876,7 @@ mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
     MDB_cursor_op op, int *exactp)
 {
 	int		 rc;
+	MDB_page	*mp;
 	MDB_node	*leaf;
 	DKBUF;
 
@@ -2878,11 +2888,12 @@ mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	if (mc->mc_flags & C_INITIALIZED) {
 		MDB_val nodekey;
 
-		if (mc->mc_pg[mc->mc_top]->mp_flags & P_LEAF2) {
+		mp = mc->mc_pg[mc->mc_top];
+		if (mp->mp_flags & P_LEAF2) {
 			nodekey.mv_size = mc->mc_db->md_pad;
-			nodekey.mv_data = LEAF2KEY(mc->mc_pg[mc->mc_top], 0, nodekey.mv_size);
+			nodekey.mv_data = LEAF2KEY(mp, 0, nodekey.mv_size);
 		} else {
-			leaf = NODEPTR(mc->mc_pg[mc->mc_top], 0);
+			leaf = NODEPTR(mp, 0);
 			MDB_SET_KEY(leaf, &nodekey);
 		}
 		rc = mc->mc_dbx->md_cmp(key, &nodekey);
@@ -2891,26 +2902,29 @@ mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 			 * was the one we wanted.
 			 */
 			mc->mc_ki[mc->mc_top] = 0;
-set1:
+			leaf = NODEPTR(mp, 0);
 			if (exactp)
 				*exactp = 1;
-			leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
-			goto set3;
+			goto set1;
 		}
 		if (rc > 0) {
 			unsigned int i;
-			if (NUMKEYS(mc->mc_pg[mc->mc_top]) > 1) {
-				if (mc->mc_pg[mc->mc_top]->mp_flags & P_LEAF2) {
-					nodekey.mv_data = LEAF2KEY(mc->mc_pg[mc->mc_top],
-						 NUMKEYS(mc->mc_pg[mc->mc_top])-1, nodekey.mv_size);
+			unsigned int nkeys = NUMKEYS(mp);
+			if (nkeys > 1) {
+				if (mp->mp_flags & P_LEAF2) {
+					nodekey.mv_data = LEAF2KEY(mp,
+						 nkeys-1, nodekey.mv_size);
 				} else {
-					leaf = NODEPTR(mc->mc_pg[mc->mc_top], NUMKEYS(mc->mc_pg[mc->mc_top])-1);
+					leaf = NODEPTR(mp, nkeys-1);
 					MDB_SET_KEY(leaf, &nodekey);
 				}
 				rc = mc->mc_dbx->md_cmp(key, &nodekey);
 				if (rc == 0) {
 					/* last node was the one we wanted */
-					mc->mc_ki[mc->mc_top] = NUMKEYS(mc->mc_pg[mc->mc_top])-1;
+					mc->mc_ki[mc->mc_top] = nkeys-1;
+					leaf = NODEPTR(mp, nkeys-1);
+					if (exactp)
+						*exactp = 1;
 					goto set1;
 				}
 				if (rc < 0) {
@@ -2928,7 +2942,7 @@ set1:
 					break;
 			if (i == mc->mc_top) {
 				/* There are no other pages */
-				mc->mc_ki[mc->mc_top] = NUMKEYS(mc->mc_pg[mc->mc_top]);
+				mc->mc_ki[mc->mc_top] = nkeys;
 				return MDB_NOTFOUND;
 			}
 		}
@@ -2938,7 +2952,8 @@ set1:
 	if (rc != MDB_SUCCESS)
 		return rc;
 
-	assert(IS_LEAF(mc->mc_pg[mc->mc_top]));
+	mp = mc->mc_pg[mc->mc_top];
+	assert(IS_LEAF(mp));
 
 set2:
 	leaf = mdb_search_node(mc, key, exactp);
@@ -2951,18 +2966,18 @@ set2:
 		DPUTS("===> inexact leaf not found, goto sibling");
 		if ((rc = mdb_sibling(mc, 1)) != MDB_SUCCESS)
 			return rc;		/* no entries matched */
-		mc->mc_ki[mc->mc_top] = 0;
-		assert(IS_LEAF(mc->mc_pg[mc->mc_top]));
-		leaf = NODEPTR(mc->mc_pg[mc->mc_top], 0);
+		mp = mc->mc_pg[mc->mc_top];
+		assert(IS_LEAF(mp));
+		leaf = NODEPTR(mp, 0);
 	}
 
-set3:
+set1:
 	mc->mc_flags |= C_INITIALIZED;
 	mc->mc_flags &= ~C_EOF;
 
-	if (IS_LEAF2(mc->mc_pg[mc->mc_top])) {
+	if (IS_LEAF2(mp)) {
 		key->mv_size = mc->mc_db->md_pad;
-		key->mv_data = LEAF2KEY(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], key->mv_size);
+		key->mv_data = LEAF2KEY(mp, mc->mc_ki[mc->mc_top], key->mv_size);
 		return MDB_SUCCESS;
 	}
 
@@ -3731,6 +3746,8 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
 	mx->mx_dbx.md_name.mv_size = node->mn_ksize;
 	mx->mx_cursor.mc_snum = 0;
 	mx->mx_cursor.mc_flags = 0;
+	if (mx->mx_dbx.md_cmp == intcmp && mx->mx_db.md_pad == sizeof(size_t))
+		mx->mx_dbx.md_cmp = longcmp;
 }
 
 static void
