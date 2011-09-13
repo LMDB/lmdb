@@ -2413,36 +2413,43 @@ mdb_search_node(MDB_cursor *mc, MDB_val *key, int *exactp)
 	if (IS_LEAF2(mp)) {
 		nodekey.mv_size = mc->mc_db->md_pad;
 		node = NODEPTR(mp, 0);	/* fake */
-	}
-	while (low <= high) {
-		i = (low + high) >> 1;
-
-		if (IS_LEAF2(mp)) {
+		while (low <= high) {
+			i = (low + high) >> 1;
 			nodekey.mv_data = LEAF2KEY(mp, i, nodekey.mv_size);
-		} else {
-			node = NODEPTR(mp, i);
-
-			nodekey.mv_size = node->mn_ksize;
-			nodekey.mv_data = NODEKEY(node);
-		}
-
-		rc = cmp(key, &nodekey);
-
-#if DEBUG
-		if (IS_LEAF(mp))
+			rc = cmp(key, &nodekey);
 			DPRINTF("found leaf index %u [%s], rc = %i",
 			    i, DKEY(&nodekey), rc);
-		else
-			DPRINTF("found branch index %u [%s -> %zu], rc = %i",
-			    i, DKEY(&nodekey), NODEPGNO(node), rc);
-#endif
+			if (rc == 0)
+				break;
+			if (rc > 0)
+				low = i + 1;
+			else
+				high = i - 1;
+		}
+	} else {
+		while (low <= high) {
+			i = (low + high) >> 1;
 
-		if (rc == 0)
-			break;
-		if (rc > 0)
-			low = i + 1;
-		else
-			high = i - 1;
+			node = NODEPTR(mp, i);
+			nodekey.mv_size = NODEKSZ(node);
+			nodekey.mv_data = NODEKEY(node);
+
+			rc = cmp(key, &nodekey);
+#if DEBUG
+			if (IS_LEAF(mp))
+				DPRINTF("found leaf index %u [%s], rc = %i",
+				    i, DKEY(&nodekey), rc);
+			else
+				DPRINTF("found branch index %u [%s -> %zu], rc = %i",
+				    i, DKEY(&nodekey), NODEPGNO(node), rc);
+#endif
+			if (rc == 0)
+				break;
+			if (rc > 0)
+				low = i + 1;
+			else
+				high = i - 1;
+		}
 	}
 
 	if (rc > 0) {	/* Found entry is less than the key. */
@@ -2530,36 +2537,41 @@ mdb_search_page_root(MDB_cursor *mc, MDB_val *key, int modify)
 
 	while (IS_BRANCH(mp)) {
 		MDB_node	*node;
+		indx_t		i;
 
 		DPRINTF("branch page %zu has %u keys", mp->mp_pgno, NUMKEYS(mp));
 		assert(NUMKEYS(mp) > 1);
 		DPRINTF("found index 0 to page %zu", NODEPGNO(NODEPTR(mp, 0)));
 
 		if (key == NULL)	/* Initialize cursor to first page. */
-			mc->mc_ki[mc->mc_top] = 0;
+			i = 0;
 		else if (key->mv_size > MAXKEYSIZE && key->mv_data == NULL) {
 							/* cursor to last page */
-			mc->mc_ki[mc->mc_top] = NUMKEYS(mp)-1;
+			i = NUMKEYS(mp)-1;
 		} else {
 			int	 exact;
 			node = mdb_search_node(mc, key, &exact);
 			if (node == NULL)
-				mc->mc_ki[mc->mc_top] = NUMKEYS(mp) - 1;
-			else if (!exact) {
-				assert(mc->mc_ki[mc->mc_top] > 0);
-				mc->mc_ki[mc->mc_top]--;
+				i = NUMKEYS(mp) - 1;
+			else {
+				i = mc->mc_ki[mc->mc_top];
+				if (!exact) {
+					assert(i > 0);
+					i--;
+				}
 			}
 		}
 
 		if (key)
 			DPRINTF("following index %u for key [%s]",
-			    mc->mc_ki[mc->mc_top], DKEY(key));
-		assert(mc->mc_ki[mc->mc_top] < NUMKEYS(mp));
-		node = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
+			    i, DKEY(key));
+		assert(i < NUMKEYS(mp));
+		node = NODEPTR(mp, i);
 
 		if ((rc = mdb_get_page(mc->mc_txn, NODEPGNO(node), &mp)))
 			return rc;
 
+		mc->mc_ki[mc->mc_top] = i;
 		if ((rc = cursor_push_page(mc, mp)))
 			return rc;
 
