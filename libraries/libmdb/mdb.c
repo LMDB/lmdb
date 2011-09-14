@@ -477,27 +477,33 @@ typedef struct MDB_txninfo {
 /** @} */
 
 /** Common header for all page types.
- * Overflow pages occupy a number of contiguous pages with no
+ * Overflow records occupy a number of contiguous pages with no
  * headers on any page after the first.
  */
 typedef struct MDB_page {
 #define	mp_pgno	mp_p.p_pgno
 #define	mp_next	mp_p.p_next
-	union padded {
+	union {
 		pgno_t		p_pgno;	/**< page number */
 		void *		p_next;	/**< for in-memory list of freed structs */
 	} mp_p;
+/**	@defgroup mdb_page	Page Flags
+ *	@ingroup internal
+ *	Flags for the page headers.
+ *	@{
+ */
 #define	P_BRANCH	 0x01		/**< branch page */
 #define	P_LEAF		 0x02		/**< leaf page */
 #define	P_OVERFLOW	 0x04		/**< overflow page */
 #define	P_META		 0x08		/**< meta page */
 #define	P_DIRTY		 0x10		/**< dirty page */
 #define	P_LEAF2		 0x20		/**< for #MDB_DUPFIXED records */
-	uint32_t	mp_flags;
+/** @} */
+	uint32_t	mp_flags;		/**< @ref mdb_page */
 #define mp_lower	mp_pb.pb.pb_lower
 #define mp_upper	mp_pb.pb.pb_upper
 #define mp_pages	mp_pb.pb_pages
-	union page_bounds {
+	union {
 		struct {
 			indx_t		pb_lower;		/**< lower bound of free space */
 			indx_t		pb_upper;		/**< upper bound of free space */
@@ -546,16 +552,22 @@ typedef struct MDB_node {
 	/** lo and hi are used for data size on leaf nodes and for
 	 * child pgno on branch nodes. On 64 bit platforms, flags
 	 * is also used for pgno. (Branch nodes have no flags).
-	 * They are in in host byte order in case that lets some
+	 * They are in host byte order in case that lets some
 	 * accesses be optimized into a 32-bit word access.
 	 */
 #define mn_lo mn_offset[__BYTE_ORDER!=__LITTLE_ENDIAN]
 #define mn_hi mn_offset[__BYTE_ORDER==__LITTLE_ENDIAN] /**< part of dsize or pgno */
-	unsigned short	mn_offset[2];
-	unsigned short	mn_flags;		/**< flags for special node types */
+	unsigned short	mn_offset[2];	/**< storage for #mn_lo and #mn_hi */
+/** @defgroup mdb_node Node Flags
+ *	@ingroup internal
+ *	Flags for node headers.
+ *	@{
+ */
 #define F_BIGDATA	 0x01			/**< data put on overflow page */
 #define F_SUBDATA	 0x02			/**< data is a sub-database */
 #define F_DUPDATA	 0x04			/**< data has duplicates */
+/** @} */
+	unsigned short	mn_flags;		/**< @ref mdb_node */
 	unsigned short	mn_ksize;		/**< key size */
 	char		mn_data[1];			/**< key and data are appended here */
 } MDB_node;
@@ -726,10 +738,15 @@ struct MDB_cursor {
 	MDB_dbx		*mc_dbx;
 	unsigned short 	mc_snum;	/**< number of pushed pages */
 	unsigned short	mc_top;		/**< index of top page, mc_snum-1 */
-	unsigned int	mc_flags;
+/** @defgroup mdb_cursor	Cursor Flags
+ *	@ingroup internal
+ *	Cursor state flags.
+ *	@{
+ */
 #define C_INITIALIZED	0x01	/**< cursor has been initialized and is valid */
 #define C_EOF	0x02			/**< No more data */
-#define C_XDIRTY	0x04		/**< @deprecated mc_xcursor needs to be flushed */
+/** @} */
+	unsigned int	mc_flags;	/**< @ref mdb_cursor */
 	MDB_page	*mc_pg[CURSOR_STACK];	/**< stack of pushed pages */
 	indx_t		mc_ki[CURSOR_STACK];	/**< stack of page indices */
 };
@@ -767,7 +784,7 @@ struct MDB_env {
 	HANDLE		me_mfd;			/**< just for writing the meta pages */
 	/** Failed to update the meta page. Probably an I/O error. */
 #define	MDB_FATAL_ERROR	0x80000000U
-	uint32_t 	me_flags;
+	uint32_t 	me_flags;		/**< @ref mdb_env */
 	uint32_t	me_extrapad;	/**< unused for now */
 	unsigned int	me_maxreaders;	/**< size of the reader table */
 	MDB_dbi		me_numdbs;		/**< number of DBs opened */
