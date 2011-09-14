@@ -802,36 +802,38 @@ struct MDB_env {
 #define MDB_COMMIT_PAGES	 64
 
 static MDB_page *mdb_page_alloc(MDB_cursor *mc, int num);
+static MDB_page *mdb_page_new(MDB_cursor *mc, uint32_t flags, int num);
 static int 		mdb_page_touch(MDB_cursor *mc);
 
+static int  mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **mp);
 static int  mdb_page_search_root(MDB_cursor *mc,
 			    MDB_val *key, int modify);
 static int  mdb_page_search(MDB_cursor *mc,
 			    MDB_val *key, int modify);
+static int	mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst);
+static int	mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata,
+				pgno_t newpgno);
 
 static int  mdb_env_read_header(MDB_env *env, MDB_meta *meta);
 static int  mdb_env_read_meta(MDB_env *env, int *which);
 static int  mdb_env_write_meta(MDB_txn *txn);
-static int  mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **mp);
 
 static MDB_node *mdb_node_search(MDB_cursor *mc, MDB_val *key, int *exactp);
 static int  mdb_node_add(MDB_cursor *mc, indx_t indx,
 			    MDB_val *key, MDB_val *data, pgno_t pgno, uint8_t flags);
 static void mdb_node_del(MDB_page *mp, indx_t indx, int ksize);
-static int mdb_del0(MDB_cursor *mc, MDB_node *leaf);
+static int	mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst);
 static int  mdb_node_read(MDB_txn *txn, MDB_node *leaf, MDB_val *data);
+static size_t	mdb_leaf_size(MDB_env *env, MDB_val *key, MDB_val *data);
+static size_t	mdb_branch_size(MDB_env *env, MDB_val *key);
 
 static int	mdb_rebalance(MDB_cursor *mc);
 static int	mdb_update_key(MDB_page *mp, indx_t indx, MDB_val *key);
-static int	mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst);
-static int	mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst);
-static int	mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata,
-				pgno_t newpgno);
-static MDB_page *mdb_page_new(MDB_cursor *mc, uint32_t flags, int num);
 
 static void	mdb_cursor_pop(MDB_cursor *mc);
 static int	mdb_cursor_push(MDB_cursor *mc, MDB_page *mp);
 
+static int	mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf);
 static int	mdb_cursor_sibling(MDB_cursor *mc, int move_right);
 static int	mdb_cursor_next(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op);
 static int	mdb_cursor_prev(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op);
@@ -843,9 +845,6 @@ static int	mdb_cursor_last(MDB_cursor *mc, MDB_val *key, MDB_val *data);
 static void	mdb_cursor_init(MDB_cursor *mc, MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx);
 static void	mdb_xcursor_init0(MDB_cursor *mc);
 static void	mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node);
-
-static size_t	mdb_leaf_size(MDB_env *env, MDB_val *key, MDB_val *data);
-static size_t	mdb_branch_size(MDB_env *env, MDB_val *key);
 
 static void mdb_default_cmp(MDB_txn *txn, MDB_dbi dbi);
 
@@ -1921,7 +1920,12 @@ mdb_env_open2(MDB_env *env, unsigned int flags)
 }
 
 #ifndef _WIN32
-/* Windows doesn't support destructor callbacks for thread-specific storage */
+/** Release a reader thread's slot in the reader lock table.
+ *	This function is called automatically when a thread exits.
+ *	Windows doesn't support destructor callbacks for thread-specific storage,
+ *	so this function is not compiled there.
+ * @param[in] ptr This points to the slot in the reader lock table.
+ */
 static void
 mdb_env_reader_dest(void *ptr)
 {
@@ -1933,7 +1937,7 @@ mdb_env_reader_dest(void *ptr)
 }
 #endif
 
-/* downgrade the exclusive lock on the region back to shared */
+/** Downgrade the exclusive lock on the region back to shared */
 static void
 mdb_env_share_locks(MDB_env *env)
 {
@@ -1968,6 +1972,13 @@ mdb_env_share_locks(MDB_env *env)
 #endif
 }
 
+/** Open and/or initialize the lock region for the environment.
+ * @param[in] env The MDB environment.
+ * @param[in] lpath The pathname of the file used for the lock region.
+ * @param[in] mode The Unix permissions for the file, if we create it.
+ * @param[out] excl Set to true if we got an exclusive lock on the region.
+ * @return 0 on success, non-zero on failure.
+ */
 static int
 mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 {
@@ -2291,7 +2302,7 @@ mdb_env_close(MDB_env *env)
 	free(env);
 }
 
-/* only for aligned size_t's */
+/** Compare two items pointing at aligned size_t's */
 static int
 mdb_cmp_long(const MDB_val *a, const MDB_val *b)
 {
@@ -2299,7 +2310,7 @@ mdb_cmp_long(const MDB_val *a, const MDB_val *b)
 		*(size_t *)a->mv_data > *(size_t *)b->mv_data;
 }
 
-/* only for aligned ints */
+/** Compare two items pointing at aligned int's */
 static int
 mdb_cmp_int(const MDB_val *a, const MDB_val *b)
 {
@@ -2307,7 +2318,9 @@ mdb_cmp_int(const MDB_val *a, const MDB_val *b)
 		*(unsigned int *)a->mv_data > *(unsigned int *)b->mv_data;
 }
 
-/* ints must always be the same size */
+/** Compare two items pointing at ints of unknown alignment.
+ *	Nodes and keys are guaranteed to be 2-byte aligned.
+ */
 static int
 mdb_cmp_cint(const MDB_val *a, const MDB_val *b)
 {
@@ -2326,6 +2339,7 @@ mdb_cmp_cint(const MDB_val *a, const MDB_val *b)
 #endif
 }
 
+/** Compare two items lexically */
 static int
 mdb_cmp_memn(const MDB_val *a, const MDB_val *b)
 {
@@ -2344,6 +2358,7 @@ mdb_cmp_memn(const MDB_val *a, const MDB_val *b)
 	return diff ? diff : len_diff<0 ? -1 : len_diff;
 }
 
+/** Compare two items in reverse byte order */
 static int
 mdb_cmp_memnr(const MDB_val *a, const MDB_val *b)
 {
@@ -2369,11 +2384,11 @@ mdb_cmp_memnr(const MDB_val *a, const MDB_val *b)
 	return len_diff<0 ? -1 : len_diff;
 }
 
-/* Search for key within a leaf page, using binary search.
+/** Search for key within a page, using binary search.
  * Returns the smallest entry larger or equal to the key.
  * If exactp is non-null, stores whether the found entry was an exact match
  * in *exactp (1 or 0).
- * If kip is non-null, stores the index of the found entry in *kip.
+ * Updates the cursor index with the index of the found entry.
  * If no entry larger or equal to the key is found, returns NULL.
  */
 static MDB_node *
@@ -2469,6 +2484,7 @@ mdb_node_search(MDB_cursor *mc, MDB_val *key, int *exactp)
 	return node;
 }
 
+/** Pop a page off the top of the cursor's stack. */
 static void
 mdb_cursor_pop(MDB_cursor *mc)
 {
@@ -2485,6 +2501,7 @@ mdb_cursor_pop(MDB_cursor *mc)
 	}
 }
 
+/** Push a page onto the top of the cursor's stack. */
 static int
 mdb_cursor_push(MDB_cursor *mc, MDB_page *mp)
 {
@@ -2503,6 +2520,12 @@ mdb_cursor_push(MDB_cursor *mc, MDB_page *mp)
 	return MDB_SUCCESS;
 }
 
+/** Find the address of the page corresponding to a given page number.
+ * @param[in] txn the transaction for this access.
+ * @param[in] pgno the page number for the page to retrieve.
+ * @param[out] ret address of a pointer where the page's address will be stored.
+ * @return 0 on success, non-zero on failure.
+ */
 static int
 mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret)
 {
@@ -2527,6 +2550,16 @@ mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret)
 	return (p != NULL) ? MDB_SUCCESS : MDB_PAGE_NOTFOUND;
 }
 
+/** Search for the page a given key should be in.
+ * Pushes parent pages on the cursor stack. This function continues a
+ * search on a cursor that has already been initialized. (Usually by
+ * #mdb_page_search() but also by #mdb_node_move().)
+ * @param[in,out] mc the cursor for this operation.
+ * @param[in] key the key to search for. If NULL, search for the lowest
+ * page. (This is used by #mdb_cursor_first().)
+ * @param[in] modify If true, visited pages are updated with new page numbers.
+ * @return 0 on success, non-zero on failure.
+ */
 static int
 mdb_page_search_root(MDB_cursor *mc, MDB_val *key, int modify)
 {
@@ -2594,10 +2627,16 @@ mdb_page_search_root(MDB_cursor *mc, MDB_val *key, int modify)
 	return MDB_SUCCESS;
 }
 
-/* Search for the page a given key should be in.
- * Pushes parent pages on the cursor stack.
- * If key is NULL, search for the lowest page (used by mdb_cursor_first).
- * If modify is true, visited pages are updated with new page numbers.
+/** Search for the page a given key should be in.
+ * Pushes parent pages on the cursor stack. This function just sets up
+ * the search; it finds the root page for \b mc's database and sets this
+ * as the root of the cursor's stack. Then #mdb_page_search_root() is
+ * called to complete the search.
+ * @param[in,out] mc the cursor for this operation.
+ * @param[in] key the key to search for. If NULL, search for the lowest
+ * page. (This is used by #mdb_cursor_first().)
+ * @param[in] modify If true, visited pages are updated with new page numbers.
+ * @return 0 on success, non-zero on failure.
  */
 static int
 mdb_page_search(MDB_cursor *mc, MDB_val *key, int modify)
@@ -2648,10 +2687,16 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int modify)
 	return mdb_page_search_root(mc, key, modify);
 }
 
+/** Return the data associated with a given node.
+ * @param[in] txn The transaction for this operation.
+ * @param[in] leaf The node being read.
+ * @param[out] data Updated to point to the node's data.
+ * @return 0 on success, non-zero on failure.
+ */
 static int
 mdb_node_read(MDB_txn *txn, MDB_node *leaf, MDB_val *data)
 {
-	MDB_page	*omp;		/* overflow mpage */
+	MDB_page	*omp;		/* overflow page */
 	pgno_t		 pgno;
 	int rc;
 
@@ -2698,6 +2743,14 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 	return mdb_cursor_set(&mc, key, data, MDB_SET, &exact);
 }
 
+/** Find a sibling for a page.
+ * Replaces the page at the top of the cursor's stack with the
+ * specified sibling, if one exists.
+ * @param[in] mc The cursor for this operation.
+ * @param[in] move_right Non-zero if the right sibling is requested,
+ * otherwise the left sibling.
+ * @return 0 on success, non-zero on failure.
+ */
 static int
 mdb_cursor_sibling(MDB_cursor *mc, int move_right)
 {
@@ -2738,6 +2791,7 @@ mdb_cursor_sibling(MDB_cursor *mc, int move_right)
 	return MDB_SUCCESS;
 }
 
+/** Move the cursor to the next data item. */
 static int
 mdb_cursor_next(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 {
@@ -2811,6 +2865,7 @@ mdb_cursor_next(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 	return MDB_SUCCESS;
 }
 
+/** Move the cursor to the previous data item. */
 static int
 mdb_cursor_prev(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 {
@@ -2883,6 +2938,7 @@ mdb_cursor_prev(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 	return MDB_SUCCESS;
 }
 
+/** Set the cursor on a specific data item. */
 static int
 mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
     MDB_cursor_op op, int *exactp)
@@ -3038,6 +3094,7 @@ set1:
 	return rc;
 }
 
+/** Move the cursor to the first item in the database. */
 static int
 mdb_cursor_first(MDB_cursor *mc, MDB_val *key, MDB_val *data)
 {
@@ -3078,6 +3135,7 @@ mdb_cursor_first(MDB_cursor *mc, MDB_val *key, MDB_val *data)
 	return MDB_SUCCESS;
 }
 
+/** Move the cursor to the last item in the database. */
 static int
 mdb_cursor_last(MDB_cursor *mc, MDB_val *key, MDB_val *data)
 {
@@ -3236,6 +3294,10 @@ fetchm:
 	return rc;
 }
 
+/** Touch all the pages in the cursor stack.
+ *	Makes sure all the pages are writable, before attempting a write operation.
+ * @param[in] mc The cursor to operate on.
+ */
 static int
 mdb_cursor_touch(MDB_cursor *mc)
 {
@@ -3506,10 +3568,15 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 		}
 	}
 
-	return mdb_del0(mc, leaf);
+	return mdb_cursor_del0(mc, leaf);
 }
 
-/* Allocate a page and initialize it
+/** Allocate and initialize new pages for a database.
+ * @param[in] mc a cursor on the database being added to.
+ * @param[in] flags flags defining what type of page is being allocated.
+ * @param[in] num the number of pages to allocate. This is usually 1,
+ * unless allocating overflow pages for a large record.
+ * @return Address of a page, or NULL on failure.
  */
 static MDB_page *
 mdb_page_new(MDB_cursor *mc, uint32_t flags, int num)
@@ -3536,6 +3603,17 @@ mdb_page_new(MDB_cursor *mc, uint32_t flags, int num)
 	return np;
 }
 
+/** Calculate the size of a leaf node.
+ * The size depends on the environment's page size; if a data item
+ * is too large it will be put onto an overflow page and the node
+ * size will only include the key and not the data. Sizes are always
+ * rounded up to an even number of bytes, to guarantee 2-byte alignment
+ * of the #MDB_node headers.
+ * @param[in] env The environment handle.
+ * @param[in] key The key for the node.
+ * @param[in] data The data for the node.
+ * @return The number of bytes needed to store the node.
+ */
 static size_t
 mdb_leaf_size(MDB_env *env, MDB_val *key, MDB_val *data)
 {
@@ -3551,6 +3629,16 @@ mdb_leaf_size(MDB_env *env, MDB_val *key, MDB_val *data)
 	return sz + sizeof(indx_t);
 }
 
+/** Calculate the size of a branch node.
+ * The size should depend on the environment's page size but since
+ * we currently don't support spilling large keys onto overflow
+ * pages, it's simply the size of the #MDB_node header plus the
+ * size of the key. Sizes are always rounded up to an even number
+ * of bytes, to guarantee 2-byte alignment of the #MDB_node headers.
+ * @param[in] env The environment handle.
+ * @param[in] key The key for the node.
+ * @return The number of bytes needed to store the node.
+ */
 static size_t
 mdb_branch_size(MDB_env *env, MDB_val *key)
 {
@@ -3566,6 +3654,21 @@ mdb_branch_size(MDB_env *env, MDB_val *key)
 	return sz + sizeof(indx_t);
 }
 
+/** Add a node to the page pointed to by the cursor.
+ * @param[in] mc The cursor for this operation.
+ * @param[in] indx The index on the page where the new node should be added.
+ * @param[in] key The key for the new node.
+ * @param[in] data The data for the new node, if any.
+ * @param[in] pgno The page number, if adding a branch node.
+ * @param[in] flags Flags for the node.
+ * @return 0 on success, non-zero on failure. Possible errors are:
+ * <ul>
+ *	<li>ENOMEM - failed to allocate overflow pages for the node.
+ *	<li>ENOSPC - there is insufficient room in the page. This error
+ *	should never happen since all callers already calculate the
+ *	page's free space before calling this function.
+ * </ul>
+ */
 static int
 mdb_node_add(MDB_cursor *mc, indx_t indx,
     MDB_val *key, MDB_val *data, pgno_t pgno, uint8_t flags)
@@ -3676,6 +3779,12 @@ mdb_node_add(MDB_cursor *mc, indx_t indx,
 	return MDB_SUCCESS;
 }
 
+/** Delete the specified node from a page.
+ * @param[in] mp The page to operate on.
+ * @param[in] indx The index of the node to delete.
+ * @param[in] ksize The size of a node. Only used if the page is
+ * part of a #MDB_DUPFIXED database.
+ */
 static void
 mdb_node_del(MDB_page *mp, indx_t indx, int ksize)
 {
@@ -3726,6 +3835,15 @@ mdb_node_del(MDB_page *mp, indx_t indx, int ksize)
 	mp->mp_upper += sz;
 }
 
+/** Initial setup of a sorted-dups cursor.
+ * Sorted duplicates are implemented as a sub-database for the given key.
+ * The duplicate data items are actually keys of the sub-database.
+ * Operations on the duplicate data items are performed using a sub-cursor
+ * initialized when the sub-database is first accessed. This function does
+ * the preliminary setup of the sub-cursor, filling in the fields that
+ * depend only on the parent DB.
+ * @param[in] mc The main cursor whose sorted-dups cursor is to be initialized.
+ */
 static void
 mdb_xcursor_init0(MDB_cursor *mc)
 {
@@ -3743,6 +3861,12 @@ mdb_xcursor_init0(MDB_cursor *mc)
 	mx->mx_dbx.md_dirty = 0;
 }
 
+/** Final setup of a sorted-dups cursor.
+ *	Sets up the fields that depend on the data from the main cursor.
+ * @param[in] mc The main cursor whose sorted-dups cursor is to be initialized.
+ * @param[in] node The data containing the #MDB_db record for the
+ * sorted-dup database.
+ */
 static void
 mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
 {
@@ -3762,6 +3886,7 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
 		mx->mx_dbx.md_cmp = mdb_cmp_long;
 }
 
+/** Initialize a cursor for a given transaction and database. */
 static void
 mdb_cursor_init(MDB_cursor *mc, MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx)
 {
@@ -3839,6 +3964,12 @@ mdb_cursor_close(MDB_cursor *mc)
 	}
 }
 
+/** Replace the key for a node with a new key.
+ * @param[in] mp The page containing the node to operate on.
+ * @param[in] indx The index of the node to operate on.
+ * @param[in] key The new key to use.
+ * @return 0 on success, non-zero on failure.
+ */
 static int
 mdb_update_key(MDB_page *mp, indx_t indx, MDB_val *key)
 {
@@ -3884,7 +4015,7 @@ mdb_update_key(MDB_page *mp, indx_t indx, MDB_val *key)
 	return MDB_SUCCESS;
 }
 
-/* Move a node from csrc to cdst.
+/** Move a node from csrc to cdst.
  */
 static int
 mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
@@ -3991,6 +4122,13 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 	return MDB_SUCCESS;
 }
 
+/** Merge one page into another.
+ *  The nodes from the page pointed to by \b csrc will
+ *	be copied to the page pointed to by \b cdst and then
+ *	the \b csrc page will be freed.
+ * @param[in] csrc Cursor pointing to the source page.
+ * @param[in] cdst Cursor pointing to the destination page.
+ */
 static int
 mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst)
 {
@@ -4057,6 +4195,10 @@ mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst)
 	return mdb_rebalance(csrc);
 }
 
+/** Copy the contents of a cursor.
+ * @param[in] csrc The cursor to copy from.
+ * @param[out] cdst The cursor to copy to.
+ */
 static void
 mdb_cursor_copy(const MDB_cursor *csrc, MDB_cursor *cdst)
 {
@@ -4076,6 +4218,11 @@ mdb_cursor_copy(const MDB_cursor *csrc, MDB_cursor *cdst)
 	}
 }
 
+/** Rebalance the tree after a delete operation.
+ * @param[in] mc Cursor pointing to the page where rebalancing
+ * should begin.
+ * @return 0 on success, non-zero on failure.
+ */
 static int
 mdb_rebalance(MDB_cursor *mc)
 {
@@ -4172,8 +4319,9 @@ mdb_rebalance(MDB_cursor *mc)
 	}
 }
 
+/** Complete a delete operation started by #mdb_cursor_del(). */
 static int
-mdb_del0(MDB_cursor *mc, MDB_node *leaf)
+mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
 {
 	int rc;
 
@@ -4242,10 +4390,14 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 	return rc;
 }
 
-/* Split page <mc->top>, and insert <key,(data|newpgno)> in either left or
- * right sibling, at index <mc->ki> (as if unsplit). Updates mc->top and
- * mc->ki with the actual values after split, ie if mc->top and mc->ki
- * refer to a node in the new right sibling page.
+/** Split a page and insert a new node.
+ * @param[in,out] mc Cursor pointing to the page and desired insertion index.
+ * The cursor will be updated to point to the actual page and index where
+ * the node got inserted after the split.
+ * @param[in] newkey The key for the newly inserted node.
+ * @param[in] newdata The data for the newly inserted node.
+ * @param[in] newpgno The page number, if the new node is a branch node.
+ * @return 0 on success, non-zero on failure.
  */
 static int
 mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno)
@@ -4581,6 +4733,12 @@ mdb_env_get_path(MDB_env *env, const char **arg)
 	return MDB_SUCCESS;
 }
 
+/** Common code for #mdb_stat() and #mdb_env_stat().
+ * @param[in] env the environment to operate in.
+ * @param[in] db the #MDB_db record containing the stats to return.
+ * @param[out] arg the address of an #MDB_stat structure to receive the stats.
+ * @return 0, this function always succeeds.
+ */
 static int
 mdb_stat0(MDB_env *env, MDB_db *db, MDB_stat *arg)
 {
@@ -4606,6 +4764,13 @@ mdb_env_stat(MDB_env *env, MDB_stat *arg)
 	return mdb_stat0(env, &env->me_metas[toggle]->mm_dbs[MAIN_DBI], arg);
 }
 
+/** Set the default comparison functions for a database.
+ * Called immediately after a database is opened to set the defaults.
+ * The user can then override them with #mdb_set_compare() or
+ * #mdb_set_dupsort().
+ * @param[in] txn A transaction handle returned by #mdb_txn_begin()
+ * @param[in] dbi A database handle returned by #mdb_open()
+ */
 static void
 mdb_default_cmp(MDB_txn *txn, MDB_dbi dbi)
 {

@@ -148,7 +148,7 @@ unsigned mdb_mid2l_search( ID2L ids, ID id );
 	/** Insert an ID2 into a ID2L.
 	 * @param[in,out] ids	The ID2L to insert into.
 	 * @param[in] id	The ID2 to insert.
-	 * @return	0 on success, -1 if the ID was already present in the MIDL2.
+	 * @return	0 on success, -1 if the ID was already present in the ID2L.
 	 */
 int mdb_mid2l_insert( ID2L ids, ID2 *id );
 
