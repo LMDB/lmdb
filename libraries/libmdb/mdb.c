@@ -59,13 +59,26 @@
 
 #ifndef _WIN32
 #include <pthread.h>
+#ifdef __APPLE__
+#include <semaphore.h>
+#endif
+#endif
+
+#ifndef BYTE_ORDER
+#define BYTE_ORDER	__BYTE_ORDER
+#endif
+#ifndef LITTLE_ENDIAN
+#define LITTLE_ENDIAN	__LITTLE_ENDIAN
+#endif
+#ifndef BIG_ENDIAN
+#define BIG_ENDIAN	__BIG_ENDIAN
 #endif
 
 #include "mdb.h"
 #include "midl.h"
 
-#if (__BYTE_ORDER == __LITTLE_ENDIAN) == (__BYTE_ORDER == __BIG_ENDIAN)
-# error "Unknown or unsupported endianness (__BYTE_ORDER)"
+#if (BYTE_ORDER == LITTLE_ENDIAN) == (BYTE_ORDER == BIG_ENDIAN)
+# error "Unknown or unsupported endianness (BYTE_ORDER)"
 #elif (-6 & 5) || CHAR_BIT != 8 || UINT_MAX < 0xffffffff || ULONG_MAX % 0xFFFF
 # error "Two's complement, reasonably sized integer types, please"
 #endif
@@ -102,6 +115,13 @@
 #define	close(fd)	CloseHandle(fd)
 #define	munmap(ptr,len)	UnmapViewOfFile(ptr)
 #else
+#ifdef __APPLE__
+#define LOCK_MUTEX_R(env)	sem_wait((env)->me_rmutex)
+#define UNLOCK_MUTEX_R(env)	sem_post((env)->me_rmutex)
+#define LOCK_MUTEX_W(env)	sem_wait((env)->me_wmutex)
+#define UNLOCK_MUTEX_W(env)	sem_post((env)->me_wmutex)
+#define fdatasync(fd)	fsync(fd)
+#else
 	/** Lock the reader mutex.
 	 */
 #define LOCK_MUTEX_R(env)	pthread_mutex_lock(&(env)->me_txns->mti_mutex)
@@ -117,6 +137,7 @@
 	/** Unlock the writer mutex.
 	 */
 #define UNLOCK_MUTEX_W(env)	pthread_mutex_unlock(&(env)->me_txns->mti_wmutex)
+#endif	/* __APPLE__ */
 
 	/** Get the error code for the last failed system function.
 	 */
@@ -139,6 +160,10 @@
 	 *	fundamental to the use of memory-mapped files.
 	 */
 #define	GET_PAGESIZE(x)	((x) = sysconf(_SC_PAGE_SIZE))
+#endif
+
+#if defined(_WIN32) || defined(__APPLE__)
+#define MNAME_LEN	32
 #endif
 
 /** @} */
@@ -424,8 +449,8 @@ typedef struct MDB_txbody {
 	uint32_t	mtb_magic;
 		/** Version number of this lock file. Must be set to #MDB_VERSION. */
 	uint32_t	mtb_version;
-#ifdef _WIN32
-	char	mtb_rmname[32];
+#if defined(_WIN32) || defined(__APPLE__)
+	char	mtb_rmname[MNAME_LEN];
 #else
 		/** Mutex protecting access to this table.
 		 *	This is the reader lock that #LOCK_MUTEX_R acquires.
@@ -463,8 +488,8 @@ typedef struct MDB_txninfo {
 		char pad[(sizeof(MDB_txbody)+CACHELINE-1) & ~(CACHELINE-1)];
 	} mt1;
 	union {
-#ifdef _WIN32
-		char mt2_wmname[32];
+#if defined(_WIN32) || defined(__APPLE__)
+		char mt2_wmname[MNAME_LEN];
 #define	mti_wmname	mt2.mt2_wmname
 #else
 		pthread_mutex_t	mt2_wmutex;
@@ -555,8 +580,8 @@ typedef struct MDB_node {
 	 * They are in host byte order in case that lets some
 	 * accesses be optimized into a 32-bit word access.
 	 */
-#define mn_lo mn_offset[__BYTE_ORDER!=__LITTLE_ENDIAN]
-#define mn_hi mn_offset[__BYTE_ORDER==__LITTLE_ENDIAN] /**< part of dsize or pgno */
+#define mn_lo mn_offset[BYTE_ORDER!=LITTLE_ENDIAN]
+#define mn_hi mn_offset[BYTE_ORDER==LITTLE_ENDIAN] /**< part of dsize or pgno */
 	unsigned short	mn_offset[2];	/**< storage for #mn_lo and #mn_hi */
 /** @defgroup mdb_node Node Flags
  *	@ingroup internal
@@ -813,6 +838,10 @@ struct MDB_env {
 #ifdef _WIN32
 	HANDLE		me_rmutex;		/* Windows mutexes don't reside in shared mem */
 	HANDLE		me_wmutex;
+#endif
+#ifdef __APPLE__
+	sem_t		*me_rmutex;		/* Apple doesn't support shared mutexes */
+	sem_t		*me_wmutex;
 #endif
 };
 	/** max number of pages to commit in one writev() call */
@@ -2115,7 +2144,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		 * probably not enough to assure uniqueness...
 		 */
 		sprintf(env->me_txns->mti_rmname, "Global\\MDBr%.20s", lpath);
-		ptr = env->me_txns->mti_rmname + sizeof("Global\\MDBr");
+		ptr = env->me_txns->mti_rmname + sizeof("Global\\MDBr")-1;
 		while ((ptr = strchr(ptr, '\\')))
 			*ptr++ = '/';
 		env->me_rmutex = CreateMutex(&mdb_all_sa, FALSE, env->me_txns->mti_rmname);
@@ -2123,16 +2152,47 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 			rc = ErrCode();
 			goto fail;
 		}
-		sprintf(env->me_txns->mti_rmname, "Global\\MDBw%.20s", lpath);
-		ptr = env->me_txns->mti_rmname + sizeof("Global\\MDBw");
+		sprintf(env->me_txns->mti_wmname, "Global\\MDBw%.20s", lpath);
+		ptr = env->me_txns->mti_wmname + sizeof("Global\\MDBw")-1;
 		while ((ptr = strchr(ptr, '\\')))
 			*ptr++ = '/';
-		env->me_wmutex = CreateMutex(&mdb_all_sa, FALSE, env->me_txns->mti_rmname);
+		env->me_wmutex = CreateMutex(&mdb_all_sa, FALSE, env->me_txns->mti_wmname);
 		if (!env->me_wmutex) {
 			rc = ErrCode();
 			goto fail;
 		}
-#else
+#else	/* _WIN32 */
+#ifdef __APPLE__
+		char *ptr;
+		sprintf(env->me_txns->mti_rmname, "MDBr%.28s", lpath);
+		ptr = env->me_txns->mti_rmname + sizeof("MDBr")-1;
+		while ((ptr = strchr(ptr, '/')))
+			*ptr++ = '_';
+		if (sem_unlink(env->me_txns->mti_rmname)) {
+			rc = ErrCode();
+			if (rc != ENOENT && rc != EINVAL)
+				goto fail;
+		}
+		env->me_rmutex = sem_open(env->me_txns->mti_rmname, O_CREAT, mode, 1);
+		if (!env->me_rmutex) {
+			rc = ErrCode();
+			goto fail;
+		}
+		sprintf(env->me_txns->mti_wmname, "MDBw%.28s", lpath);
+		ptr = env->me_txns->mti_wmname + sizeof("MDBw")-1;
+		while ((ptr = strchr(ptr, '/')))
+			*ptr++ = '_';
+		if (sem_unlink(env->me_txns->mti_wmname)) {
+			rc = ErrCode();
+			if (rc != ENOENT && rc != EINVAL)
+				goto fail;
+		}
+		env->me_wmutex = sem_open(env->me_txns->mti_wmname, O_CREAT, mode, 1);
+		if (!env->me_wmutex) {
+			rc = ErrCode();
+			goto fail;
+		}
+#else	/* __APPLE__ */
 		pthread_mutexattr_t mattr;
 
 		pthread_mutexattr_init(&mattr);
@@ -2142,7 +2202,8 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		}
 		pthread_mutex_init(&env->me_txns->mti_mutex, &mattr);
 		pthread_mutex_init(&env->me_txns->mti_wmutex, &mattr);
-#endif
+#endif	/* __APPLE__ */
+#endif	/* _WIN32 */
 		env->me_txns->mti_version = MDB_VERSION;
 		env->me_txns->mti_magic = MDB_MAGIC;
 		env->me_txns->mti_txnid = 0;
@@ -2172,6 +2233,18 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 			goto fail;
 		}
 		env->me_wmutex = OpenMutex(SYNCHRONIZE, FALSE, env->me_txns->mti_wmname);
+		if (!env->me_wmutex) {
+			rc = ErrCode();
+			goto fail;
+		}
+#endif
+#ifdef __APPLE__
+		env->me_rmutex = sem_open(env->me_txns->mti_rmname, 0);
+		if (!env->me_rmutex) {
+			rc = ErrCode();
+			goto fail;
+		}
+		env->me_wmutex = sem_open(env->me_txns->mti_wmname, 0);
 		if (!env->me_wmutex) {
 			rc = ErrCode();
 			goto fail;
@@ -2341,7 +2414,7 @@ mdb_cmp_int(const MDB_val *a, const MDB_val *b)
 static int
 mdb_cmp_cint(const MDB_val *a, const MDB_val *b)
 {
-#if __BYTE_ORDER == __LITTLE_ENDIAN
+#if BYTE_ORDER == LITTLE_ENDIAN
 	unsigned short *u, *c;
 	int x;
 
