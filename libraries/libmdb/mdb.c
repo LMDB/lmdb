@@ -2022,6 +2022,80 @@ mdb_env_share_locks(MDB_env *env)
 	}
 #endif
 }
+#if defined(_WIN32) || defined(__APPLE__)
+/*
+ * hash_64 - 64 bit Fowler/Noll/Vo-0 FNV-1a hash code
+ *
+ * @(#) $Revision: 5.1 $
+ * @(#) $Id: hash_64a.c,v 5.1 2009/06/30 09:01:38 chongo Exp $
+ * @(#) $Source: /usr/local/src/cmd/fnv/RCS/hash_64a.c,v $
+ *
+ *	  http://www.isthe.com/chongo/tech/comp/fnv/index.html
+ *
+ ***
+ *
+ * Please do not copyright this code.  This code is in the public domain.
+ *
+ * LANDON CURT NOLL DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO
+ * EVENT SHALL LANDON CURT NOLL BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF
+ * USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+ * OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+ * PERFORMANCE OF THIS SOFTWARE.
+ *
+ * By:
+ *	chongo <Landon Curt Noll> /\oo/\
+ *	  http://www.isthe.com/chongo/
+ *
+ * Share and Enjoy!	:-)
+ */
+
+typedef unsigned long long	mdb_hash_t;
+#define MDB_HASH_INIT ((mdb_hash_t)0xcbf29ce484222325ULL)
+
+/** perform a 64 bit Fowler/Noll/Vo FNV-1a hash on a buffer
+ * @param[in] str string to hash
+ * @param[in] hval	initial value for hash
+ * @return 64 bit hash
+ *
+ * NOTE: To use the recommended 64 bit FNV-1a hash, use MDB_HASH_INIT as the
+ * 	 hval arg on the first call.
+ */
+static inline mdb_hash_t
+mdb_hash_str(char *str, mdb_hash_t hval)
+{
+	unsigned char *s = (unsigned char *)str;	/* unsigned string */
+	/*
+	 * FNV-1a hash each octet of the string
+	 */
+	while (*s) {
+		/* xor the bottom with the current octet */
+		hval ^= (mdb_hash_t)*s++;
+
+		/* multiply by the 64 bit FNV magic prime mod 2^64 */
+		hval += (hval << 1) + (hval << 4) + (hval << 5) +
+			(hval << 7) + (hval << 8) + (hval << 40);
+	}
+	/* return our new hash value */
+	return hval;
+}
+
+/** Hash the string and output the hash in hex.
+ * @param[in] str string to hash
+ * @param[out] hexbuf an array of 17 chars to hold the hash
+ */
+static void
+mdb_hash_hex(char *str, char *hexbuf)
+{
+	int i;
+	mdb_hash_t h = mdb_hash_str(str, MDB_HASH_INIT);
+	for (i=0; i<8; i++) {
+		hexbuf += sprintf(hexbuf, "%02x", (unsigned int)h & 0xff);
+		h >>= 8;
+	}
+}
+#endif
 
 /** Open and/or initialize the lock region for the environment.
  * @param[in] env The MDB environment.
@@ -2135,7 +2209,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 #endif
 	if (*excl) {
 #ifdef _WIN32
-		char *ptr;
+		char hexbuf[17];
 		if (!mdb_sec_inited) {
 			InitializeSecurityDescriptor(&mdb_null_sd,
 				SECURITY_DESCRIPTOR_REVISION);
@@ -2145,22 +2219,14 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 			mdb_all_sa.lpSecurityDescriptor = &mdb_null_sd;
 			mdb_sec_inited = 1;
 		}
-		/* FIXME: only using up to 20 characters of the env path here,
-		 * probably not enough to assure uniqueness...
-		 */
-		sprintf(env->me_txns->mti_rmname, "Global\\MDBr%.20s", lpath);
-		ptr = env->me_txns->mti_rmname + sizeof("Global\\MDBr")-1;
-		while ((ptr = strchr(ptr, '\\')))
-			*ptr++ = '/';
+		mdb_hash_hex(lpath, hexbuf);
+		sprintf(env->me_txns->mti_rmname, "Global\\MDBr%s", hexbuf);
 		env->me_rmutex = CreateMutex(&mdb_all_sa, FALSE, env->me_txns->mti_rmname);
 		if (!env->me_rmutex) {
 			rc = ErrCode();
 			goto fail;
 		}
-		sprintf(env->me_txns->mti_wmname, "Global\\MDBw%.20s", lpath);
-		ptr = env->me_txns->mti_wmname + sizeof("Global\\MDBw")-1;
-		while ((ptr = strchr(ptr, '\\')))
-			*ptr++ = '/';
+		sprintf(env->me_txns->mti_wmname, "Global\\MDBw%s", hexbuf);
 		env->me_wmutex = CreateMutex(&mdb_all_sa, FALSE, env->me_txns->mti_wmname);
 		if (!env->me_wmutex) {
 			rc = ErrCode();
@@ -2168,11 +2234,9 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		}
 #else	/* _WIN32 */
 #ifdef __APPLE__
-		char *ptr;
-		sprintf(env->me_txns->mti_rmname, "MDBr%.26s", lpath);
-		ptr = env->me_txns->mti_rmname + sizeof("MDBr")-1;
-		while ((ptr = strchr(ptr, '/')))
-			*ptr++ = '_';
+		char hexbuf[17];
+		mdb_hash_hex(lpath, hexbuf);
+		sprintf(env->me_txns->mti_rmname, "MDBr%s", hexbuf);
 		if (sem_unlink(env->me_txns->mti_rmname)) {
 			rc = ErrCode();
 			if (rc != ENOENT && rc != EINVAL)
@@ -2183,10 +2247,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 			rc = ErrCode();
 			goto fail;
 		}
-		sprintf(env->me_txns->mti_wmname, "MDBw%.26s", lpath);
-		ptr = env->me_txns->mti_wmname + sizeof("MDBw")-1;
-		while ((ptr = strchr(ptr, '/')))
-			*ptr++ = '_';
+		sprintf(env->me_txns->mti_wmname, "MDBw%s", hexbuf);
 		if (sem_unlink(env->me_txns->mti_wmname)) {
 			rc = ErrCode();
 			if (rc != ENOENT && rc != EINVAL)
