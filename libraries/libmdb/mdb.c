@@ -732,9 +732,14 @@ struct MDB_txn {
 	 */
 	MDB_dbi		mt_numdbs;
 
+/** @defgroup mdb_txn	Transaction Flags
+ *	@ingroup internal
+ *	@{
+ */
 #define MDB_TXN_RDONLY		0x01		/**< read-only transaction */
 #define MDB_TXN_ERROR		0x02		/**< an error has occurred */
-	unsigned int	mt_flags;
+/** @} */
+	unsigned int	mt_flags;		/**< @ref mdb_txn */
 	/** Tracks which of the two meta pages was used at the start
 	 * 	of this transaction.
 	 */
