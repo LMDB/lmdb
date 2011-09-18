@@ -1617,9 +1617,9 @@ mdb_txn_commit(MDB_txn *txn)
 		mdb_txn_abort(txn);
 		return n;
 	}
+	env->me_wtxnid = txn->mt_txnid;
 
 done:
-	env->me_wtxnid = txn->mt_txnid;
 	env->me_txn = NULL;
 	/* update the DB tables */
 	{
@@ -2852,12 +2852,38 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int modify)
 	if (F_ISSET(mc->mc_txn->mt_flags, MDB_TXN_ERROR)) {
 		DPUTS("transaction has failed, must abort");
 		return EINVAL;
-	} else
+	} else {
+		/* Make sure we're using an up-to-date root */
+		if (mc->mc_dbi > MAIN_DBI) {
+			if ((*mc->mc_dbflag & DB_STALE) ||
+			(modify && !(*mc->mc_dbflag & DB_DIRTY))) {
+				MDB_cursor mc2;
+				unsigned char dbflag = 0;
+				mdb_cursor_init(&mc2, mc->mc_txn, MAIN_DBI, NULL);
+				rc = mdb_page_search(&mc2, &mc->mc_dbx->md_name, modify);
+				if (rc)
+					return rc;
+				if (*mc->mc_dbflag & DB_STALE) {
+					MDB_val data;
+					int exact = 0;
+					MDB_node *leaf = mdb_node_search(&mc2,
+						&mc->mc_dbx->md_name, &exact);
+					if (!exact)
+						return MDB_NOTFOUND;
+					mdb_node_read(mc->mc_txn, leaf, &data);
+					memcpy(mc->mc_db, data.mv_data, sizeof(MDB_db));
+				}
+				if (modify)
+					dbflag = DB_DIRTY;
+				*mc->mc_dbflag = dbflag;
+			}
+		}
 		root = mc->mc_db->md_root;
 
-	if (root == P_INVALID) {		/* Tree is empty. */
-		DPUTS("tree is empty");
-		return MDB_NOTFOUND;
+		if (root == P_INVALID) {		/* Tree is empty. */
+			DPUTS("tree is empty");
+			return MDB_NOTFOUND;
+		}
 	}
 
 	if ((rc = mdb_page_get(mc->mc_txn, root, &mc->mc_pg[0])))
@@ -2869,31 +2895,6 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int modify)
 	DPRINTF("db %u root page %zu has flags 0x%X",
 		mc->mc_dbi, root, mc->mc_pg[0]->mp_flags);
 
-	/* For sub-databases, update main root first */
-	if (mc->mc_dbi > MAIN_DBI) {
-		if ((*mc->mc_dbflag & DB_STALE) ||
-			(modify && !(*mc->mc_dbflag & DB_DIRTY))) {
-			MDB_cursor mc2;
-			unsigned char dbflag = 0;
-			mdb_cursor_init(&mc2, mc->mc_txn, MAIN_DBI, NULL);
-			rc = mdb_page_search(&mc2, &mc->mc_dbx->md_name, modify);
-			if (rc)
-				return rc;
-			if (*mc->mc_dbflag & DB_STALE) {
-				MDB_val data;
-				int exact = 0;
-				MDB_node *leaf = mdb_node_search(&mc2,
-					&mc->mc_dbx->md_name, &exact);
-				if (!exact)
-					return MDB_NOTFOUND;
-				mdb_node_read(mc->mc_txn, leaf, &data);
-				memcpy(mc->mc_db, data.mv_data, sizeof(MDB_db));
-			}
-			if (modify)
-				dbflag = DB_DIRTY;
-			*mc->mc_dbflag = dbflag;
-		}
-	}
 	if (modify) {
 		if (!F_ISSET(mc->mc_pg[0]->mp_flags, P_DIRTY)) {
 			if ((rc = mdb_page_touch(mc)))
