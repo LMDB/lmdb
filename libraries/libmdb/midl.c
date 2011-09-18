@@ -167,7 +167,7 @@ int mdb_midl_append( IDL *idp, ID id )
 #define	SWAP(a,b)	{ itmp=(a); (a)=(b); (b)=itmp; }
 
 void
-mdb_midl_sort( ID *ids )
+mdb_midl_sort( IDL ids )
 {
 	/* Max possible depth of int-indexed tree * 2 items/level */
 	int istack[sizeof(int)*CHAR_BIT * 2];

@@ -1163,7 +1163,7 @@ mdb_env_sync(MDB_env *env, int force)
 	return rc;
 }
 
-static inline void
+static void
 mdb_txn_reset0(MDB_txn *txn);
 
 /** Common code for #mdb_txn_begin() and #mdb_txn_renew().
@@ -1172,7 +1172,7 @@ mdb_txn_reset0(MDB_txn *txn);
  * fail for read-only transactions, and then only if the
  * reader table is full.
  */
-static inline int
+static int
 mdb_txn_renew0(MDB_txn *txn)
 {
 	MDB_env *env = txn->mt_env;
@@ -1301,7 +1301,7 @@ mdb_txn_begin(MDB_env *env, unsigned int flags, MDB_txn **ret)
 /** Common code for #mdb_txn_reset() and #mdb_txn_abort().
  * @param[in] txn the transaction handle to reset
  */
-static inline void
+static void
 mdb_txn_reset0(MDB_txn *txn)
 {
 	MDB_env	*env = txn->mt_env;
@@ -2107,7 +2107,7 @@ typedef unsigned long long	mdb_hash_t;
  * NOTE: To use the recommended 64 bit FNV-1a hash, use MDB_HASH_INIT as the
  * 	 hval arg on the first call.
  */
-static inline mdb_hash_t
+static mdb_hash_t
 mdb_hash_str(char *str, mdb_hash_t hval)
 {
 	unsigned char *s = (unsigned char *)str;	/* unsigned string */

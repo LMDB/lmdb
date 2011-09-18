@@ -132,7 +132,7 @@ int mdb_midl_shrink(IDL *idp);
 	/** Append an ID onto an IDL.
 	 * @param[in,out] idp	Address of the IDL to append to.
 	 * @param[in] id	The ID to append.
-	 * @return	0 on success, -2 if the IDL is too large.
+	 * @return	0 on success, -1 if the IDL is too large.
 	 */
 int mdb_midl_append( IDL *idp, ID id );
 
