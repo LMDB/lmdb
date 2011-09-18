@@ -152,7 +152,7 @@ int main(int argc,char * argv[])
 			(int) data.mv_size, (char *) data.mv_data);
 	}
 	mdb_cursor_close(cursor);
-	mdb_close(txn, dbi);
+	mdb_close(env, dbi);
 
 	mdb_txn_abort(txn);
 	mdb_env_close(env);

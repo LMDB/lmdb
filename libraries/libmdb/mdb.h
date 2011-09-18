@@ -592,15 +592,34 @@ int  mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi);
 int  mdb_stat(MDB_txn *txn, MDB_dbi dbi, MDB_stat *stat);
 
 	/** Close a database handle.
-	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
+	 * This call is not mutex protected. Handles should only be closed by
+	 * a single thread, and only if no other threads are going to reference
+	 * the database handle any further.
+	 * @param[in] env An environment handle returned by #mdb_env_create()
 	 * @param[in] dbi A database handle returned by #mdb_open()
 	 */
-void mdb_close(MDB_txn *txn, MDB_dbi dbi);
+void mdb_close(MDB_env *env, MDB_dbi dbi);
+
+	/** Delete a database and free all its pages.
+	 * This function acquires its own write transaction to perform its
+	 * work, so it must not be called if there is already an open write
+	 * transaction in the environment. The database handle will also be
+	 * closed as part of this operation.
+	 * @param[in] env An environment handle returned by #mdb_env_create()
+	 * @param[in] dbi A database handle returned by #mdb_open()
+	 * @return A non-zero error value on failure and 0 on success. Some possible
+	 * errors are:
+	 * <ul>
+	 *	<li>EINVAL - an invalid parameter was specified.
+	 *	<li>EBUSY - there is already a write transaction.
+	 * </ul>
+	 */
+int  mdb_drop(MDB_env *env, MDB_dbi dbi);
 
 	/** Set a custom key comparison function for a database.
 	 * The comparison function is called whenever it is necessary to compare a
 	 * key specified by the application with a key currently stored in the database.
-	 * If no comparison function is specified, and no special key flags were specified
+	 * If no comparison function is specified, and no speAGAINcial key flags were specified
 	 * with #mdb_open(), the keys are compared lexically, with shorter keys collating
 	 * before longer keys.
 	 * @warning This function must be called before any data access functions are used,

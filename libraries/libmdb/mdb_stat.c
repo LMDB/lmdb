@@ -56,7 +56,7 @@ int main(int argc,char * argv[])
 	printf("Leaf pages: %zu\n", mst.ms_leaf_pages);
 	printf("Overflow pages: %zu\n", mst.ms_overflow_pages);
 	printf("Entries: %zu\n", mst.ms_entries);
-	mdb_close(txn, dbi);
+	mdb_close(env, dbi);
 	mdb_txn_abort(txn);
 	mdb_env_close(env);
 
