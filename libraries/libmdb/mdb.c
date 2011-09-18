@@ -5342,10 +5342,19 @@ int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)
 		mdb_cursor_close(mc);
 		return rc;
 
-	if (del) {
+	/* Can't delete the main DB */
+	if (del && dbi > MAIN_DBI) {
 		rc = mdb_del(txn, MAIN_DBI, &mc->mc_dbx->md_name, NULL);
 		if (!rc)
 			mdb_close(txn->mt_env, dbi);
+	} else {
+		txn->mt_dbflags[dbi] |= DB_DIRTY;
+		txn->mt_dbs[dbi].md_depth = 0;
+		txn->mt_dbs[dbi].md_branch_pages = 0;
+		txn->mt_dbs[dbi].md_leaf_pages = 0;
+		txn->mt_dbs[dbi].md_overflow_pages = 0;
+		txn->mt_dbs[dbi].md_entries = 0;
+		txn->mt_dbs[dbi].md_root = P_INVALID;
 	}
 	mdb_cursor_close(mc);
 	return rc;
