@@ -17,6 +17,7 @@
 
 #include <limits.h>
 #include <string.h>
+#include <stdlib.h>
 #include <sys/types.h>
 #include <assert.h>
 #include "midl.h"
@@ -117,11 +118,44 @@ int mdb_midl_insert( IDL ids, ID id )
 }
 #endif
 
-int mdb_midl_append( IDL ids, ID id )
+IDL mdb_midl_alloc()
 {
+	IDL ids = malloc((MDB_IDL_UM_MAX+1) * sizeof(ID));
+	*ids++ = MDB_IDL_UM_MAX;
+	return ids;
+}
+
+void mdb_midl_free(IDL ids)
+{
+	free(ids-1);
+}
+
+int mdb_midl_shrink( IDL *idp )
+{
+	IDL ids = *idp;
+	if (ids[-1] > MDB_IDL_UM_MAX) {
+		ids = realloc(ids, (MDB_IDL_UM_MAX+1) * sizeof(ID));
+		*ids++ = MDB_IDL_UM_MAX;
+		*idp = ids;
+		return 1;
+	}
+	return 0;
+}
+
+int mdb_midl_append( IDL *idp, ID id )
+{
+	IDL ids = *idp;
 	/* Too big? */
-	if (ids[0] >= MDB_IDL_UM_MAX)
-		return -1;
+	if (ids[0] >= ids[-1]) {
+		IDL idn = ids-1;
+		/* grow it */
+		idn = realloc(idn, (*idn + MDB_IDL_UM_MAX + 1) * sizeof(ID));
+		if (!idn)
+			return -1;
+		*idn++ += MDB_IDL_UM_MAX;
+		ids = idn;
+		*idp = ids;
+	}
 	ids[0]++;
 	ids[ids[0]] = id;
 	return 0;

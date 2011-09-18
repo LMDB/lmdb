@@ -111,12 +111,30 @@ typedef ID *IDL;
 int mdb_midl_insert( IDL ids, ID id );
 #endif
 
+	/** Allocate an IDL.
+	 * Allocates memory for an IDL of a default size.
+	 * @return	IDL on success, NULL on failure.
+	 */
+IDL mdb_midl_alloc();
+
+	/** Free an IDL.
+	 * @param[in] ids	The IDL to free.
+	 */
+void mdb_midl_free(IDL ids);
+
+	/** Shrink an IDL.
+	 * Return the IDL to the default size if it has grown larger.
+	 * @param[in,out] idp	Address of the IDL to shrink.
+	 * @return	0 on no change, non-zero if shrunk.
+	 */
+int mdb_midl_shrink(IDL *idp);
+
 	/** Append an ID onto an IDL.
-	 * @param[in,out] ids	The IDL to append to.
+	 * @param[in,out] idp	Address of the IDL to append to.
 	 * @param[in] id	The ID to append.
 	 * @return	0 on success, -2 if the IDL is too large.
 	 */
-int mdb_midl_append( IDL ids, ID id );
+int mdb_midl_append( IDL *idp, ID id );
 
 	/** Sort an IDL.
 	 * @param[in,out] ids	The IDL to sort.

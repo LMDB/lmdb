@@ -531,7 +531,9 @@ void mdb_txn_reset(MDB_txn *txn);
 int  mdb_txn_renew(MDB_txn *txn);
 
 	/** Open a database in the environment.
-	 * The database handle may be discarded by calling #mdb_close().
+	 * The database handle may be discarded by calling #mdb_close(). Only
+	 * one thread should call this function; it is not mutex-protected in
+	 * a read-only transaction.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] name The name of the database to open. If only a single
 	 * 	database is needed in the enviroment, this value may be NULL.
@@ -600,21 +602,16 @@ int  mdb_stat(MDB_txn *txn, MDB_dbi dbi, MDB_stat *stat);
 	 */
 void mdb_close(MDB_env *env, MDB_dbi dbi);
 
-	/** Delete a database and free all its pages.
-	 * This function acquires its own write transaction to perform its
-	 * work, so it must not be called if there is already an open write
-	 * transaction in the environment. The database handle will also be
-	 * closed as part of this operation.
-	 * @param[in] env An environment handle returned by #mdb_env_create()
+	/** Delete a database and/or free all its pages.
+	 * If the \b del parameter is non-zero the DB handle will be closed
+	 * and the DB will be deleted.
+	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] dbi A database handle returned by #mdb_open()
-	 * @return A non-zero error value on failure and 0 on success. Some possible
-	 * errors are:
-	 * <ul>
-	 *	<li>EINVAL - an invalid parameter was specified.
-	 *	<li>EBUSY - there is already a write transaction.
-	 * </ul>
+	 * @param[in] del non-zero to delete the DB from the environment,
+	 * otherwise just free its pages.
+	 * @return A non-zero error value on failure and 0 on success.
 	 */
-int  mdb_drop(MDB_env *env, MDB_dbi dbi);
+int  mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del);
 
 	/** Set a custom key comparison function for a database.
 	 * The comparison function is called whenever it is necessary to compare a
