@@ -3695,8 +3695,9 @@ top:
 					offset = NODESIZE + sizeof(indx_t) + data->mv_size;
 				}
 				offset += offset & 1;
-				if (NODESIZE + NODEKSZ(leaf) + NODEDSZ(leaf) + offset >=
-					(mc->mc_txn->mt_env->me_psize - PAGEHDRSZ) / MDB_MINKEYS) {
+				if (NODESIZE + sizeof(indx_t) + NODEKSZ(leaf) + NODEDSZ(leaf) +
+					offset >= (mc->mc_txn->mt_env->me_psize - PAGEHDRSZ) /
+						MDB_MINKEYS) {
 					/* yes, convert it */
 					dummy.md_flags = 0;
 					if (mc->mc_db->md_flags & MDB_DUPFIXED) {
