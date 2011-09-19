@@ -3843,7 +3843,7 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 			}
 			rc = mdb_cursor_del(&mc->mc_xcursor->mx_cursor, 0);
 			/* If sub-DB still has entries, we're done */
-			if (mc->mc_xcursor->mx_db.md_root != P_INVALID) {
+			if (mc->mc_xcursor->mx_db.md_entries) {
 				if (leaf->mn_flags & F_SUBDATA) {
 					/* update subDB info */
 					MDB_db *db = NODEDATA(leaf);
