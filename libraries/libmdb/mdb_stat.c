@@ -38,7 +38,7 @@ int main(int argc,char * argv[])
 		printf("mdb_env_open failed, error %d\n", rc);
 		exit(1);
 	}
-	rc = mdb_txn_begin(env, 1, &txn);
+	rc = mdb_txn_begin(env, NULL, 1, &txn);
 	if (rc) {
 		printf("mdb_txn_begin failed, error %d\n", rc);
 		exit(1);

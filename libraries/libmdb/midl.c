@@ -160,6 +160,25 @@ int mdb_midl_append( IDL *idp, ID id )
 	return 0;
 }
 
+int mdb_midl_append_list( IDL *idp, IDL app )
+{
+	IDL ids = *idp;
+	/* Too big? */
+	if (ids[0] + app[0] >= ids[-1]) {
+		IDL idn = ids-1;
+		/* grow it */
+		idn = realloc(idn, (*idn + app[-1]) * sizeof(ID));
+		if (!idn)
+			return -1;
+		*idn++ += app[-1];
+		ids = idn;
+		*idp = ids;
+	}
+	memcpy(&ids[ids[0]+1], &app[1], app[0] * sizeof(ID));
+	ids[0] += app[0];
+	return 0;
+}
+
 /* Quicksort + Insertion sort for small arrays */
 
 #define SMALL	8

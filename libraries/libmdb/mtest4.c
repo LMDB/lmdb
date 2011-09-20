@@ -47,7 +47,7 @@ int main(int argc,char * argv[])
 	rc = mdb_env_set_mapsize(env, 10485760);
 	rc = mdb_env_set_maxdbs(env, 4);
 	rc = mdb_env_open(env, "./testdb", MDB_FIXEDMAP|MDB_NOSYNC, 0664);
-	rc = mdb_txn_begin(env, 0, &txn);
+	rc = mdb_txn_begin(env, NULL, 0, &txn);
 	rc = mdb_open(txn, "id2", MDB_CREATE|MDB_DUPSORT|MDB_DUPFIXED, &dbi);
 
 	key.mv_size = sizeof(int);
@@ -68,7 +68,7 @@ int main(int argc,char * argv[])
 
 	/* there should be one full page of dups now.
 	 */
-	rc = mdb_txn_begin(env, 1, &txn);
+	rc = mdb_txn_begin(env, NULL, 1, &txn);
 	rc = mdb_cursor_open(txn, dbi, &cursor);
 	while ((rc = mdb_cursor_get(cursor, &key, &data, MDB_NEXT)) == 0) {
 		printf("key: %p %.*s, data: %p %.*s\n",
@@ -90,22 +90,22 @@ int main(int argc,char * argv[])
 	data.mv_data = sval;
 
 	sprintf(sval, "%07x", values[3]+1);
-	rc = mdb_txn_begin(env, 0, &txn);
+	rc = mdb_txn_begin(env, NULL, 0, &txn);
 	rc = mdb_put(txn, dbi, &key, &data, MDB_NODUPDATA);
 	mdb_txn_abort(txn);
 
 	sprintf(sval, "%07x", values[255]+1);
-	rc = mdb_txn_begin(env, 0, &txn);
+	rc = mdb_txn_begin(env, NULL, 0, &txn);
 	rc = mdb_put(txn, dbi, &key, &data, MDB_NODUPDATA);
 	mdb_txn_abort(txn);
 
 	sprintf(sval, "%07x", values[500]+1);
-	rc = mdb_txn_begin(env, 0, &txn);
+	rc = mdb_txn_begin(env, NULL, 0, &txn);
 	rc = mdb_put(txn, dbi, &key, &data, MDB_NODUPDATA);
 	rc = mdb_txn_commit(txn);
 
 	/* Try MDB_NEXT_MULTIPLE */
-	rc = mdb_txn_begin(env, 0, &txn);
+	rc = mdb_txn_begin(env, NULL, 0, &txn);
 	rc = mdb_cursor_open(txn, dbi, &cursor);
 	while ((rc = mdb_cursor_get(cursor, &key, &data, MDB_NEXT_MULTIPLE)) == 0) {
 		printf("key: %.*s, data: %.*s\n",
@@ -119,7 +119,7 @@ int main(int argc,char * argv[])
 	for (i= count - 1; i > -1; i-= (random()%3)) {
 		j++;
 		txn=NULL;
-		rc = mdb_txn_begin(env, 0, &txn);
+		rc = mdb_txn_begin(env, NULL, 0, &txn);
 		sprintf(sval, "%07x", values[i]);
 		key.mv_size = sizeof(int);
 		key.mv_data = kval;
@@ -137,7 +137,7 @@ int main(int argc,char * argv[])
 	printf("Deleted %d values\n", j);
 
 	rc = mdb_env_stat(env, &mst);
-	rc = mdb_txn_begin(env, 1, &txn);
+	rc = mdb_txn_begin(env, NULL, 1, &txn);
 	rc = mdb_cursor_open(txn, dbi, &cursor);
 	printf("Cursor next\n");
 	while ((rc = mdb_cursor_get(cursor, &key, &data, MDB_NEXT)) == 0) {

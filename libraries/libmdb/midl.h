@@ -136,6 +136,13 @@ int mdb_midl_shrink(IDL *idp);
 	 */
 int mdb_midl_append( IDL *idp, ID id );
 
+	/** Append an IDL onto an IDL.
+	 * @param[in,out] idp	Address of the IDL to append to.
+	 * @param[in] app	The IDL to append.
+	 * @return	0 on success, -1 if the IDL is too large.
+	 */
+int mdb_midl_append_list( IDL *idp, IDL app );
+
 	/** Sort an IDL.
 	 * @param[in,out] ids	The IDL to sort.
 	 */

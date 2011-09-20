@@ -704,6 +704,8 @@ typedef struct MDB_dbx {
 	 *	Every operation requires a transaction handle.
 	 */
 struct MDB_txn {
+	MDB_txn		*mt_parent;		/**< parent of a nested txn */
+	MDB_txn		*mt_child;		/**< nested txn under this txn */
 	pgno_t		mt_next_pgno;	/**< next unallocated page */
 	/** The ID of this transaction. IDs are integers incrementing from 1.
 	 *	Only committed write transactions increment the ID. If a transaction
@@ -994,6 +996,21 @@ mdb_dcmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b)
 		return EINVAL;	/* too bad you can't distinguish this from a valid result */
 }
 
+/** Allocate a single page.
+ * Re-use old malloc'd pages first, otherwise just malloc.
+ */
+static MDB_page *
+mdb_page_malloc(MDB_cursor *mc) {
+	MDB_page *ret;
+	if (mc->mc_txn->mt_env->me_dpages) {
+		ret = mc->mc_txn->mt_env->me_dpages;
+		mc->mc_txn->mt_env->me_dpages = ret->mp_next;
+	} else {
+		ret = malloc(mc->mc_txn->mt_env->me_psize);
+	}
+	return ret;
+}
+
 /** Allocate pages for writing.
  * If there are free pages available from older transactions, they
  * will be re-used first. Otherwise a new page will be allocated.
@@ -1142,12 +1159,40 @@ mdb_page_touch(MDB_cursor *mc)
 		mp->mp_pgno = pgno;
 		mp->mp_flags |= P_DIRTY;
 
+finish:
 		mc->mc_pg[mc->mc_top] = mp;
 		/** If this page has a parent, update the parent to point to
 		 * this new page.
 		 */
 		if (mc->mc_top)
 			SETPGNO(NODEPTR(mc->mc_pg[mc->mc_top-1], mc->mc_ki[mc->mc_top-1]), mp->mp_pgno);
+		else
+			mc->mc_db->md_root = mp->mp_pgno;
+	} else if (mc->mc_txn->mt_parent) {
+		MDB_page *np;
+		ID2 mid;
+		/* If txn has a parent, make sure the page is in our
+		 * dirty list.
+		 */
+		if (mc->mc_txn->mt_u.dirty_list[0].mid) {
+			unsigned x = mdb_mid2l_search(mc->mc_txn->mt_u.dirty_list, mp->mp_pgno);
+			if (x <= mc->mc_txn->mt_u.dirty_list[0].mid &&
+				mc->mc_txn->mt_u.dirty_list[x].mid == mp->mp_pgno) {
+				if (mc->mc_txn->mt_u.dirty_list[x].mptr != mp) {
+					mp = mc->mc_txn->mt_u.dirty_list[x].mptr;
+					mc->mc_pg[mc->mc_top] = mp;
+				}
+				return 0;
+			}
+		}
+		/* No - copy it */
+		np = mdb_page_malloc(mc);
+		memcpy(np, mp, mc->mc_txn->mt_env->me_psize);
+		mid.mid = np->mp_pgno;
+		mid.mptr = np;
+		mdb_mid2l_insert(mc->mc_txn->mt_u.dirty_list, &mid);
+		mp = np;
+		goto finish;
 	}
 	return 0;
 }
@@ -1264,7 +1309,7 @@ mdb_txn_renew(MDB_txn *txn)
 }
 
 int
-mdb_txn_begin(MDB_env *env, unsigned int flags, MDB_txn **ret)
+mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 {
 	MDB_txn *txn;
 	int rc;
@@ -1272,6 +1317,12 @@ mdb_txn_begin(MDB_env *env, unsigned int flags, MDB_txn **ret)
 	if (env->me_flags & MDB_FATAL_ERROR) {
 		DPUTS("environment had fatal error, must shutdown!");
 		return MDB_PANIC;
+	}
+	if (parent) {
+		/* parent already has an active child txn */
+		if (parent->mt_child) {
+			return EINVAL;
+		}
 	}
 	if ((txn = calloc(1, sizeof(MDB_txn) +
 		env->me_maxdbs * (sizeof(MDB_db)+1))) == NULL) {
@@ -1285,7 +1336,33 @@ mdb_txn_begin(MDB_env *env, unsigned int flags, MDB_txn **ret)
 	txn->mt_dbflags = (unsigned char *)(txn->mt_dbs + env->me_maxdbs);
 	txn->mt_env = env;
 
-	rc = mdb_txn_renew0(txn);
+	if (parent) {
+		txn->mt_free_pgs = mdb_midl_alloc();
+		if (!txn->mt_free_pgs) {
+			free(txn);
+			return ENOMEM;
+		}
+		txn->mt_u.dirty_list = malloc(sizeof(ID2)*MDB_IDL_UM_SIZE);
+		if (!txn->mt_u.dirty_list) {
+			free(txn->mt_free_pgs);
+			free(txn);
+			return ENOMEM;
+		}
+		txn->mt_txnid = parent->mt_txnid;
+		txn->mt_toggle = parent->mt_toggle;
+		txn->mt_u.dirty_list[0].mid = 0;
+		txn->mt_free_pgs[0] = 0;
+		txn->mt_next_pgno = parent->mt_next_pgno;
+		parent->mt_child = txn;
+		txn->mt_parent = parent;
+		txn->mt_numdbs = parent->mt_numdbs;
+		txn->mt_dbxs = parent->mt_dbxs;
+		memcpy(txn->mt_dbs, parent->mt_dbs, txn->mt_numdbs * sizeof(MDB_db));
+		memcpy(txn->mt_dbflags, parent->mt_dbflags, txn->mt_numdbs);
+		rc = 0;
+	} else {
+		rc = mdb_txn_renew0(txn);
+	}
 	if (rc)
 		free(txn);
 	else {
@@ -1313,9 +1390,6 @@ mdb_txn_reset0(MDB_txn *txn)
 		MDB_page *dp;
 		unsigned int i;
 
-		if (mdb_midl_shrink(&txn->mt_free_pgs))
-			env->me_free_pgs = txn->mt_free_pgs;
-
 		/* return all dirty pages to dpage list */
 		for (i=1; i<=txn->mt_u.dirty_list[0].mid; i++) {
 			dp = txn->mt_u.dirty_list[i].mptr;
@@ -1326,6 +1400,16 @@ mdb_txn_reset0(MDB_txn *txn)
 				/* large pages just get freed directly */
 				free(dp);
 			}
+		}
+
+		if (txn->mt_parent) {
+			txn->mt_parent->mt_child = NULL;
+			free(txn->mt_free_pgs);
+			free(txn->mt_u.dirty_list);
+			return;
+		} else {
+			if (mdb_midl_shrink(&txn->mt_free_pgs))
+				env->me_free_pgs = txn->mt_free_pgs;
 		}
 
 		while ((mop = txn->mt_env->me_pghead)) {
@@ -1362,6 +1446,9 @@ mdb_txn_abort(MDB_txn *txn)
 		txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w',
 		(void *)txn, (void *)txn->mt_env, txn->mt_dbs[MAIN_DBI].md_root);
 
+	if (txn->mt_child)
+		mdb_txn_abort(txn->mt_child);
+
 	mdb_txn_reset0(txn);
 	free(txn);
 }
@@ -1380,6 +1467,11 @@ mdb_txn_commit(MDB_txn *txn)
 
 	assert(txn != NULL);
 	assert(txn->mt_env != NULL);
+
+	if (txn->mt_child) {
+		mdb_txn_commit(txn->mt_child);
+		txn->mt_child = NULL;
+	}
 
 	env = txn->mt_env;
 
@@ -1405,14 +1497,72 @@ mdb_txn_commit(MDB_txn *txn)
 		return MDB_SUCCESS;
 	}
 
-	if (txn != env->me_txn) {
-		DPUTS("attempt to commit unknown transaction");
+
+	if (F_ISSET(txn->mt_flags, MDB_TXN_ERROR)) {
+		DPUTS("error flag is set, can't commit");
+		if (txn->mt_parent)
+			txn->mt_parent->mt_flags |= MDB_TXN_ERROR;
 		mdb_txn_abort(txn);
 		return EINVAL;
 	}
 
-	if (F_ISSET(txn->mt_flags, MDB_TXN_ERROR)) {
-		DPUTS("error flag is set, can't commit");
+	if (txn->mt_parent) {
+		MDB_db *ip, *jp;
+		MDB_dbi i;
+		unsigned x, y;
+		ID2L dst, src;
+
+		/* Update parent's DB table */
+		ip = &txn->mt_parent->mt_dbs[2];
+		jp = &txn->mt_dbs[2];
+		for (i = 2; i < txn->mt_numdbs; i++) {
+			if (ip->md_root != jp->md_root)
+				*ip = *jp;
+			ip++; jp++;
+		}
+		txn->mt_parent->mt_numdbs = txn->mt_numdbs;
+
+		/* Append our free list to parent's */
+		mdb_midl_append_list(&txn->mt_parent->mt_free_pgs,
+			txn->mt_free_pgs);
+		mdb_midl_free(txn->mt_free_pgs);
+
+		/* Merge our dirty list with parent's */
+		dst = txn->mt_parent->mt_u.dirty_list;
+		src = txn->mt_u.dirty_list;
+		x = mdb_mid2l_search(dst, src[1].mid);
+		for (y=1; y<=src[0].mid; y++) {
+			MDB_page *mp;
+			while (x <= dst[0].mid && dst[x].mid != src[y].mid) x++;
+			if (x > dst[0].mid)
+				break;
+			mp = dst[x].mptr;
+			dp = src[y].mptr;
+			mp->mp_lower = dp->mp_lower;
+			mp->mp_upper = dp->mp_upper;
+			if (IS_LEAF2(mp)) {
+				memcpy(METADATA(mp), METADATA(dp), NUMKEYS(mp) * mp->mp_pad);
+			} else {
+				memcpy((char *)mp+mp->mp_upper, (char *)dp+dp->mp_upper,
+					txn->mt_env->me_psize - mp->mp_upper);
+			}
+			free(src[y].mptr);
+		}
+		x = dst[0].mid;
+		for (; y<=src[0].mid; y++) {
+			if (++x >= MDB_IDL_UM_MAX)
+				return ENOMEM;
+			dst[x] = src[y];
+		}
+		dst[0].mid = x;
+		free(txn->mt_u.dirty_list);
+		txn->mt_parent->mt_child = NULL;
+		free(txn);
+		return MDB_SUCCESS;
+	}
+
+	if (txn != env->me_txn) {
+		DPUTS("attempt to commit unknown transaction");
 		mdb_txn_abort(txn);
 		return EINVAL;
 	}
@@ -1892,6 +2042,8 @@ mdb_env_set_mapsize(MDB_env *env, size_t size)
 	if (env->me_map)
 		return EINVAL;
 	env->me_mapsize = size;
+	if (env->me_psize)
+		env->me_maxpg = env->me_mapsize / env->me_psize;
 	return MDB_SUCCESS;
 }
 
@@ -2896,11 +3048,8 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int modify)
 		mc->mc_dbi, root, mc->mc_pg[0]->mp_flags);
 
 	if (modify) {
-		if (!F_ISSET(mc->mc_pg[0]->mp_flags, P_DIRTY)) {
-			if ((rc = mdb_page_touch(mc)))
-				return rc;
-			mc->mc_db->md_root = mc->mc_pg[0]->mp_pgno;
-		}
+		if ((rc = mdb_page_touch(mc)))
+			return rc;
 	}
 
 	return mdb_page_search_root(mc, key, modify);
@@ -3545,15 +3694,9 @@ mdb_cursor_touch(MDB_cursor *mc)
 		*mc->mc_dbflag = DB_DIRTY;
 	}
 	for (mc->mc_top = 0; mc->mc_top < mc->mc_snum; mc->mc_top++) {
-		if (!F_ISSET(mc->mc_pg[mc->mc_top]->mp_flags, P_DIRTY)) {
-			rc = mdb_page_touch(mc);
-			if (rc)
-				return rc;
-			if (!mc->mc_top) {
-				mc->mc_db->md_root =
-					mc->mc_pg[mc->mc_top]->mp_pgno;
-			}
-		}
+		rc = mdb_page_touch(mc);
+		if (rc)
+			return rc;
 	}
 	mc->mc_top = mc->mc_snum-1;
 	return MDB_SUCCESS;
@@ -3578,7 +3721,7 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 		return EACCES;
 
 	DPRINTF("==> put db %u key [%s], size %zu, data size %zu",
-		mc->mc_dbi, DKEY(key), key->mv_size, data->mv_size);
+		mc->mc_dbi, DKEY(key), key ? key->mv_size:0, data->mv_size);
 
 	dkey.mv_size = 0;
 
@@ -4969,13 +5112,9 @@ newsep:
 	/* Move half of the keys to the right sibling. */
 
 	/* grab a page to hold a temporary copy */
-	if (mc->mc_txn->mt_env->me_dpages) {
-		copy = mc->mc_txn->mt_env->me_dpages;
-		mc->mc_txn->mt_env->me_dpages = copy->mp_next;
-	} else {
-		if ((copy = malloc(mc->mc_txn->mt_env->me_psize)) == NULL)
-			return ENOMEM;
-	}
+	copy = mdb_page_malloc(mc);
+	if (copy == NULL)
+		return ENOMEM;
 
 	copy->mp_pgno  = mp->mp_pgno;
 	copy->mp_flags = mp->mp_flags;
@@ -5075,14 +5214,14 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 	return mdb_cursor_put(&mc, key, data, flags);
 }
 
+/** Only a subset of the @ref mdb_env flags can be changed
+ *	at runtime. Changing other flags requires closing the environment
+ *	and re-opening it with the new flags.
+ */
+#define	CHANGEABLE	(MDB_NOSYNC)
 int
 mdb_env_set_flags(MDB_env *env, unsigned int flag, int onoff)
 {
-	/** Only a subset of the @ref mdb_env flags can be changed
-	 *	at runtime. Changing other flags requires closing the environment
-	 *	and re-opening it with the new flags.
-	 */
-#define	CHANGEABLE	(MDB_NOSYNC)
 	if ((flag & CHANGEABLE) != flag)
 		return EINVAL;
 	if (onoff)
@@ -5340,7 +5479,7 @@ int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)
 	if (rc)
 		return rc;
 
-	rc = mdb_drop0(mc, 1);
+	rc = mdb_drop0(mc, mc->mc_db->md_flags & MDB_DUPSORT);
 	if (rc)
 		mdb_cursor_close(mc);
 		return rc;

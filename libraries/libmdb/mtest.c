@@ -42,7 +42,7 @@ int main(int argc,char * argv[])
 		rc = mdb_env_create(&env);
 		rc = mdb_env_set_mapsize(env, 10485760);
 		rc = mdb_env_open(env, "./testdb", MDB_FIXEDMAP /*|MDB_NOSYNC*/, 0664);
-		rc = mdb_txn_begin(env, 0, &txn);
+		rc = mdb_txn_begin(env, NULL, 0, &txn);
 		rc = mdb_open(txn, NULL, 0, &dbi);
    
 		key.mv_size = sizeof(int);
@@ -60,7 +60,7 @@ int main(int argc,char * argv[])
 		rc = mdb_txn_commit(txn);
 		rc = mdb_env_stat(env, &mst);
 
-		rc = mdb_txn_begin(env, 1, &txn);
+		rc = mdb_txn_begin(env, NULL, 1, &txn);
 		rc = mdb_cursor_open(txn, dbi, &cursor);
 		while ((rc = mdb_cursor_get(cursor, &key, &data, MDB_NEXT)) == 0) {
 			printf("key: %p %.*s, data: %p %.*s\n",
@@ -75,7 +75,7 @@ int main(int argc,char * argv[])
 	    for (i= count - 1; i > -1; i-= (random()%5)) {	
 			j++;
 			txn=NULL;
-			rc = mdb_txn_begin(env, 0, &txn);
+			rc = mdb_txn_begin(env, NULL, 0, &txn);
 			sprintf(sval, "%03x ", values[i]);
 			rc = mdb_del(txn, dbi, &key, NULL);
 			if (rc) {
@@ -89,7 +89,7 @@ int main(int argc,char * argv[])
 		printf("Deleted %d values\n", j);
 
 		rc = mdb_env_stat(env, &mst);
-		rc = mdb_txn_begin(env, 1, &txn);
+		rc = mdb_txn_begin(env, NULL, 1, &txn);
 		rc = mdb_cursor_open(txn, dbi, &cursor);
 		printf("Cursor next\n");
 		while ((rc = mdb_cursor_get(cursor, &key, &data, MDB_NEXT)) == 0) {
@@ -108,7 +108,7 @@ int main(int argc,char * argv[])
 		 * this stuff all breaks
 		 */
 		printf("Deleting with cursor\n");
-		rc = mdb_txn_begin(env, 0, &txn);
+		rc = mdb_txn_begin(env, NULL, 0, &txn);
 		rc = mdb_cursor_open(db, txn, &cur2);
 		for (i=0; i<50; i++) {
 			rc = mdb_cursor_get(cur2, &key, &data, MDB_NEXT);

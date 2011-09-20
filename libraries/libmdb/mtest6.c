@@ -42,7 +42,7 @@ int main(int argc,char * argv[])
 	rc = mdb_env_set_mapsize(env, 10485760);
 	rc = mdb_env_set_maxdbs(env, 4);
 	rc = mdb_env_open(env, "./testdb", MDB_FIXEDMAP|MDB_NOSYNC, 0664);
-	rc = mdb_txn_begin(env, 0, &txn);
+	rc = mdb_txn_begin(env, NULL, 0, &txn);
 	rc = mdb_open(txn, "id2", MDB_CREATE|MDB_INTEGERKEY, &dbi);
 	rc = mdb_cursor_open(txn, dbi, &cursor);
 	rc = mdb_stat(txn, dbi, &mst);
@@ -87,7 +87,7 @@ int main(int argc,char * argv[])
 	for (i= count - 1; i > -1; i-= (random()%5)) {
 		j++;
 		txn=NULL;
-		rc = mdb_txn_begin(env, 0, &txn);
+		rc = mdb_txn_begin(env, NULL, 0, &txn);
 		sprintf(kval, "%03x", values[i & ~0x0f]);
 		sprintf(sval, "%03x %d foo bar", values[i], values[i]);
 		key.mv_size = sizeof(int);
@@ -106,7 +106,7 @@ int main(int argc,char * argv[])
 	printf("Deleted %d values\n", j);
 
 	rc = mdb_env_stat(env, &mst);
-	rc = mdb_txn_begin(env, 1, &txn);
+	rc = mdb_txn_begin(env, NULL, 1, &txn);
 	rc = mdb_cursor_open(txn, dbi, &cursor);
 	printf("Cursor next\n");
 	while ((rc = mdb_cursor_get(cursor, &key, &data, MDB_NEXT)) == 0) {
