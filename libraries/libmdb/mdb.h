@@ -505,9 +505,8 @@ int  mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **
 
 	/** @brief Commit all the operations of a transaction into the database.
 	 *
-	 * All cursors opened within the transaction must be closed before the transaction
-	 * is committed.
-	 * The transaction handle will be freed and must not be used again after this call.
+	 * All cursors opened within the transaction will be closed by this call. The cursors
+	 * and transaction handle will be freed and must not be used again after this call.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @return A non-zero error value on failure and 0 on success. Some possible
 	 * errors are:
@@ -521,9 +520,8 @@ int  mdb_txn_commit(MDB_txn *txn);
 
 	/** @brief Abandon all the operations of the transaction instead of saving them.
 	 *
-	 * All cursors opened within the transaction must be closed before the transaction
-	 * is aborted.
-	 * The transaction handle will be freed and must not be used again after this call.
+	 * All cursors opened within the transaction will be closed by this call. The cursors
+	 * and transaction handle will be freed and must not be used again after this call.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 */
 void mdb_txn_abort(MDB_txn *txn);
