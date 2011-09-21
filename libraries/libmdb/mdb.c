@@ -790,7 +790,8 @@ struct MDB_cursor {
 #define C_INITIALIZED	0x01	/**< cursor has been initialized and is valid */
 #define C_EOF	0x02			/**< No more data */
 #define C_SUB	0x04			/**< Cursor is a sub-cursor */
-#define C_SHADOW	0x08			/**< Cursor is a dup from a parent txn */
+#define C_SHADOW	0x08		/**< Cursor is a dup from a parent txn */
+#define C_ALLOCD	0x10		/**< Cursor was malloc'd */
 /** @} */
 	unsigned int	mc_flags;	/**< @ref mdb_cursor */
 	MDB_page	*mc_pg[CURSOR_STACK];	/**< stack of pushed pages */
@@ -1316,7 +1317,8 @@ mdb_cursor_merge(MDB_txn *txn)
 						m2->mc_ki[j] = mc->mc_ki[j];
 					}
 				}
-				free(mc);
+				if (mc->mc_flags & C_ALLOCD)
+					free(mc);
 			}
 		}
 	}
@@ -1517,7 +1519,8 @@ mdb_txn_reset0(MDB_txn *txn)
 				MDB_cursor *mc;
 				while ((mc = txn->mt_cursors[i])) {
 					txn->mt_cursors[i] = mc->mc_next;
-					free(mc);
+					if (mc->mc_flags & C_ALLOCD)
+						free(mc);
 				}
 			}
 		}
@@ -4620,6 +4623,7 @@ mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **ret)
 			mc->mc_next = txn->mt_cursors[dbi];
 			txn->mt_cursors[dbi] = mc;
 		}
+		mc->mc_flags |= C_ALLOCD;
 	} else {
 		return ENOMEM;
 	}
@@ -4664,7 +4668,8 @@ mdb_cursor_close(MDB_cursor *mc)
 			if (*prev == mc)
 				*prev = mc->mc_next;
 		}
-		free(mc);
+		if (mc->mc_flags & C_ALLOCD)
+			free(mc);
 	}
 }
 
