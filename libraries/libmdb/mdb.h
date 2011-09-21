@@ -843,9 +843,6 @@ void mdb_cursor_close(MDB_cursor *cursor);
 	 * case of the #MDB_SET option, in which the \b key object is unchanged), and
 	 * the address and length of the data are returned in the object to which \b data
 	 * refers.
-	 * @bug Cursors are not coordinated with write operations. If a cursor in a
-	 * write transaction is performing a sequential scan while records are being
-	 * inserted or deleted in the same transaction, the cursor will be corrupted.
 	 * @param[in] cursor A cursor handle returned by #mdb_cursor_open()
 	 * @param[in,out] key The key for a retrieved item
 	 * @param[in,out] data The data of a retrieved item
