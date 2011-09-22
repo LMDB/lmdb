@@ -1121,7 +1121,7 @@ mdb_page_alloc(MDB_cursor *mc, int num)
 	if (pgno == P_INVALID) {
 		/* DB size is maxed out */
 		if (txn->mt_next_pgno + num >= txn->mt_env->me_maxpg) {
-			assert(txn->mt_next_pgno + num < txn->mt_env->me_maxpg);
+			DPRINTF("DB size maxed out");
 			return NULL;
 		}
 	}
@@ -4824,7 +4824,8 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 		if (IS_BRANCH(csrc->mc_pg[csrc->mc_top])) {
 			MDB_val	 nullkey;
 			nullkey.mv_size = 0;
-			assert(mdb_update_key(csrc->mc_pg[csrc->mc_top], 0, &nullkey) == MDB_SUCCESS);
+			rc = mdb_update_key(csrc->mc_pg[csrc->mc_top], 0, &nullkey);
+			assert(rc == MDB_SUCCESS);
 		}
 	}
 
@@ -4846,7 +4847,8 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 		if (IS_BRANCH(cdst->mc_pg[cdst->mc_top])) {
 			MDB_val	 nullkey;
 			nullkey.mv_size = 0;
-			assert(mdb_update_key(cdst->mc_pg[cdst->mc_top], 0, &nullkey) == MDB_SUCCESS);
+			rc = mdb_update_key(cdst->mc_pg[cdst->mc_top], 0, &nullkey);
+			assert(rc == MDB_SUCCESS);
 		}
 	}
 
