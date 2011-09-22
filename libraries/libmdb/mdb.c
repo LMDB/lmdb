@@ -439,9 +439,12 @@ typedef struct MDB_reader {
 	 *	For POSIX the actual mutexes reside in the shared memory of this
 	 *	mapped file. On Windows, mutexes are named objects allocated by the
 	 *	kernel; we store the mutex names in this mapped file so that other
-	 *	processes can grab them. This same approach will also be used on
+	 *	processes can grab them. This same approach is also used on
 	 *	MacOSX/Darwin (using named semaphores) since MacOSX doesn't support
-	 *	process-shared POSIX mutexes.
+	 *	process-shared POSIX mutexes. For these cases where a named object
+	 *	is used, the object name is derived from a 64 bit FNV hash of the
+	 *	environment pathname. As such, naming collisions are extremely
+	 *	unlikely. If a collision occurs, the results are unpredictable.
 	 */
 typedef struct MDB_txbody {
 		/** Stamp identifying this as an MDB lock file. It must be set
