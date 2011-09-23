@@ -307,6 +307,12 @@ int  mdb_env_create(MDB_env **env);
 	 *		across multiple invocations. This option may not always work, depending on
 	 *		how the operating system has allocated memory to shared libraries and other uses.
 	 *		The feature is highly experimental.
+	 *	<li>#MDB_NOSUBDIR
+	 *		By default, MDB creates its environment in a directory whose
+	 *		pathname is given in \b path, and creates its data and lock files
+	 *		under that directory. With this option, \b path is used as-is for
+	 *		the database main data file. The database lock file is the \b path
+	 *		with "-lock" appended.
 	 *	<li>#MDB_NOSYNC
 	 *		Don't perform a synchronous flush after committing a transaction. This means
 	 *		transactions will exhibit the ACI (atomicity, consistency, and isolation)
