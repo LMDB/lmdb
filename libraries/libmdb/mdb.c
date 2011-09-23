@@ -2657,6 +2657,9 @@ fail:
 #define LOCKNAME	"/lock.mdb"
 	/** The name of the data file in the DB environment */
 #define DATANAME	"/data.mdb"
+	/** The suffix of the lock file when no subdir is used */
+#define LOCKSUFF	"-lock"
+
 int
 mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 {
@@ -2664,12 +2667,23 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 	char *lpath, *dpath;
 
 	len = strlen(path);
-	lpath = malloc(len + sizeof(LOCKNAME) + len + sizeof(DATANAME));
+	if (flags & MDB_NOSUBDIR) {
+		rc = len + sizeof(LOCKSUFF) + len + 1;
+	} else {
+		rc = len + sizeof(LOCKNAME) + len + sizeof(DATANAME);
+	}
+	lpath = malloc(rc);
 	if (!lpath)
 		return ENOMEM;
-	dpath = lpath + len + sizeof(LOCKNAME);
-	sprintf(lpath, "%s" LOCKNAME, path);
-	sprintf(dpath, "%s" DATANAME, path);
+	if (flags & MDB_NOSUBDIR) {
+		dpath = lpath + len + sizeof(LOCKSUFF);
+		sprintf(lpath, "%s" LOCKSUFF, path);
+		strcpy(dpath, path);
+	} else {
+		dpath = lpath + len + sizeof(LOCKNAME);
+		sprintf(lpath, "%s" LOCKNAME, path);
+		sprintf(dpath, "%s" DATANAME, path);
+	}
 
 	rc = mdb_env_setup_locks(env, lpath, mode, &excl);
 	if (rc)

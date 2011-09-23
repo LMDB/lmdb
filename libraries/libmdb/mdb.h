@@ -149,6 +149,8 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
  */
 	/** mmap at a fixed address */
 #define MDB_FIXEDMAP	0x01
+	/** no environment directory */
+#define MDB_NOSUBDIR	0x02
 	/** don't fsync after commit */
 #define MDB_NOSYNC		0x10000
 	/** read only */
