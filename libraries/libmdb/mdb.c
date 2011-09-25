@@ -330,7 +330,7 @@ typedef ID	txnid_t;
 #endif
 
 /**	@defgroup lazylock	Lazy Locking
- *	Macros for locks that are't actually needed.
+ *	Macros for locks that aren't actually needed.
  *	The DB view is always consistent because all writes are wrapped in
  *	the wmutex. Finer-grained locks aren't necessary.
  *	@{
@@ -492,7 +492,7 @@ typedef struct MDB_reader {
 	 *	unlikely. If a collision occurs, the results are unpredictable.
 	 */
 typedef struct MDB_txbody {
-		/** Stamp identifying this as an MDB lock file. It must be set
+		/** Stamp identifying this as an MDB file. It must be set
 		 *	to #MDB_MAGIC. */
 	uint32_t	mtb_magic;
 		/** Version number of this lock file. Must be set to #MDB_VERSION. */
@@ -748,7 +748,7 @@ typedef struct MDB_db {
 
 	/** Meta page content. */
 typedef struct MDB_meta {
-		/** Stamp identifying this as an MDB data file. It must be set
+		/** Stamp identifying this as an MDB file. It must be set
 		 *	to #MDB_MAGIC. */
 	uint32_t	mm_magic;
 		/** Version number of this lock file. Must be set to #MDB_VERSION. */
@@ -857,7 +857,7 @@ struct MDB_cursor {
 	/** The @ref mt_dbflag for this database */
 	unsigned char	*mc_dbflag;
 	unsigned short 	mc_snum;	/**< number of pushed pages */
-	unsigned short	mc_top;		/**< index of top page, mc_snum-1 */
+	unsigned short	mc_top;		/**< index of top page, normally mc_snum-1 */
 /** @defgroup mdb_cursor	Cursor Flags
  *	@ingroup internal
  *	Cursor state flags.
