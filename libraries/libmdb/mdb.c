@@ -5642,7 +5642,8 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 {
 	MDB_val key, data;
 	MDB_dbi i;
-	int rc, dbflag = 0;
+	MDB_cursor mc;
+	int rc, dbflag, exact;
 	size_t len;
 
 	if (txn->mt_dbxs[FREE_DBI].md_cmp == NULL) {
@@ -5676,20 +5677,25 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 		return ENFILE;
 
 	/* Find the DB info */
+	dbflag = 0;
+	exact = 0;
 	key.mv_size = len;
 	key.mv_data = (void *)name;
-	rc = mdb_get(txn, MAIN_DBI, &key, &data);
-
-	/* Create if requested */
-	if (rc == MDB_NOTFOUND && (flags & MDB_CREATE)) {
-		MDB_cursor mc;
+	mdb_cursor_init(&mc, txn, MAIN_DBI, NULL);
+	rc = mdb_cursor_set(&mc, &key, &data, MDB_SET, &exact);
+	if (rc == MDB_SUCCESS) {
+		/* make sure this is actually a DB */
+		MDB_node *node = NODEPTR(mc.mc_pg[mc.mc_top], mc.mc_ki[mc.mc_top]);
+		if (!(node->mn_flags & F_SUBDATA))
+			return EINVAL;
+	} else if (rc == MDB_NOTFOUND && (flags & MDB_CREATE)) {
+		/* Create if requested */
 		MDB_db dummy;
 		data.mv_size = sizeof(MDB_db);
 		data.mv_data = &dummy;
 		memset(&dummy, 0, sizeof(dummy));
 		dummy.md_root = P_INVALID;
 		dummy.md_flags = flags & 0xffff;
-		mdb_cursor_init(&mc, txn, MAIN_DBI, NULL);
 		rc = mdb_cursor_put(&mc, &key, &data, F_SUBDATA);
 		dbflag = DB_DIRTY;
 	}
