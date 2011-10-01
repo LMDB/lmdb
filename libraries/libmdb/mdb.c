@@ -1178,6 +1178,7 @@ finish:
 			MDB_dbi dbi = mc->mc_dbi-1;
 
 			for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
+				if (m2 == mc) continue;
 				m3 = &m2->mc_xcursor->mx_cursor;
 				if (m3->mc_pg[mc->mc_top] == mc->mc_pg[mc->mc_top]) {
 					m3->mc_pg[mc->mc_top] = mp;
@@ -1187,6 +1188,7 @@ finish:
 			MDB_cursor *m2;
 
 			for (m2 = mc->mc_txn->mt_cursors[mc->mc_dbi]; m2; m2=m2->mc_next) {
+				if (m2 == mc) continue;
 				if (m2->mc_pg[mc->mc_top] == mc->mc_pg[mc->mc_top]) {
 					m2->mc_pg[mc->mc_top] = mp;
 				}
@@ -4083,6 +4085,7 @@ new_sub:
 				dbi--;
 
 			for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
+				if (m2 == mc) continue;
 				if (mc->mc_flags & C_SUB)
 					m3 = &m2->mc_xcursor->mx_cursor;
 				else
@@ -4132,6 +4135,7 @@ put_sub:
 					MDB_page *mp = mc->mc_pg[i];
 
 					for (m2 = mc->mc_txn->mt_cursors[mc->mc_dbi]; m2; m2=m2->mc_next) {
+						if (m2 == mc) continue;
 						if (m2->mc_pg[i] == mp && m2->mc_ki[i] == mc->mc_ki[i]) {
 							mdb_xcursor_init1(m2, leaf);
 						}
@@ -4809,6 +4813,7 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 			dbi--;
 
 		for (m2 = csrc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
+			if (m2 == csrc) continue;
 			if (csrc->mc_flags & C_SUB)
 				m3 = &m2->mc_xcursor->mx_cursor;
 			else
@@ -4951,6 +4956,7 @@ mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst)
 			dbi--;
 
 		for (m2 = csrc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
+			if (m2 == csrc) continue;
 			if (csrc->mc_flags & C_SUB)
 				m3 = &m2->mc_xcursor->mx_cursor;
 			else
@@ -5031,6 +5037,7 @@ mdb_rebalance(MDB_cursor *mc)
 					dbi--;
 
 				for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
+					if (m2 == mc) continue;
 					if (mc->mc_flags & C_SUB)
 						m3 = &m2->mc_xcursor->mx_cursor;
 					else
@@ -5059,6 +5066,7 @@ mdb_rebalance(MDB_cursor *mc)
 					dbi--;
 
 				for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
+					if (m2 == mc) continue;
 					if (mc->mc_flags & C_SUB)
 						m3 = &m2->mc_xcursor->mx_cursor;
 					else
@@ -5483,6 +5491,7 @@ done:
 			dbi--;
 
 		for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
+			if (m2 == mc) continue;
 			if (mc->mc_flags & C_SUB)
 				m3 = &m2->mc_xcursor->mx_cursor;
 			else
