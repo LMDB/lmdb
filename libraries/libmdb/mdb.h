@@ -189,6 +189,10 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
 #define MDB_NODUPDATA	0x20
 /** For mdb_cursor_put: overwrite the current key/data pair */
 #define MDB_CURRENT	0x40
+/** For put: Just reserve space for data, don't copy it. Return a
+ * pointer to the reserved space.
+ */
+#define MDB_RESERVE	0x10000
 /*	@} */
 
 /** @brief Cursor Get operations.
