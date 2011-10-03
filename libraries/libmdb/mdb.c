@@ -600,7 +600,7 @@ typedef struct MDB_node {
 #define F_DUPDATA	 0x04			/**< data has duplicates */
 
 /** valid flags for #mdb_node_add() */
-#define	NODE_ADD_FLAGS	(F_DUPDATA|F_SUBDATA|MDB_RESERVE)
+#define	NODE_ADD_FLAGS	(F_DUPDATA|F_SUBDATA|MDB_RESERVE|MDB_APPEND)
 
 /** @} */
 	unsigned short	mn_flags;		/**< @ref mdb_node */
@@ -4094,11 +4094,11 @@ new_sub:
 				dbi--;
 
 			for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
-				if (m2 == mc) continue;
 				if (mc->mc_flags & C_SUB)
 					m3 = &m2->mc_xcursor->mx_cursor;
 				else
 					m3 = m2;
+				if (m3 == mc) continue;
 				if (m3->mc_pg[i] == mp && m3->mc_ki[i] >= mc->mc_ki[i]) {
 					m3->mc_ki[i]++;
 				}
@@ -4146,6 +4146,7 @@ put_sub:
 					}
 				}
 			}
+			xflags |= (flags & MDB_APPEND);
 			rc = mdb_cursor_put(&mc->mc_xcursor->mx_cursor, data, &xdata, xflags);
 			if (flags & F_SUBDATA) {
 				db = NODEDATA(leaf);
@@ -5298,10 +5299,17 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 	/* Create a right sibling. */
 	if ((rp = mdb_page_new(mc, mp->mp_flags, 1)) == NULL)
 		return ENOMEM;
+	DPRINTF("new right sibling: page %zu", rp->mp_pgno);
+
 	mdb_cursor_copy(mc, &mn);
 	mn.mc_pg[mn.mc_top] = rp;
 	mn.mc_ki[ptop] = mc->mc_ki[ptop]+1;
-	DPRINTF("new right sibling: page %zu", rp->mp_pgno);
+
+	if (nflags & MDB_APPEND) {
+		mn.mc_ki[mn.mc_top] = 0;
+		sepkey = *newkey;
+		goto newsep;
+	}
 
 	nkeys = NUMKEYS(mp);
 	split_indx = nkeys / 2 + 1;
@@ -5426,6 +5434,11 @@ newsep:
 	}
 	if (rc != MDB_SUCCESS) {
 		return rc;
+	}
+	if (nflags & MDB_APPEND) {
+		mc->mc_pg[mc->mc_top] = rp;
+		mc->mc_ki[mc->mc_top] = 0;
+		return mdb_node_add(mc, 0, newkey, newdata, newpgno, nflags);
 	}
 	if (IS_LEAF2(rp)) {
 		goto done;
@@ -5563,7 +5576,7 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 		return EINVAL;
 	}
 
-	if ((flags & (MDB_NOOVERWRITE|MDB_NODUPDATA|MDB_RESERVE)) != flags)
+	if ((flags & (MDB_NOOVERWRITE|MDB_NODUPDATA|MDB_RESERVE|MDB_APPEND)) != flags)
 		return EINVAL;
 
 	mdb_cursor_init(&mc, txn, dbi, &mx);
