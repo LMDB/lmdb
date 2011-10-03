@@ -1128,7 +1128,7 @@ mdb_page_alloc(MDB_cursor *mc, int num)
 	if (pgno == P_INVALID) {
 		/* DB size is maxed out */
 		if (txn->mt_next_pgno + num >= txn->mt_env->me_maxpg) {
-			DPRINTF("DB size maxed out");
+			DPUTS("DB size maxed out");
 			return NULL;
 		}
 	}
@@ -1764,13 +1764,13 @@ mdb_txn_commit(MDB_txn *txn)
 		MDB_oldpages *mop;
 
 		mop = env->me_pghead;
+		env->me_pghead = NULL;
 		key.mv_size = sizeof(pgno_t);
 		key.mv_data = &mop->mo_txnid;
 		data.mv_size = MDB_IDL_SIZEOF(mop->mo_pages);
 		data.mv_data = mop->mo_pages;
 		mdb_cursor_put(&mc, &key, &data, 0);
-		free(env->me_pghead);
-		env->me_pghead = NULL;
+		free(mop);
 	}
 
 	/* Update DB root pointers. Their pages have already been
@@ -3202,6 +3202,7 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int modify)
 		}
 	}
 
+	assert(root > 1);
 	if ((rc = mdb_page_get(mc->mc_txn, root, &mc->mc_pg[0])))
 		return rc;
 
