@@ -3875,6 +3875,7 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	MDB_page	*fp;
 	MDB_db dummy;
 	int do_sub = 0;
+	unsigned int mcount = 0;
 	size_t nsize;
 	int rc, rc2;
 	char pbuf[PAGESIZE];
@@ -3950,6 +3951,7 @@ top:
 		/* DB has dups? */
 		if (F_ISSET(mc->mc_db->md_flags, MDB_DUPSORT)) {
 			/* Was a single item before, must convert now */
+more:
 			if (!F_ISSET(leaf->mn_flags, F_DUPDATA)) {
 				/* Just overwrite the current item */
 				if (flags == MDB_CURRENT)
@@ -4158,6 +4160,14 @@ put_sub:
 		 */
 		if (!rc && !(flags & MDB_CURRENT))
 			mc->mc_db->md_entries++;
+		if (flags & MDB_MULTIPLE) {
+			mcount++;
+			if (mcount < data[1].mv_size) {
+				data[0].mv_data = (char *)data[0].mv_data + data[0].mv_size;
+				leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
+				goto more;
+			}
+		}
 	}
 done:
 	return rc;
@@ -5308,6 +5318,8 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 	if (nflags & MDB_APPEND) {
 		mn.mc_ki[mn.mc_top] = 0;
 		sepkey = *newkey;
+		nkeys = 0;
+		split_indx = 0;
 		goto newsep;
 	}
 

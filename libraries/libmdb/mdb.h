@@ -195,6 +195,8 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
 #define MDB_RESERVE	0x10000
 /** Data is being appended, don't split full pages. */
 #define MDB_APPEND	0x20000
+/** Store multiple data items in one call. */
+#define MDB_MULTIPLE	0x40000
 /*	@} */
 
 /** @brief Cursor Get operations.
