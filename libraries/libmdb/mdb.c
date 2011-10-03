@@ -4700,6 +4700,20 @@ mdb_cursor_close(MDB_cursor *mc)
 	}
 }
 
+MDB_txn *
+mdb_cursor_txn(MDB_cursor *mc)
+{
+	if (!mc) return NULL;
+	return mc->mc_txn;
+}
+
+MDB_dbi
+mdb_cursor_dbi(MDB_cursor *mc)
+{
+	if (!mc) return 0;
+	return mc->mc_dbi;
+}
+
 /** Replace the key for a node with a new key.
  * @param[in] mp The page containing the node to operate on.
  * @param[in] indx The index of the node to operate on.

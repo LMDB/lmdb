@@ -846,6 +846,18 @@ int  mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **cursor);
 	 */
 void mdb_cursor_close(MDB_cursor *cursor);
 
+	/** @brief Return the cursor's transaction handle.
+	 *
+	 * @param[in] cursor A cursor handle returned by #mdb_cursor_open()
+	 */
+MDB_txn *mdb_cursor_txn(MDB_cursor *cursor);
+
+	/** @brief Return the cursor's database handle.
+	 *
+	 * @param[in] cursor A cursor handle returned by #mdb_cursor_open()
+	 */
+MDB_dbi mdb_cursor_dbi(MDB_cursor *cursor);
+
 	/** @brief Retrieve by cursor.
 	 *
 	 * This function retrieves key/data pairs from the database. The address and length
