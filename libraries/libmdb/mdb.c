@@ -4062,7 +4062,10 @@ current:
 		/* same size, just replace it */
 		if (!F_ISSET(leaf->mn_flags, F_BIGDATA) &&
 			NODEDSZ(leaf) == data->mv_size) {
-			memcpy(NODEDATA(leaf), data->mv_data, data->mv_size);
+			if (F_ISSET(flags, MDB_RESERVE))
+				data->mv_data = NODEDATA(leaf);
+			else
+				memcpy(NODEDATA(leaf), data->mv_data, data->mv_size);
 			goto done;
 		}
 		mdb_node_del(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], 0);
