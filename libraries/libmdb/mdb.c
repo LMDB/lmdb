@@ -4082,6 +4082,8 @@ new_sub:
 	nflags = flags & NODE_ADD_FLAGS;
 	nsize = IS_LEAF2(mc->mc_pg[mc->mc_top]) ? key->mv_size : mdb_leaf_size(mc->mc_txn->mt_env, key, rdata);
 	if (SIZELEFT(mc->mc_pg[mc->mc_top]) < nsize) {
+		if (( flags & (F_DUPDATA|F_SUBDATA)) == F_DUPDATA )
+			nflags &= ~MDB_APPEND;
 		rc = mdb_page_split(mc, key, rdata, P_INVALID, nflags);
 	} else {
 		/* There is room already in this leaf page. */
