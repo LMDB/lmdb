@@ -5520,10 +5520,6 @@ newsep:
 		rc = mdb_node_add(mc, j, &rkey, rdata, pgno, flags);
 	}
 
-	/* reset back to original page */
-	if (newindx < split_indx)
-		mc->mc_pg[mc->mc_top] = mp;
-
 	nkeys = NUMKEYS(copy);
 	for (i=0; i<nkeys; i++)
 		mp->mp_ptrs[i] = copy->mp_ptrs[i];
@@ -5531,6 +5527,16 @@ newsep:
 	mp->mp_upper = copy->mp_upper;
 	memcpy(NODEPTR(mp, nkeys-1), NODEPTR(copy, nkeys-1),
 		mc->mc_txn->mt_env->me_psize - copy->mp_upper);
+
+	/* reset back to original page */
+	if (newindx < split_indx) {
+		mc->mc_pg[mc->mc_top] = mp;
+		if (nflags & MDB_RESERVE) {
+			node = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
+			if (!(node->mn_flags & F_BIGDATA))
+				newdata->mv_data = NODEDATA(node);
+		}
+	}
 
 	/* return tmp page to freelist */
 	copy->mp_next = mc->mc_txn->mt_env->me_dpages;
