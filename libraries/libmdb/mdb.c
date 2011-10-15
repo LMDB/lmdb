@@ -74,6 +74,10 @@
 #define BIG_ENDIAN	__BIG_ENDIAN
 #endif
 
+#if defined(__i386) || defined(__x86_64)
+#define MISALIGNED_OK	1
+#endif
+
 #include "mdb.h"
 #include "midl.h"
 
@@ -122,6 +126,9 @@
 #define UNLOCK_MUTEX_W(env)	sem_post((env)->me_wmutex)
 #define fdatasync(fd)	fsync(fd)
 #else
+#ifdef ANDROID
+#define fdatasync(fd)	fsync(fd)
+#endif
 	/** Lock the reader mutex.
 	 */
 #define LOCK_MUTEX_R(env)	pthread_mutex_lock(&(env)->me_txns->mti_mutex)
@@ -3996,7 +4003,18 @@ more:
 				fp = NODEDATA(leaf);
 				if (flags == MDB_CURRENT) {
 					fp->mp_flags |= P_DIRTY;
+#ifdef MISALIGNED_OK
 					fp->mp_pgno = mc->mc_pg[mc->mc_top]->mp_pgno;
+#else
+					{
+						unsigned short *src, *dst;
+						int i;
+						dst = (unsigned short *)&fp->mp_pgno;
+						src = (unsigned short *)&mc->mc_pg[mc->mc_top]->mp_pgno;
+						for (i=0; i<sizeof(fp->mp_pgno)/sizeof(unsigned short); i++)
+							*dst++ = *src++;
+					}
+#endif
 					mc->mc_xcursor->mx_cursor.mc_pg[0] = fp;
 					flags |= F_DUPDATA;
 					goto put_sub;
@@ -4603,7 +4621,18 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
 		mx->mx_db.md_leaf_pages = 1;
 		mx->mx_db.md_overflow_pages = 0;
 		mx->mx_db.md_entries = NUMKEYS(fp);
+#ifdef MISALIGNED_OK
 		mx->mx_db.md_root = fp->mp_pgno;
+#else
+		{
+			unsigned short *src, *dst;
+			int i;
+			dst = (unsigned short *)&mx->mx_db.md_root;
+			src = (unsigned short *)&fp->mp_pgno;
+			for (i=0; i<sizeof(fp->mp_pgno)/sizeof(unsigned short); i++)
+				*dst++ = *src++;
+		}
+#endif
 		mx->mx_cursor.mc_snum = 1;
 		mx->mx_cursor.mc_flags = C_INITIALIZED|C_SUB;
 		mx->mx_cursor.mc_top = 0;
