@@ -300,7 +300,7 @@ typedef ID	txnid_t;
 #define	DKEY(x)	mdb_dkey(x, kbuf)
 #else
 #define	DKBUF	typedef int dummy_kbuf	/* so we can put ';' after */
-#define DKEY(x)
+#define DKEY(x)	0
 #endif
 
 /**	@defgroup lazylock	Lazy Locking
