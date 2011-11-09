@@ -669,6 +669,30 @@ typedef struct MDB_node {
 	/** The size of a key in a node */
 #define NODEKSZ(node)	 ((node)->mn_ksize)
 
+	/** Copy a page number from src to dst */
+#ifdef MISALIGNED_OK
+#define COPY_PGNO(dst,src)	dst = src
+#else
+#if SIZE_MAX > 4294967295UL
+#define COPY_PGNO(dst,src)	do { \
+	unsigned short *s, *d;	\
+	s = (unsigned short *)&(src);	\
+	d = (unsigned short *)&(dst);	\
+	*d++ = *s++;	\
+	*d++ = *s++;	\
+	*d++ = *s++;	\
+	*d = *s;	\
+} while (0)
+#else
+#define COPY_PGNO(dst,src)	do { \
+	unsigned short *s, *d;	\
+	s = (unsigned short *)&(src);	\
+	d = (unsigned short *)&(dst);	\
+	*d++ = *s++;	\
+	*d = *s;	\
+} while (0)
+#endif
+#endif
 	/** The address of a key in a LEAF2 page.
 	 *	LEAF2 pages are used for #MDB_DUPFIXED sorted-duplicate sub-DBs.
 	 *	There are no node headers, keys are stored contiguously.
@@ -4015,18 +4039,7 @@ more:
 				fp = NODEDATA(leaf);
 				if (flags == MDB_CURRENT) {
 					fp->mp_flags |= P_DIRTY;
-#ifdef MISALIGNED_OK
-					fp->mp_pgno = mc->mc_pg[mc->mc_top]->mp_pgno;
-#else
-					{
-						unsigned short *src, *dst;
-						int i;
-						dst = (unsigned short *)&fp->mp_pgno;
-						src = (unsigned short *)&mc->mc_pg[mc->mc_top]->mp_pgno;
-						for (i=0; i<sizeof(fp->mp_pgno)/sizeof(unsigned short); i++)
-							*dst++ = *src++;
-					}
-#endif
+					COPY_PGNO(fp->mp_pgno, mc->mc_pg[mc->mc_top]->mp_pgno);
 					mc->mc_xcursor->mx_cursor.mc_pg[0] = fp;
 					flags |= F_DUPDATA;
 					goto put_sub;
@@ -4566,7 +4579,7 @@ mdb_node_shrink(MDB_page *mp, indx_t indx)
 	xp->mp_lower = sp->mp_lower;
 	xp->mp_flags = sp->mp_flags;
 	xp->mp_pad = sp->mp_pad;
-	xp->mp_pgno = mp->mp_pgno;
+	COPY_PGNO(xp->mp_pgno, mp->mp_pgno);
 
 	/* shift lower nodes upward */
 	ptr = mp->mp_ptrs[indx];
@@ -4633,18 +4646,7 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
 		mx->mx_db.md_leaf_pages = 1;
 		mx->mx_db.md_overflow_pages = 0;
 		mx->mx_db.md_entries = NUMKEYS(fp);
-#ifdef MISALIGNED_OK
-		mx->mx_db.md_root = fp->mp_pgno;
-#else
-		{
-			unsigned short *src, *dst;
-			int i;
-			dst = (unsigned short *)&mx->mx_db.md_root;
-			src = (unsigned short *)&fp->mp_pgno;
-			for (i=0; i<sizeof(fp->mp_pgno)/sizeof(unsigned short); i++)
-				*dst++ = *src++;
-		}
-#endif
+		COPY_PGNO(mx->mx_db.md_root, fp->mp_pgno);
 		mx->mx_cursor.mc_snum = 1;
 		mx->mx_cursor.mc_flags = C_INITIALIZED|C_SUB;
 		mx->mx_cursor.mc_top = 0;
