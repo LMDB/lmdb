@@ -255,7 +255,7 @@ typedef ID	txnid_t;
 	 *	pressure from other processes is high. So until OSs have
 	 *	actual paging support for Huge pages, they're not viable.
 	 */
-#define PAGESIZE	 4096
+#define MDB_PAGESIZE	 4096
 
 	/** The minimum number of keys required in a database page.
 	 *	Setting this to a larger value will place a smaller bound on the
@@ -283,7 +283,7 @@ typedef ID	txnid_t;
 	/**	The maximum size of a key in the database.
 	 *	While data items have essentially unbounded size, we require that
 	 *	keys all fit onto a regular page. This limit could be raised a bit
-	 *	further if needed; to something just under #PAGESIZE / #MDB_MINKEYS.
+	 *	further if needed; to something just under #MDB_PAGESIZE / #MDB_MINKEYS.
 	 */
 #define MAXKEYSIZE	 511
 
@@ -1898,7 +1898,7 @@ mdb_txn_commit(MDB_txn *txn)
 			DPRINTF("committing page %zu", dp->mp_pgno);
 			iov[n].iov_len = env->me_psize;
 			if (IS_OVERFLOW(dp)) iov[n].iov_len *= dp->mp_pages;
-			iov[n].iov_base = dp;
+			iov[n].iov_base = (char *)dp;
 			size += iov[n].iov_len;
 			next = dp->mp_pgno + (IS_OVERFLOW(dp) ? dp->mp_pages : 1);
 			/* clear dirty flag */
@@ -1985,7 +1985,7 @@ done:
 static int
 mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 {
-	char		 page[PAGESIZE];
+	char		 page[MDB_PAGESIZE];
 	MDB_page	*p;
 	MDB_meta	*m;
 	int		 rc, err;
@@ -1994,14 +1994,14 @@ mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 	 */
 
 #ifdef _WIN32
-	if (!ReadFile(env->me_fd, page, PAGESIZE, (DWORD *)&rc, NULL) || rc == 0)
+	if (!ReadFile(env->me_fd, page, MDB_PAGESIZE, (DWORD *)&rc, NULL) || rc == 0)
 #else
-	if ((rc = read(env->me_fd, page, PAGESIZE)) == 0)
+	if ((rc = read(env->me_fd, page, MDB_PAGESIZE)) == 0)
 #endif
 	{
 		return ENOENT;
 	}
-	else if (rc != PAGESIZE) {
+	else if (rc != MDB_PAGESIZE) {
 		err = ErrCode();
 		if (rc > 0)
 			err = EINVAL;
@@ -2576,7 +2576,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		}
 	}
 #else
-	env->me_txns = mmap(0, rsize, PROT_READ|PROT_WRITE, MAP_SHARED,
+	env->me_txns = (MDB_txninfo *)mmap(0, rsize, PROT_READ|PROT_WRITE, MAP_SHARED,
 		env->me_lfd, 0);
 	if (env->me_txns == MAP_FAILED) {
 		rc = ErrCode();
@@ -2842,7 +2842,7 @@ mdb_env_close(MDB_env *env)
 		for (i=0; i<env->me_txns->mti_numreaders; i++)
 			if (env->me_txns->mti_readers[i].mr_pid == pid)
 				env->me_txns->mti_readers[i].mr_pid = 0;
-		munmap(env->me_txns, (env->me_maxreaders-1)*sizeof(MDB_reader)+sizeof(MDB_txninfo));
+		munmap((void *)env->me_txns, (env->me_maxreaders-1)*sizeof(MDB_reader)+sizeof(MDB_txninfo));
 	}
 	close(env->me_lfd);
 	mdb_midl_free(env->me_free_pgs);
@@ -3922,7 +3922,7 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	unsigned int mcount = 0;
 	size_t nsize;
 	int rc, rc2;
-	char pbuf[PAGESIZE];
+	char pbuf[MDB_PAGESIZE];
 	char dbuf[MAXKEYSIZE+1];
 	unsigned int nflags;
 	DKBUF;
@@ -4003,7 +4003,15 @@ more:
 
 				dkey.mv_size = NODEDSZ(leaf);
 				dkey.mv_data = NODEDATA(leaf);
-				/* data matches, ignore it */
+#if UINT_MAX > SIZE_MAX
+				if (mc->mc_dbx->md_dcmp == mdb_cmp_int && dkey.mv_size == sizeof(size_t))
+#ifdef MISALIGNED_OK
+					mc->mc_dbx->md_dcmp = mdb_cmp_long;
+#else
+					mc->mc_dbx->md_dcmp = mdb_cmp_cint;
+#endif
+#endif
+				/* if data matches, ignore it */
 				if (!mc->mc_dbx->md_dcmp(data, &dkey))
 					return (flags == MDB_NODUPDATA) ? MDB_KEYEXIST : MDB_SUCCESS;
 
@@ -4665,8 +4673,14 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
 		DB_DIRTY : 0;
 	mx->mx_dbx.md_name.mv_data = NODEKEY(node);
 	mx->mx_dbx.md_name.mv_size = node->mn_ksize;
+#if UINT_MAX > SIZE_MAX
 	if (mx->mx_dbx.md_cmp == mdb_cmp_int && mx->mx_db.md_pad == sizeof(size_t))
+#ifdef MISALIGNED_OK
 		mx->mx_dbx.md_cmp = mdb_cmp_long;
+#else
+		mx->mx_dbx.md_cmp = mdb_cmp_cint;
+#endif
+#endif
 }
 
 /** Initialize a cursor for a given transaction and database. */
