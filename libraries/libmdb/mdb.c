@@ -65,8 +65,20 @@
 #endif
 
 #ifndef BYTE_ORDER
-#define BYTE_ORDER	__BYTE_ORDER
+# if (defined(_LITTLE_ENDIAN) || defined(_BIG_ENDIAN)) && !(defined(_LITTLE_ENDIAN) && defined(_BIG_ENDIAN))
+/* Solaris just defines one or the other */
+#  define LITTLE_ENDIAN	1234
+#  define BIG_ENDIAN	4321
+#  ifdef _LITTLE_ENDIAN
+#   define BYTE_ORDER  LITTLE_ENDIAN
+#  else
+#   define BYTE_ORDER  BIG_ENDIAN
+#  endif
+# else
+#  define BYTE_ORDER   __BYTE_ORDER
+# endif
 #endif
+
 #ifndef LITTLE_ENDIAN
 #define LITTLE_ENDIAN	__LITTLE_ENDIAN
 #endif
