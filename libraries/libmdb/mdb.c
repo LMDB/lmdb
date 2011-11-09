@@ -5910,8 +5910,7 @@ int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)
 
 	rc = mdb_drop0(mc, mc->mc_db->md_flags & MDB_DUPSORT);
 	if (rc)
-		mdb_cursor_close(mc);
-		return rc;
+		goto leave;
 
 	/* Can't delete the main DB */
 	if (del && dbi > MAIN_DBI) {
@@ -5927,6 +5926,7 @@ int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)
 		txn->mt_dbs[dbi].md_entries = 0;
 		txn->mt_dbs[dbi].md_root = P_INVALID;
 	}
+leave:
 	mdb_cursor_close(mc);
 	return rc;
 }
