@@ -4003,7 +4003,7 @@ more:
 
 				dkey.mv_size = NODEDSZ(leaf);
 				dkey.mv_data = NODEDATA(leaf);
-#if UINT_MAX > SIZE_MAX
+#if UINT_MAX < SIZE_MAX
 				if (mc->mc_dbx->md_dcmp == mdb_cmp_int && dkey.mv_size == sizeof(size_t))
 #ifdef MISALIGNED_OK
 					mc->mc_dbx->md_dcmp = mdb_cmp_long;
@@ -4673,7 +4673,7 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
 		DB_DIRTY : 0;
 	mx->mx_dbx.md_name.mv_data = NODEKEY(node);
 	mx->mx_dbx.md_name.mv_size = node->mn_ksize;
-#if UINT_MAX > SIZE_MAX
+#if UINT_MAX < SIZE_MAX
 	if (mx->mx_dbx.md_cmp == mdb_cmp_int && mx->mx_db.md_pad == sizeof(size_t))
 #ifdef MISALIGNED_OK
 		mx->mx_dbx.md_cmp = mdb_cmp_long;
