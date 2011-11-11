@@ -202,6 +202,13 @@
 #endif
 #endif
 
+/** Function for flushing the data of a file. Define this to fsync
+ *	if fdatasync() is not supported.
+ */
+#ifndef MDB_FDATASYNC
+# define MDB_FDATASYNC	fdatasync
+#endif
+
 	/** A page number in the database.
 	 *	Note that 64 bit page numbers are overkill, since pages themselves
 	 *	already represent 12-13 bits of addressable memory, and the OS will
@@ -1283,7 +1290,7 @@ mdb_env_sync(MDB_env *env, int force)
 {
 	int rc = 0;
 	if (force || !F_ISSET(env->me_flags, MDB_NOSYNC)) {
-		if (fdatasync(env->me_fd))
+		if (MDB_FDATASYNC(env->me_fd))
 			rc = ErrCode();
 	}
 	return rc;
