@@ -227,17 +227,17 @@ typedef ID	txnid_t;
 /** @defgroup debug	Debug Macros
  *	@{
  */
-#ifndef DEBUG
+#ifndef MDB_DEBUG
 	/**	Enable debug output.
 	 *	Set this to 1 for copious tracing. Set to 2 to add dumps of all IDLs
 	 *	read from and written to the database (used for free space management).
 	 */
-#define DEBUG 0
+#define MDB_DEBUG 0
 #endif
 
 #if !(__STDC_VERSION__ >= 199901L || defined(__GNUC__))
 # define DPRINTF	(void)	/* Vararg macros may be unsupported */
-#elif DEBUG
+#elif MDB_DEBUG
 	/**	Print a debug message with printf formatting. */
 # define DPRINTF(fmt, ...)	/**< Requires 2 or more args */ \
 	fprintf(stderr, "%s:%d " fmt "\n", __func__, __LINE__, __VA_ARGS__)
@@ -294,7 +294,7 @@ typedef ID	txnid_t;
 	 */
 #define MAXKEYSIZE	 511
 
-#if DEBUG
+#if MDB_DEBUG
 	/**	A key buffer.
 	 *	@ingroup debug
 	 *	This is used for printing a hex dump of a key's contents.
@@ -1020,7 +1020,7 @@ mdb_strerror(int err)
 	return strerror(err);
 }
 
-#if DEBUG
+#if MDB_DEBUG
 /** Display a key in hexadecimal and return the address of the result.
  * @param[in] key the key to display
  * @param[in] buf the buffer to write into. Should always be #DKBUF.
@@ -1133,7 +1133,7 @@ mdb_page_alloc(MDB_cursor *mc, int num)
 				txn->mt_env->me_pghead = mop;
 				memcpy(mop->mo_pages, idl, MDB_IDL_SIZEOF(idl));
 
-#if DEBUG > 1
+#if MDB_DEBUG > 1
 				{
 					unsigned int i;
 					DPRINTF("IDL read txn %zu root %zu num %zu",
@@ -1777,7 +1777,7 @@ mdb_txn_commit(MDB_txn *txn)
 		mdb_page_search(&mc, &key, 1);
 
 		mdb_midl_sort(txn->mt_free_pgs);
-#if DEBUG > 1
+#if MDB_DEBUG > 1
 		{
 			unsigned int i;
 			ID *idl = txn->mt_free_pgs;
@@ -3004,7 +3004,7 @@ mdb_node_search(MDB_cursor *mc, MDB_val *key, int *exactp)
 			nodekey.mv_data = NODEKEY(node);
 
 			rc = cmp(key, &nodekey);
-#if DEBUG
+#if MDB_DEBUG
 			if (IS_LEAF(mp))
 				DPRINTF("found leaf index %u [%s], rc = %i",
 				    i, DKEY(&nodekey), rc);
