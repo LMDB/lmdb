@@ -2959,9 +2959,15 @@ mdb_node_search(MDB_cursor *mc, MDB_val *key, int *exactp)
 
 	nkeys = NUMKEYS(mp);
 
+#if DEBUG
+	{
+	pgno_t pgno;
+	COPY_PGNO(pgno, mp->mp_pgno);
 	DPRINTF("searching %u keys in %s %spage %zu",
 	    nkeys, IS_LEAF(mp) ? "leaf" : "branch", IS_SUBP(mp) ? "sub-" : "",
-	    mp->mp_pgno);
+	    pgno);
+	}
+#endif
 
 	assert(nkeys > 0);
 
@@ -4515,8 +4521,14 @@ mdb_node_del(MDB_page *mp, indx_t indx, int ksize)
 	MDB_node	*node;
 	char		*base;
 
+#if DEBUG
+	{
+	pgno_t pgno;
+	COPY_PGNO(pgno, mp->mp_pgno);
 	DPRINTF("delete node %u on %s page %zu", indx,
-	    IS_LEAF(mp) ? "leaf" : "branch", mp->mp_pgno);
+	    IS_LEAF(mp) ? "leaf" : "branch", pgno);
+	}
+#endif
 	assert(indx < NUMKEYS(mp));
 
 	if (IS_LEAF2(mp)) {
@@ -5111,13 +5123,23 @@ mdb_rebalance(MDB_cursor *mc)
 	unsigned int ptop;
 	MDB_cursor	mn;
 
+#if DEBUG
+	{
+	pgno_t pgno;
+	COPY_PGNO(pgno, mc->mc_pg[mc->mc_top]->mp_pgno);
 	DPRINTF("rebalancing %s page %zu (has %u keys, %.1f%% full)",
 	    IS_LEAF(mc->mc_pg[mc->mc_top]) ? "leaf" : "branch",
-	    mc->mc_pg[mc->mc_top]->mp_pgno, NUMKEYS(mc->mc_pg[mc->mc_top]), (float)PAGEFILL(mc->mc_txn->mt_env, mc->mc_pg[mc->mc_top]) / 10);
+	    pgno, NUMKEYS(mc->mc_pg[mc->mc_top]), (float)PAGEFILL(mc->mc_txn->mt_env, mc->mc_pg[mc->mc_top]) / 10);
+	}
+#endif
 
 	if (PAGEFILL(mc->mc_txn->mt_env, mc->mc_pg[mc->mc_top]) >= FILL_THRESHOLD) {
+#if DEBUG
+		pgno_t pgno;
+		COPY_PGNO(pgno, mc->mc_pg[mc->mc_top]->mp_pgno);
 		DPRINTF("no need to rebalance page %zu, above fill threshold",
-		    mc->mc_pg[mc->mc_top]->mp_pgno);
+		    pgno);
+#endif
 		return MDB_SUCCESS;
 	}
 
