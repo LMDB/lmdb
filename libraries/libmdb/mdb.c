@@ -2959,7 +2959,7 @@ mdb_node_search(MDB_cursor *mc, MDB_val *key, int *exactp)
 
 	nkeys = NUMKEYS(mp);
 
-#if DEBUG
+#if MDB_DEBUG
 	{
 	pgno_t pgno;
 	COPY_PGNO(pgno, mp->mp_pgno);
@@ -4521,7 +4521,7 @@ mdb_node_del(MDB_page *mp, indx_t indx, int ksize)
 	MDB_node	*node;
 	char		*base;
 
-#if DEBUG
+#if MDB_DEBUG
 	{
 	pgno_t pgno;
 	COPY_PGNO(pgno, mp->mp_pgno);
@@ -5123,7 +5123,7 @@ mdb_rebalance(MDB_cursor *mc)
 	unsigned int ptop;
 	MDB_cursor	mn;
 
-#if DEBUG
+#if MDB_DEBUG
 	{
 	pgno_t pgno;
 	COPY_PGNO(pgno, mc->mc_pg[mc->mc_top]->mp_pgno);
@@ -5134,7 +5134,7 @@ mdb_rebalance(MDB_cursor *mc)
 #endif
 
 	if (PAGEFILL(mc->mc_txn->mt_env, mc->mc_pg[mc->mc_top]) >= FILL_THRESHOLD) {
-#if DEBUG
+#if MDB_DEBUG
 		pgno_t pgno;
 		COPY_PGNO(pgno, mc->mc_pg[mc->mc_top]->mp_pgno);
 		DPRINTF("no need to rebalance page %zu, above fill threshold",
