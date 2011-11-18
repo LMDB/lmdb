@@ -3,6 +3,7 @@ W	= -W -Wall -Wno-unused-parameter -Wbad-function-cast
 OPT = -O2 -g
 CFLAGS	= -pthread $(OPT) $(W) $(XCFLAGS)
 LDLIBS	=
+SOLIBS	=
 
 PROGS	= mdb_stat mtest mtest2 mtest3 mtest4 mtest5
 all:	libmdb.a libmdb.so $(PROGS)
@@ -18,7 +19,7 @@ libmdb.a:	mdb.o midl.o
 	ar rs $@ mdb.o midl.o
 
 libmdb.so:	mdb.o midl.o
-	gcc -shared -o $@ mdb.o midl.o
+	gcc -shared -o $@ mdb.o midl.o $(SOLIBS)
 
 mdb_stat: mdb_stat.o libmdb.a
 mtest:    mtest.o    libmdb.a
