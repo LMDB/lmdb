@@ -4342,7 +4342,7 @@ mdb_leaf_size(MDB_env *env, MDB_val *key, MDB_val *data)
 	size_t		 sz;
 
 	sz = LEAFSIZE(key, data);
-	if (data->mv_size >= env->me_psize / MDB_MINKEYS) {
+	if (sz >= env->me_psize / MDB_MINKEYS) {
 		/* put on overflow page */
 		sz -= data->mv_size - sizeof(pgno_t);
 	}
@@ -4435,11 +4435,11 @@ mdb_node_add(MDB_cursor *mc, indx_t indx,
 		if (F_ISSET(flags, F_BIGDATA)) {
 			/* Data already on overflow page. */
 			node_size += sizeof(pgno_t);
-		} else if (data->mv_size >= mc->mc_txn->mt_env->me_psize / MDB_MINKEYS) {
+		} else if (node_size + data->mv_size >= mc->mc_txn->mt_env->me_psize / MDB_MINKEYS) {
 			int ovpages = OVPAGES(data->mv_size, mc->mc_txn->mt_env->me_psize);
 			/* Put data on overflow page. */
-			DPRINTF("data size is %zu, put on overflow page",
-			    data->mv_size);
+			DPRINTF("data size is %zu, node would be %zu, put data on overflow page",
+			    data->mv_size, node_size+data->mv_size);
 			node_size += sizeof(pgno_t);
 			if ((ofp = mdb_page_new(mc, P_OVERFLOW, ovpages)) == NULL)
 				return ENOMEM;
