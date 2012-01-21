@@ -1737,8 +1737,10 @@ mdb_txn_commit(MDB_txn *txn)
 		}
 		x = dst[0].mid;
 		for (; y<=src[0].mid; y++) {
-			if (++x >= MDB_IDL_UM_MAX)
+			if (++x >= MDB_IDL_UM_MAX) {
+				mdb_txn_abort(txn);
 				return ENOMEM;
+			}
 			dst[x] = src[y];
 		}
 		dst[0].mid = x;
