@@ -64,6 +64,21 @@
 #endif
 #endif
 
+#ifdef USE_VALGRIND
+#include <valgrind/memcheck.h>
+#define VGMEMP_CREATE(h,r,z)    VALGRIND_CREATE_MEMPOOL(h,r,z)
+#define VGMEMP_ALLOC(h,a,s) VALGRIND_MEMPOOL_ALLOC(h,a,s)
+#define VGMEMP_FREE(h,a) VALGRIND_MEMPOOL_FREE(h,a)
+#define VGMEMP_DESTROY(h)	VALGRIND_DESTROY_MEMPOOL(h)
+#define VGMEMP_DEFINED(a,s)	VALGRIND_MAKE_MEM_DEFINED(a,s)
+#else
+#define VGMEMP_CREATE(h,r,z)
+#define VGMEMP_ALLOC(h,a,s)
+#define VGMEMP_FREE(h,a)
+#define VGMEMP_DESTROY(h)
+#define VGMEMP_DEFINED(a,s)
+#endif
+
 #ifndef BYTE_ORDER
 # if (defined(_LITTLE_ENDIAN) || defined(_BIG_ENDIAN)) && !(defined(_LITTLE_ENDIAN) && defined(_BIG_ENDIAN))
 /* Solaris just defines one or the other */
@@ -1068,11 +1083,15 @@ mdb_dcmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b)
 static MDB_page *
 mdb_page_malloc(MDB_cursor *mc) {
 	MDB_page *ret;
+	size_t sz = mc->mc_txn->mt_env->me_psize;
 	if (mc->mc_txn->mt_env->me_dpages) {
 		ret = mc->mc_txn->mt_env->me_dpages;
+		VGMEMP_ALLOC(mc->mc_txn->mt_env, ret, sz);
+		VGMEMP_DEFINED(ret, sizeof(ret->mp_next));
 		mc->mc_txn->mt_env->me_dpages = ret->mp_next;
 	} else {
-		ret = malloc(mc->mc_txn->mt_env->me_psize);
+		ret = malloc(sz);
+		VGMEMP_ALLOC(mc->mc_txn->mt_env, ret, sz);
 	}
 	return ret;
 }
@@ -1184,10 +1203,14 @@ mdb_page_alloc(MDB_cursor *mc, int num)
 	}
 	if (txn->mt_env->me_dpages && num == 1) {
 		np = txn->mt_env->me_dpages;
+		VGMEMP_ALLOC(txn->mt_env, np, txn->mt_env->me_psize);
+		VGMEMP_DEFINED(np, sizeof(np->mp_next));
 		txn->mt_env->me_dpages = np->mp_next;
 	} else {
-		if ((np = malloc(txn->mt_env->me_psize * num )) == NULL)
+		size_t sz = txn->mt_env->me_psize * num;
+		if ((np = malloc(sz)) == NULL)
 			return NULL;
+		VGMEMP_ALLOC(txn->mt_env, np, sz);
 	}
 	if (pgno == P_INVALID) {
 		np->mp_pgno = txn->mt_next_pgno;
@@ -1590,9 +1613,11 @@ mdb_txn_reset0(MDB_txn *txn)
 			dp = txn->mt_u.dirty_list[i].mptr;
 			if (!IS_OVERFLOW(dp) || dp->mp_pages == 1) {
 				dp->mp_next = txn->mt_env->me_dpages;
+				VGMEMP_FREE(txn->mt_env, dp);
 				txn->mt_env->me_dpages = dp;
 			} else {
 				/* large pages just get freed directly */
+				VGMEMP_FREE(txn->mt_env, dp);
 				free(dp);
 			}
 		}
@@ -1943,8 +1968,10 @@ mdb_txn_commit(MDB_txn *txn)
 		dp = txn->mt_u.dirty_list[i].mptr;
 		if (!IS_OVERFLOW(dp) || dp->mp_pages == 1) {
 			dp->mp_next = txn->mt_env->me_dpages;
+			VGMEMP_FREE(txn->mt_env, dp);
 			txn->mt_env->me_dpages = dp;
 		} else {
+			VGMEMP_FREE(txn->mt_env, dp);
 			free(dp);
 		}
 		txn->mt_u.dirty_list[i].mid = 0;
@@ -2221,6 +2248,7 @@ mdb_env_create(MDB_env **env)
 	e->me_fd = INVALID_HANDLE_VALUE;
 	e->me_lfd = INVALID_HANDLE_VALUE;
 	e->me_mfd = INVALID_HANDLE_VALUE;
+	VGMEMP_CREATE(e,0,0);
 	*env = e;
 	return MDB_SUCCESS;
 }
@@ -2827,8 +2855,10 @@ mdb_env_close(MDB_env *env)
 	if (env == NULL)
 		return;
 
+	VGMEMP_DESTROY(env);
 	while (env->me_dpages) {
 		dp = env->me_dpages;
+		VALGRIND_MAKE_MEM_DEFINED(&dp->mp_next, sizeof(dp->mp_next));
 		env->me_dpages = dp->mp_next;
 		free(dp);
 	}
@@ -5635,6 +5665,7 @@ newsep:
 
 	/* return tmp page to freelist */
 	copy->mp_next = mc->mc_txn->mt_env->me_dpages;
+	VGMEMP_FREE(mc->mc_txn->mt_env, copy);
 	mc->mc_txn->mt_env->me_dpages = copy;
 done:
 	{
