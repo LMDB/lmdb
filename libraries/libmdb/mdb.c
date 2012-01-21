@@ -5585,6 +5585,8 @@ newsep:
 			ins_new = 1;
 
 			/* Update page and index for the new key. */
+			if (!newindx)
+				mc->mc_pg[mc->mc_top] = copy;
 			mc->mc_ki[mc->mc_top] = j;
 		} else if (i == nkeys) {
 			break;
@@ -5620,7 +5622,7 @@ newsep:
 		mc->mc_txn->mt_env->me_psize - copy->mp_upper);
 
 	/* reset back to original page */
-	if (newindx < split_indx) {
+	if (!newindx || (newindx < split_indx)) {
 		mc->mc_pg[mc->mc_top] = mp;
 		if (nflags & MDB_RESERVE) {
 			node = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
