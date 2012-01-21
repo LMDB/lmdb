@@ -1234,6 +1234,7 @@ finish:
 			for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
 				if (m2 == mc) continue;
 				m3 = &m2->mc_xcursor->mx_cursor;
+				if (m3->mc_snum < mc->mc_snum) continue;
 				if (m3->mc_pg[mc->mc_top] == mc->mc_pg[mc->mc_top]) {
 					m3->mc_pg[mc->mc_top] = mp;
 				}
@@ -1242,7 +1243,7 @@ finish:
 			MDB_cursor *m2;
 
 			for (m2 = mc->mc_txn->mt_cursors[mc->mc_dbi]; m2; m2=m2->mc_next) {
-				if (m2 == mc) continue;
+				if (m2 == mc || m2->mc_snum < mc->mc_snum) continue;
 				if (m2->mc_pg[mc->mc_top] == mc->mc_pg[mc->mc_top]) {
 					m2->mc_pg[mc->mc_top] = mp;
 				}
@@ -4167,7 +4168,7 @@ new_sub:
 					m3 = &m2->mc_xcursor->mx_cursor;
 				else
 					m3 = m2;
-				if (m3 == mc) continue;
+				if (m3 == mc || m3->mc_snum < mc->mc_snum) continue;
 				if (m3->mc_pg[i] == mp && m3->mc_ki[i] >= mc->mc_ki[i]) {
 					m3->mc_ki[i]++;
 				}
@@ -4208,7 +4209,7 @@ put_sub:
 					MDB_page *mp = mc->mc_pg[i];
 
 					for (m2 = mc->mc_txn->mt_cursors[mc->mc_dbi]; m2; m2=m2->mc_next) {
-						if (m2 == mc) continue;
+						if (m2 == mc || m2->mc_snum < mc->mc_snum) continue;
 						if (m2->mc_pg[i] == mp && m2->mc_ki[i] == mc->mc_ki[i]) {
 							mdb_xcursor_init1(m2, leaf);
 						}
@@ -4713,6 +4714,7 @@ mdb_cursor_init(MDB_cursor *mc, MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx)
 	mc->mc_dbx = &txn->mt_dbxs[dbi];
 	mc->mc_dbflag = &txn->mt_dbflags[dbi];
 	mc->mc_snum = 0;
+	mc->mc_top = 0;
 	mc->mc_flags = 0;
 	if (txn->mt_dbs[dbi].md_flags & MDB_DUPSORT) {
 		assert(mx != NULL);
@@ -5076,6 +5078,7 @@ mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst)
 				m3 = &m2->mc_xcursor->mx_cursor;
 			else
 				m3 = m2;
+			if (m3->mc_snum < csrc->mc_snum) continue;
 			if (m3->mc_pg[csrc->mc_top] == csrc->mc_pg[csrc->mc_top]) {
 				m3->mc_pg[csrc->mc_top] = mp;
 				m3->mc_ki[csrc->mc_top] += nkeys;
@@ -5167,6 +5170,7 @@ mdb_rebalance(MDB_cursor *mc)
 						m3 = &m2->mc_xcursor->mx_cursor;
 					else
 						m3 = m2;
+					if (m3->mc_snum < mc->mc_snum) continue;
 					if (m3->mc_pg[0] == mp) {
 						m3->mc_snum = 0;
 						m3->mc_top = 0;
@@ -5196,6 +5200,7 @@ mdb_rebalance(MDB_cursor *mc)
 						m3 = &m2->mc_xcursor->mx_cursor;
 					else
 						m3 = m2;
+					if (m3->mc_snum < mc->mc_snum) continue;
 					if (m3->mc_pg[0] == mp) {
 						m3->mc_pg[0] = mc->mc_pg[0];
 					}
