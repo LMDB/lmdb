@@ -2858,7 +2858,7 @@ mdb_env_close(MDB_env *env)
 	VGMEMP_DESTROY(env);
 	while (env->me_dpages) {
 		dp = env->me_dpages;
-		VALGRIND_MAKE_MEM_DEFINED(&dp->mp_next, sizeof(dp->mp_next));
+		VGMEMP_DEFINED(&dp->mp_next, sizeof(dp->mp_next));
 		env->me_dpages = dp->mp_next;
 		free(dp);
 	}
