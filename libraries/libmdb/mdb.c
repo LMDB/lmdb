@@ -57,6 +57,10 @@
 #include <time.h>
 #include <unistd.h>
 
+#if !(defined(BYTE_ORDER) || defined(__BYTE_ORDER))
+#include <resolv.h>	/* defines BYTE_ORDER on HPUX and Solaris */
+#endif
+
 #ifndef _WIN32
 #include <pthread.h>
 #ifdef __APPLE__
