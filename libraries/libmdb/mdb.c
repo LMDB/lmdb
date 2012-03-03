@@ -947,6 +947,10 @@ struct MDB_env {
 };
 	/** max number of pages to commit in one writev() call */
 #define MDB_COMMIT_PAGES	 64
+#if defined(IOV_MAX) && IOV_MAX < MDB_COMMIT_PAGES
+#undef MDB_COMMIT_PAGES
+#define MDB_COMMIT_PAGES	IOV_MAX
+#endif
 
 static MDB_page *mdb_page_alloc(MDB_cursor *mc, int num);
 static MDB_page *mdb_page_new(MDB_cursor *mc, uint32_t flags, int num);
