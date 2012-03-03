@@ -4701,8 +4701,7 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
 	MDB_xcursor *mx = mc->mc_xcursor;
 
 	if (node->mn_flags & F_SUBDATA) {
-		MDB_db *db = NODEDATA(node);
-		mx->mx_db = *db;
+		memcpy(&mx->mx_db, NODEDATA(node), sizeof(MDB_db));
 		mx->mx_cursor.mc_snum = 0;
 		mx->mx_cursor.mc_flags = C_SUB;
 	} else {
