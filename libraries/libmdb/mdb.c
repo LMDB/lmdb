@@ -4992,7 +4992,7 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 		rc = mdb_update_key(cdst->mc_pg[cdst->mc_top], 0, &bkey);
 	}
 
-	XPRINTF("moving %s node %u [%s] on page %zu to node %u on page %zu",
+	DPRINTF("moving %s node %u [%s] on page %zu to node %u on page %zu",
 	    IS_LEAF(csrc->mc_pg[csrc->mc_top]) ? "leaf" : "branch",
 	    csrc->mc_ki[csrc->mc_top],
 		DKEY(&key),
