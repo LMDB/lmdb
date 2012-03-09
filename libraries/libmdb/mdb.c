@@ -202,6 +202,8 @@
 
 #if defined(_WIN32) || defined(__APPLE__)
 #define MNAME_LEN	32
+#else
+#define MNAME_LEN	(sizeof(pthread_mutex_t))
 #endif
 
 /** @} */
@@ -543,7 +545,7 @@ typedef struct MDB_txninfo {
 		pthread_mutex_t	mt2_wmutex;
 #define mti_wmutex	mt2.mt2_wmutex
 #endif
-		char pad[(sizeof(pthread_mutex_t)+CACHELINE-1) & ~(CACHELINE-1)];
+		char pad[(MNAME_LEN+CACHELINE-1) & ~(CACHELINE-1)];
 	} mt2;
 	MDB_reader	mti_readers[1];
 } MDB_txninfo;
