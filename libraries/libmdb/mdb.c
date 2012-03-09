@@ -1126,13 +1126,11 @@ static MDB_page *
 mdb_page_malloc(MDB_cursor *mc) {
 	MDB_page *ret;
 	size_t sz = mc->mc_txn->mt_env->me_psize;
-	if (mc->mc_txn->mt_env->me_dpages) {
-		ret = mc->mc_txn->mt_env->me_dpages;
+	if ((ret = mc->mc_txn->mt_env->me_dpages) != NULL) {
 		VGMEMP_ALLOC(mc->mc_txn->mt_env, ret, sz);
 		VGMEMP_DEFINED(ret, sizeof(ret->mp_next));
 		mc->mc_txn->mt_env->me_dpages = ret->mp_next;
-	} else {
-		ret = malloc(sz);
+	} else if ((ret = malloc(sz)) != NULL) {
 		VGMEMP_ALLOC(mc->mc_txn->mt_env, ret, sz);
 	}
 	return ret;
