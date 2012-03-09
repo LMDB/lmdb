@@ -4245,7 +4245,6 @@ new_sub:
 		 * DB are all zero size.
 		 */
 		if (do_sub) {
-			MDB_db *db;
 			int xflags;
 put_sub:
 			xdata.mv_size = 0;
@@ -4279,7 +4278,7 @@ put_sub:
 			xflags |= (flags & MDB_APPEND);
 			rc = mdb_cursor_put(&mc->mc_xcursor->mx_cursor, data, &xdata, xflags);
 			if (flags & F_SUBDATA) {
-				db = NODEDATA(leaf);
+				void *db = NODEDATA(leaf);
 				memcpy(db, &mc->mc_xcursor->mx_db, sizeof(MDB_db));
 			}
 		}
@@ -4329,7 +4328,7 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 			if (mc->mc_xcursor->mx_db.md_entries) {
 				if (leaf->mn_flags & F_SUBDATA) {
 					/* update subDB info */
-					MDB_db *db = NODEDATA(leaf);
+					void *db = NODEDATA(leaf);
 					memcpy(db, &mc->mc_xcursor->mx_db, sizeof(MDB_db));
 				} else {
 					/* shrink fake page */
