@@ -36,8 +36,7 @@
  *	@{
  */
 	/** A generic ID number. These were entryIDs in back-bdb.
-	 *	It should be the largest integer type supported on a machine.
-	 *	It should be equal to the size of a pointer.
+	 *	Preferably it should have the same size as a pointer.
 	 */
 typedef size_t ID;
 
