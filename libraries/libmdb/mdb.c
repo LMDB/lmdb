@@ -2389,8 +2389,10 @@ mdb_env_open2(MDB_env *env, unsigned int flags)
 		i |= MAP_FIXED;
 	env->me_map = mmap(meta.mm_address, env->me_mapsize, PROT_READ, i,
 		env->me_fd, 0);
-	if (env->me_map == MAP_FAILED)
+	if (env->me_map == MAP_FAILED) {
+		env->me_map = NULL;
 		return ErrCode();
+	}
 #endif
 
 	if (newenv) {
@@ -2639,8 +2641,8 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		size = rsize - sizeof(MDB_txninfo);
 		env->me_maxreaders = size/sizeof(MDB_reader) + 1;
 	}
-#ifdef _WIN32
 	{
+#ifdef _WIN32
 		HANDLE mh;
 		mh = CreateFileMapping(env->me_lfd, NULL, PAGE_READWRITE,
 			0, 0, NULL);
@@ -2654,15 +2656,17 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 			rc = ErrCode();
 			goto fail;
 		}
-	}
 #else
-	env->me_txns = (MDB_txninfo *)mmap(0, rsize, PROT_READ|PROT_WRITE, MAP_SHARED,
-		env->me_lfd, 0);
-	if (env->me_txns == MAP_FAILED) {
-		rc = ErrCode();
-		goto fail;
-	}
+		void *m = mmap(NULL, rsize, PROT_READ|PROT_WRITE, MAP_SHARED,
+			env->me_lfd, 0);
+		if (m == MAP_FAILED) {
+			env->me_txns = NULL;
+			rc = ErrCode();
+			goto fail;
+		}
+		env->me_txns = m;
 #endif
+	}
 	if (*excl) {
 #ifdef _WIN32
 		char hexbuf[17];
