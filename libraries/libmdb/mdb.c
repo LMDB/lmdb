@@ -764,6 +764,20 @@ typedef struct MDB_meta {
 	txnid_t		mm_txnid;			/**< txnid that committed this page */
 } MDB_meta;
 
+	/** Buffer for a stack-allocated dirty page.
+	 *	The members define size and alignment, and silence type
+	 *	aliasing warnings.  They are not used directly; that could
+	 *	mean incorrectly using several union members in parallel.
+	 */
+typedef union MDB_pagebuf {
+	char		mb_raw[MDB_PAGESIZE];
+	MDB_page	mb_page;
+	struct {
+		char		mm_pad[PAGEHDRSZ];
+		MDB_meta	mm_meta;
+	} mb_metabuf;
+} MDB_pagebuf;
+
 	/** Auxiliary DB info.
 	 *	The information here is mostly static/read-only. There is
 	 *	only a single copy of this record in the environment.
@@ -2050,7 +2064,7 @@ done:
 static int
 mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 {
-	char		 page[MDB_PAGESIZE];
+	MDB_pagebuf	pbuf;
 	MDB_page	*p;
 	MDB_meta	*m;
 	int		 rc, err;
@@ -2059,9 +2073,9 @@ mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 	 */
 
 #ifdef _WIN32
-	if (!ReadFile(env->me_fd, page, MDB_PAGESIZE, (DWORD *)&rc, NULL) || rc == 0)
+	if (!ReadFile(env->me_fd, &pbuf, MDB_PAGESIZE, (DWORD *)&rc, NULL) || rc == 0)
 #else
-	if ((rc = read(env->me_fd, page, MDB_PAGESIZE)) == 0)
+	if ((rc = read(env->me_fd, &pbuf, MDB_PAGESIZE)) == 0)
 #endif
 	{
 		return ENOENT;
@@ -2074,7 +2088,7 @@ mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 		return err;
 	}
 
-	p = (MDB_page *)page;
+	p = (MDB_page *)&pbuf;
 
 	if (!F_ISSET(p->mp_flags, P_META)) {
 		DPRINTF("page %zu not a meta page", p->mp_pgno);
@@ -3996,7 +4010,7 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	unsigned int mcount = 0;
 	size_t nsize;
 	int rc, rc2;
-	char pbuf[MDB_PAGESIZE];
+	MDB_pagebuf pbuf;
 	char dbuf[MAXKEYSIZE+1];
 	unsigned int nflags;
 	DKBUF;
@@ -4092,7 +4106,7 @@ more:
 				/* create a fake page for the dup items */
 				memcpy(dbuf, dkey.mv_data, dkey.mv_size);
 				dkey.mv_data = dbuf;
-				fp = (MDB_page *)pbuf;
+				fp = (MDB_page *)&pbuf;
 				fp->mp_pgno = mc->mc_pg[mc->mc_top]->mp_pgno;
 				fp->mp_flags = P_LEAF|P_DIRTY|P_SUBP;
 				fp->mp_lower = PAGEHDRSZ;
@@ -4108,7 +4122,7 @@ more:
 				do_sub = 1;
 				rdata = &xdata;
 				xdata.mv_size = fp->mp_upper;
-				xdata.mv_data = pbuf;
+				xdata.mv_data = fp;
 				flags |= F_DUPDATA;
 				goto new_sub;
 			}
@@ -4161,8 +4175,8 @@ more:
 					/* no, just grow it */
 					rdata = &xdata;
 					xdata.mv_size = NODEDSZ(leaf) + offset;
-					xdata.mv_data = pbuf;
-					mp = (MDB_page *)pbuf;
+					xdata.mv_data = &pbuf;
+					mp = (MDB_page *)&pbuf;
 					mp->mp_pgno = mc->mc_pg[mc->mc_top]->mp_pgno;
 					flags |= F_DUPDATA;
 				}
