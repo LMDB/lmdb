@@ -5399,6 +5399,7 @@ mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
 
 		memcpy(&pg, NODEDATA(leaf), sizeof(pg));
 		ovpages = OVPAGES(NODEDSZ(leaf), mc->mc_txn->mt_env->me_psize);
+		mc->mc_db->md_overflow_pages -= ovpages;
 		for (i=0; i<ovpages; i++) {
 			DPRINTF("freed ov page %zu", pg);
 			mdb_midl_append(&mc->mc_txn->mt_free_pgs, pg);
