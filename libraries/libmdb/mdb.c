@@ -5665,7 +5665,10 @@ newsep:
 	if (nflags & MDB_APPEND) {
 		mc->mc_pg[mc->mc_top] = rp;
 		mc->mc_ki[mc->mc_top] = 0;
-		return mdb_node_add(mc, 0, newkey, newdata, newpgno, nflags);
+		rc = mdb_node_add(mc, 0, newkey, newdata, newpgno, nflags);
+		if (rc)
+			return rc;
+		goto done;
 	}
 	if (IS_LEAF2(rp)) {
 		goto done;
@@ -5772,10 +5775,11 @@ done:
 			if (!(m3->mc_flags & C_INITIALIZED))
 				continue;
 			if (new_root) {
+				int k;
 				/* root split */
-				for (i=m3->mc_top; i>0; i--) {
-					m3->mc_ki[i+1] = m3->mc_ki[i];
-					m3->mc_pg[i+1] = m3->mc_pg[i];
+				for (k=m3->mc_top; k>=0; k--) {
+					m3->mc_ki[k+1] = m3->mc_ki[k];
+					m3->mc_pg[k+1] = m3->mc_pg[k];
 				}
 				m3->mc_ki[0] = mc->mc_ki[0];
 				m3->mc_pg[0] = mc->mc_pg[0];
