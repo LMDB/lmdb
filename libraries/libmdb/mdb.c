@@ -941,6 +941,8 @@ struct MDB_env {
 	unsigned int	me_psize;	/**< size of a page, from #GET_PAGESIZE */
 	unsigned int	me_db_toggle;	/**< which DB table is current */
 	txnid_t		me_wtxnid;		/**< ID of last txn we committed */
+	txnid_t		me_pgfirst;		/**< ID of first old page record we used */
+	txnid_t		me_pglast;		/**< ID of last old page record we used */
 	MDB_dbx		*me_dbxs;		/**< array of static DB info */
 	MDB_db		*me_dbs[2];		/**< two arrays of MDB_db info */
 	MDB_oldpages *me_pghead;	/**< list of old page records */
@@ -1157,17 +1159,32 @@ mdb_page_alloc(MDB_cursor *mc, int num)
 
 	if (txn->mt_txnid > 2) {
 
-		if (!txn->mt_env->me_pghead && mc->mc_dbi != FREE_DBI &&
+		if (!txn->mt_env->me_pghead &&
 			txn->mt_dbs[FREE_DBI].md_root != P_INVALID) {
 			/* See if there's anything in the free DB */
 			MDB_cursor m2;
 			MDB_node *leaf;
-			txnid_t *kptr, oldest;
+			MDB_val data;
+			txnid_t *kptr, oldest, last;
 
 			mdb_cursor_init(&m2, txn, FREE_DBI, NULL);
-			mdb_page_search(&m2, NULL, 0);
-			leaf = NODEPTR(m2.mc_pg[m2.mc_top], 0);
-			kptr = (txnid_t *)NODEKEY(leaf);
+			if (!txn->mt_env->me_pgfirst) {
+				mdb_page_search(&m2, NULL, 0);
+				leaf = NODEPTR(m2.mc_pg[m2.mc_top], 0);
+				kptr = (txnid_t *)NODEKEY(leaf);
+				last = *kptr;
+			} else {
+				MDB_val key;
+				int rc, exact = 0;
+				last = txn->mt_env->me_pglast + 1;
+				leaf = NULL;
+				key.mv_data = &last;
+				key.mv_size = sizeof(last);
+				rc = mdb_cursor_set(&m2, &key, &data, MDB_SET, &exact);
+				if (rc)
+					goto none;
+				last = *(txnid_t *)key.mv_data;
+			}
 
 			{
 				unsigned int i;
@@ -1179,18 +1196,22 @@ mdb_page_alloc(MDB_cursor *mc, int num)
 				}
 			}
 
-			if (oldest > *kptr) {
+			if (oldest > last) {
 				/* It's usable, grab it.
 				 */
 				MDB_oldpages *mop;
-				MDB_val data;
 				pgno_t *idl;
 
-				mdb_node_read(txn, leaf, &data);
+				if (!txn->mt_env->me_pgfirst) {
+					mdb_node_read(txn, leaf, &data);
+				}
 				idl = (ID *) data.mv_data;
 				mop = malloc(sizeof(MDB_oldpages) + MDB_IDL_SIZEOF(idl) - sizeof(pgno_t));
 				mop->mo_next = txn->mt_env->me_pghead;
-				mop->mo_txnid = *kptr;
+				mop->mo_txnid = last;
+				txn->mt_env->me_pglast = last;
+				if (!txn->mt_env->me_pgfirst)
+					txn->mt_env->me_pgfirst = last;
 				txn->mt_env->me_pghead = mop;
 				memcpy(mop->mo_pages, idl, MDB_IDL_SIZEOF(idl));
 
@@ -1204,12 +1225,12 @@ mdb_page_alloc(MDB_cursor *mc, int num)
 					}
 				}
 #endif
-				/* drop this IDL from the DB */
-				m2.mc_ki[m2.mc_top] = 0;
-				m2.mc_flags = C_INITIALIZED;
-				mdb_cursor_del(&m2, 0);
+				if (mop->mo_txnid == 87869 && txn->mt_txnid == 87879) {
+					int i=1;
+				}
 			}
 		}
+none:
 		if (txn->mt_env->me_pghead) {
 			MDB_oldpages *mop = txn->mt_env->me_pghead;
 			if (num > 1) {
@@ -1678,6 +1699,8 @@ mdb_txn_reset0(MDB_txn *txn)
 			txn->mt_env->me_pghead = mop->mo_next;
 			free(mop);
 		}
+		txn->mt_env->me_pgfirst = 0;
+		txn->mt_env->me_pglast = 0;
 
 		env->me_txn = NULL;
 		/* The writer mutex was locked in mdb_txn_begin. */
@@ -1836,6 +1859,24 @@ mdb_txn_commit(MDB_txn *txn)
 		/* make sure first page of freeDB is touched and on freelist */
 		mdb_page_search(&mc, NULL, 1);
 	}
+
+	/* Delete IDLs we used from the free list */
+	if (env->me_pgfirst) {
+		txnid_t cur;
+		MDB_val key;
+		int exact = 0;
+
+		key.mv_size = sizeof(cur);
+		for (cur = env->me_pgfirst; cur <= env->me_pglast; cur++) {
+			key.mv_data = &cur;
+
+			mdb_cursor_set(&mc, &key, NULL, MDB_SET, &exact);
+			mdb_cursor_del(&mc, 0);
+		}
+		env->me_pgfirst = 0;
+		env->me_pglast = 0;
+	}
+
 	/* save to free list */
 	if (!MDB_IDL_IS_ZERO(txn->mt_free_pgs)) {
 		MDB_val key, data;
@@ -1882,14 +1923,24 @@ mdb_txn_commit(MDB_txn *txn)
 	if (env->me_pghead) {
 		MDB_val key, data;
 		MDB_oldpages *mop;
+		pgno_t orig;
 
 		mop = env->me_pghead;
-		env->me_pghead = NULL;
 		key.mv_size = sizeof(pgno_t);
 		key.mv_data = &mop->mo_txnid;
 		data.mv_size = MDB_IDL_SIZEOF(mop->mo_pages);
 		data.mv_data = mop->mo_pages;
+		orig = mop->mo_pages[0];
 		mdb_cursor_put(&mc, &key, &data, 0);
+		/* could have been used again here */
+		if (mop->mo_pages[0] != orig) {
+			data.mv_size = MDB_IDL_SIZEOF(mop->mo_pages);
+			data.mv_data = mop->mo_pages;
+			mdb_cursor_put(&mc, &key, &data, 0);
+			env->me_pgfirst = 0;
+			env->me_pglast = 0;
+		}
+		env->me_pghead = NULL;
 		free(mop);
 	}
 
