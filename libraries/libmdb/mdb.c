@@ -4829,6 +4829,7 @@ mdb_xcursor_init0(MDB_cursor *mc)
 	mx->mx_cursor.mc_dbi = mc->mc_dbi+1;
 	mx->mx_cursor.mc_dbflag = &mx->mx_dbflag;
 	mx->mx_cursor.mc_snum = 0;
+	mx->mx_cursor.mc_top = 0;
 	mx->mx_cursor.mc_flags = C_SUB;
 	mx->mx_dbx.md_cmp = mc->mc_dbx->md_dcmp;
 	mx->mx_dbx.md_dcmp = NULL;
