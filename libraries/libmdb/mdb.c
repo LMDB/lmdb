@@ -4232,6 +4232,7 @@ more:
 						(dkey.mv_size & 1) + (data->mv_size & 1);
 				}
 				mdb_node_del(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], 0);
+				mc->mc_db->md_entries--;
 				do_sub = 1;
 				rdata = &xdata;
 				xdata.mv_size = fp->mp_upper;
@@ -4306,6 +4307,7 @@ more:
 						mp->mp_ptrs[i] = fp->mp_ptrs[i] + offset;
 				}
 				mdb_node_del(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], 0);
+				mc->mc_db->md_entries--;
 				do_sub = 1;
 				goto new_sub;
 			}
@@ -4324,6 +4326,7 @@ current:
 			goto done;
 		}
 		mdb_node_del(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], 0);
+		mc->mc_db->md_entries--;
 	} else {
 		DPRINTF("inserting key at index %i", mc->mc_ki[mc->mc_top]);
 	}
