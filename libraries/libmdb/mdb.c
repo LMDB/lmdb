@@ -1924,6 +1924,7 @@ mdb_txn_commit(MDB_txn *txn)
 	}
 
 	/* save to free list */
+free2:
 	freecnt = txn->mt_free_pgs[0];
 	if (!MDB_IDL_IS_ZERO(txn->mt_free_pgs)) {
 		MDB_val key, data;
@@ -1962,8 +1963,6 @@ mdb_txn_commit(MDB_txn *txn)
 				return rc;
 			}
 		} while (freecnt != txn->mt_free_pgs[0]);
-		if (mdb_midl_shrink(&txn->mt_free_pgs))
-			env->me_free_pgs = txn->mt_free_pgs;
 	}
 	/* should only be one record now */
 again:
@@ -1980,6 +1979,9 @@ again:
 		data.mv_size = MDB_IDL_SIZEOF(mop->mo_pages);
 		data.mv_data = mop->mo_pages;
 		orig = mop->mo_pages[0];
+		/* These steps may grow the freelist again
+		 * due to freed overflow pages...
+		 */
 		mdb_cursor_put(&mc, &key, &data, 0);
 		if (mop == env->me_pghead) {
 			/* could have been used again here */
@@ -1999,6 +2001,14 @@ again:
 		}
 		env->me_pgfirst = 0;
 		env->me_pglast = 0;
+	}
+	/* Check for growth of freelist again */
+	if (freecnt != txn->mt_free_pgs[0])
+		goto free2;
+
+	if (!MDB_IDL_IS_ZERO(txn->mt_free_pgs)) {
+		if (mdb_midl_shrink(&txn->mt_free_pgs))
+			env->me_free_pgs = txn->mt_free_pgs;
 	}
 
 	/* Update DB root pointers. Their pages have already been
@@ -4314,9 +4324,42 @@ more:
 			goto put_sub;
 		}
 current:
-		/* same size, just replace it */
-		if (!F_ISSET(leaf->mn_flags, F_BIGDATA) &&
-			NODEDSZ(leaf) == data->mv_size) {
+		/* overflow page overwrites need special handling */
+		if (F_ISSET(leaf->mn_flags, F_BIGDATA)) {
+			MDB_page *omp;
+			pgno_t pg;
+			int ovpages, dpages;
+
+			ovpages = OVPAGES(NODEDSZ(leaf), mc->mc_txn->mt_env->me_psize);
+			dpages = OVPAGES(data->mv_size, mc->mc_txn->mt_env->me_psize);
+			memcpy(&pg, NODEDATA(leaf), sizeof(pg));
+			mdb_page_get(mc->mc_txn, pg, &omp);
+			/* Is the ov page writable and large enough? */
+			if ((omp->mp_flags & P_DIRTY) && ovpages >= dpages) {
+				/* yes, overwrite it. Note in this case we don't
+				 * bother to try shrinking the node if the new data
+				 * is smaller than the overflow threshold.
+				 */
+				if (F_ISSET(flags, MDB_RESERVE))
+					data->mv_data = METADATA(omp);
+				else
+					memcpy(METADATA(omp), data->mv_data, data->mv_size);
+				goto done;
+			} else {
+				/* no, free ovpages */
+				int i;
+				mc->mc_db->md_overflow_pages -= ovpages;
+				for (i=0; i<ovpages; i++) {
+					DPRINTF("freed ov page %zu", pg);
+					mdb_midl_append(&mc->mc_txn->mt_free_pgs, pg);
+					pg++;
+				}
+			}
+		} else if (NODEDSZ(leaf) == data->mv_size) {
+			/* same size, just replace it. Note that we could
+			 * also reuse this node if the new data is smaller,
+			 * but instead we opt to shrink the node in that case.
+			 */
 			if (F_ISSET(flags, MDB_RESERVE))
 				data->mv_data = NODEDATA(leaf);
 			else
