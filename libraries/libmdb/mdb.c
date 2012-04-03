@@ -5054,11 +5054,11 @@ mdb_cursor_dbi(MDB_cursor *mc)
 static int
 mdb_update_key(MDB_page *mp, indx_t indx, MDB_val *key)
 {
-	indx_t			 ptr, i, numkeys;
-	int			 delta;
-	size_t			 len;
 	MDB_node		*node;
 	char			*base;
+	size_t			 len;
+	int			 delta;
+	indx_t			 ptr, i, numkeys;
 	DKBUF;
 
 	node = NODEPTR(mp, indx);
@@ -5078,6 +5078,7 @@ mdb_update_key(MDB_page *mp, indx_t indx, MDB_val *key)
 #endif
 
 	delta = key->mv_size - node->mn_ksize;
+	delta += (delta & 1);
 	if (delta) {
 		if (delta > 0 && SIZELEFT(mp) < delta) {
 			DPRINTF("OUCH! Not enough room, delta = %d", delta);
