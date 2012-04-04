@@ -5057,7 +5057,7 @@ mdb_update_key(MDB_page *mp, indx_t indx, MDB_val *key)
 	MDB_node		*node;
 	char			*base;
 	size_t			 len;
-	int			 delta;
+	int			 delta, delta0;
 	indx_t			 ptr, i, numkeys;
 	DKBUF;
 
@@ -5077,7 +5077,11 @@ mdb_update_key(MDB_page *mp, indx_t indx, MDB_val *key)
 	}
 #endif
 
-	delta = key->mv_size - node->mn_ksize;
+	delta0 = delta = key->mv_size - node->mn_ksize;
+
+	/* Must be 2-byte aligned. If new key is
+	 * shorter by 1, the shift will be skipped.
+	 */
 	delta += (delta & 1);
 	if (delta) {
 		if (delta > 0 && SIZELEFT(mp) < delta) {
@@ -5097,8 +5101,11 @@ mdb_update_key(MDB_page *mp, indx_t indx, MDB_val *key)
 		mp->mp_upper -= delta;
 
 		node = NODEPTR(mp, indx);
-		node->mn_ksize = key->mv_size;
 	}
+
+	/* But even if no shift was needed, update ksize */
+	if (delta0)
+		node->mn_ksize = key->mv_size;
 
 	if (key->mv_size)
 		memcpy(NODEKEY(node), key->mv_data, key->mv_size);
