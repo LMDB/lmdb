@@ -5638,7 +5638,7 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 	unsigned int nflags)
 {
 	unsigned int flags;
-	int		 rc = MDB_SUCCESS, ins_new = 0, new_root = 0;
+	int		 rc = MDB_SUCCESS, ins_new = 0, new_root = 0, newpos = 1;
 	indx_t		 newindx;
 	pgno_t		 pgno = 0;
 	unsigned int	 i, j, split_indx, nkeys, pmax;
@@ -5751,15 +5751,22 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 	}
 
 	/* For leaf pages, check the split point based on what
-	 * fits where, since otherwise add_node can fail.
+	 * fits where, since otherwise mdb_node_add can fail.
+	 *
+	 * This check is only needed when the data items are
+	 * relatively large, such that being off by one will
+	 * make the difference between success or failure.
+	 * When the size of the data items is much smaller than
+	 * one-half of a page, this check is irrelevant.
 	 */
-	if (IS_LEAF(mp)) {
+	if (IS_LEAF(mp) && nkeys < 4) {
 		unsigned int psize, nsize;
 		/* Maximum free space in an empty page */
 		pmax = mc->mc_txn->mt_env->me_psize - PAGEHDRSZ;
 		nsize = mdb_leaf_size(mc->mc_txn->mt_env, newkey, newdata);
-		if (newindx < split_indx) {
+		if (newindx <= split_indx) {
 			psize = nsize;
+			newpos = 0;
 			for (i=0; i<split_indx; i++) {
 				node = NODEPTR(mp, i);
 				psize += NODESIZE + NODEKSZ(node) + sizeof(indx_t);
@@ -5769,7 +5776,10 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 					psize += NODEDSZ(node);
 				psize += psize & 1;
 				if (psize > pmax) {
-					split_indx = i;
+					if (i == split_indx - 1 && newindx == split_indx)
+						newpos = 1;
+					else
+						split_indx = i;
 					break;
 				}
 			}
@@ -5792,8 +5802,11 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 	}
 
 	/* First find the separating key between the split pages.
+	 * The case where newindx == split_indx is ambiguous; the
+	 * new item could go to the new page or stay on the original
+	 * page. If newpos == 1 it goes to the new page.
 	 */
-	if (newindx == split_indx) {
+	if (newindx == split_indx && newpos) {
 		sepkey.mv_size = newkey->mv_size;
 		sepkey.mv_data = newkey->mv_data;
 	} else {
@@ -5856,8 +5869,10 @@ newsep:
 		if (i == split_indx) {
 		/* Insert in right sibling. */
 		/* Reset insert index for right sibling. */
-			j = (i == newindx && ins_new);
-			mc->mc_pg[mc->mc_top] = rp;
+			if (i != newindx || (newpos ^ ins_new)) {
+				j = 0;
+				mc->mc_pg[mc->mc_top] = rp;
+			}
 		}
 
 		if (i == newindx && !ins_new) {
@@ -5872,9 +5887,7 @@ newsep:
 
 			ins_new = 1;
 
-			/* Update page and index for the new key. */
-			if (!newindx)
-				mc->mc_pg[mc->mc_top] = copy;
+			/* Update index for the new key. */
 			mc->mc_ki[mc->mc_top] = j;
 		} else if (i == nkeys) {
 			break;
@@ -5910,7 +5923,7 @@ newsep:
 		mc->mc_txn->mt_env->me_psize - copy->mp_upper);
 
 	/* reset back to original page */
-	if (!newindx || (newindx < split_indx)) {
+	if (newindx < split_indx || (!newpos && newindx == split_indx)) {
 		mc->mc_pg[mc->mc_top] = mp;
 		if (nflags & MDB_RESERVE) {
 			node = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
