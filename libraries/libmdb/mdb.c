@@ -5711,7 +5711,7 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 	}
 
 	nkeys = NUMKEYS(mp);
-	split_indx = nkeys / 2 + 1;
+	split_indx = (nkeys + 1) / 2;
 
 	if (IS_LEAF2(rp)) {
 		char *split, *ins;
@@ -5765,7 +5765,7 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 	 * When the size of the data items is much smaller than
 	 * one-half of a page, this check is irrelevant.
 	 */
-	if (IS_LEAF(mp) && nkeys < 4) {
+	if (IS_LEAF(mp) && nkeys < 16) {
 		unsigned int psize, nsize;
 		/* Maximum free space in an empty page */
 		pmax = mc->mc_txn->mt_env->me_psize - PAGEHDRSZ;
