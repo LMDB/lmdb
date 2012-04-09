@@ -6277,6 +6277,9 @@ int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)
 	if (!txn || !dbi || dbi >= txn->mt_numdbs)
 		return EINVAL;
 
+	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY))
+		return EACCES;
+
 	rc = mdb_cursor_open(txn, dbi, &mc);
 	if (rc)
 		return rc;

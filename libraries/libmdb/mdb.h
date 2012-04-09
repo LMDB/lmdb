@@ -490,8 +490,8 @@ int  mdb_env_set_maxdbs(MDB_env *env, MDB_dbi dbs);
 	/** @brief Create a transaction for use with the environment.
 	 *
 	 * The transaction handle may be discarded using #mdb_txn_abort() or #mdb_txn_commit().
-	 * @note Transactions may not span threads, a transaction must only be used by a
-	 * single thread.
+	 * @note Transactions may not span threads; a transaction must only be used by a
+	 * single thread. Also, a thread may only have a single transaction.
 	 * @note Cursors may not span transactions; each cursor must be opened and closed
 	 * within a single transaction.
 	 * @param[in] env An environment handle returned by #mdb_env_create()
@@ -579,7 +579,7 @@ int  mdb_txn_renew(MDB_txn *txn);
 	/** @brief Open a database in the environment.
 	 *
 	 * The database handle may be discarded by calling #mdb_close(). Only
-	 * one thread should call this function; it is not mutex-protected in
+	 * one thread at a time may call this function; it is not mutex-protected in
 	 * a read-only transaction.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] name The name of the database to open. If only a single
