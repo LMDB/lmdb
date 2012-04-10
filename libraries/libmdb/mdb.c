@@ -1989,7 +1989,7 @@ again:
 		 * due to freed overflow pages...
 		 */
 		mdb_cursor_put(&mc, &key, &data, 0);
-		if (mop == env->me_pghead) {
+		if (mop == env->me_pghead && env->me_pghead->mo_txnid == id) {
 			/* could have been used again here */
 			if (mop->mo_pages[0] != orig) {
 				data.mv_size = MDB_IDL_SIZEOF(mop->mo_pages);
