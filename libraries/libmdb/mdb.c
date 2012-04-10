@@ -259,9 +259,12 @@ typedef ID	txnid_t;
 #if !(__STDC_VERSION__ >= 199901L || defined(__GNUC__))
 # define DPRINTF	(void)	/* Vararg macros may be unsupported */
 #elif MDB_DEBUG
+static int mdb_debug;
+static int mdb_debug_start;
+
 	/**	Print a debug message with printf formatting. */
 # define DPRINTF(fmt, ...)	/**< Requires 2 or more args */ \
-	fprintf(stderr, "%s:%d " fmt "\n", __func__, __LINE__, __VA_ARGS__)
+	if (mdb_debug) fprintf(stderr, "%s:%d " fmt "\n", __func__, __LINE__, __VA_ARGS__)
 #else
 # define DPRINTF(fmt, ...)	((void) 0)
 #endif
@@ -1576,6 +1579,10 @@ mdb_txn_renew0(MDB_txn *txn)
 		if (env->me_wtxnid < txn->mt_txnid)
 			mt_dbflag = DB_STALE;
 		txn->mt_txnid++;
+#if MDB_DEBUG
+		if (txn->mt_txnid == mdb_debug_start)
+			mdb_debug = 1;
+#endif
 		txn->mt_toggle = env->me_txns->mti_me_toggle;
 		txn->mt_u.dirty_list = env->me_dirty_list;
 		txn->mt_u.dirty_list[0].mid = 0;
@@ -5765,43 +5772,45 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 	 * When the size of the data items is much smaller than
 	 * one-half of a page, this check is irrelevant.
 	 */
-	if (IS_LEAF(mp) && nkeys < 16) {
+	if (IS_LEAF(mp)) {
 		unsigned int psize, nsize;
 		/* Maximum free space in an empty page */
 		pmax = mc->mc_txn->mt_env->me_psize - PAGEHDRSZ;
 		nsize = mdb_leaf_size(mc->mc_txn->mt_env, newkey, newdata);
-		if (newindx <= split_indx) {
-			psize = nsize;
-			newpos = 0;
-			for (i=0; i<split_indx; i++) {
-				node = NODEPTR(mp, i);
-				psize += NODESIZE + NODEKSZ(node) + sizeof(indx_t);
-				if (F_ISSET(node->mn_flags, F_BIGDATA))
-					psize += sizeof(pgno_t);
-				else
-					psize += NODEDSZ(node);
-				psize += psize & 1;
-				if (psize > pmax) {
-					if (i == split_indx - 1 && newindx == split_indx)
-						newpos = 1;
+		if ((nkeys < 20) || (nsize > pmax/4)) {
+			if (newindx <= split_indx) {
+				psize = nsize;
+				newpos = 0;
+				for (i=0; i<split_indx; i++) {
+					node = NODEPTR(mp, i);
+					psize += NODESIZE + NODEKSZ(node) + sizeof(indx_t);
+					if (F_ISSET(node->mn_flags, F_BIGDATA))
+						psize += sizeof(pgno_t);
 					else
-						split_indx = i;
-					break;
+						psize += NODEDSZ(node);
+					psize += psize & 1;
+					if (psize > pmax) {
+						if (i == split_indx - 1 && newindx == split_indx)
+							newpos = 1;
+						else
+							split_indx = i;
+						break;
+					}
 				}
-			}
-		} else {
-			psize = nsize;
-			for (i=nkeys-1; i>=split_indx; i--) {
-				node = NODEPTR(mp, i);
-				psize += NODESIZE + NODEKSZ(node) + sizeof(indx_t);
-				if (F_ISSET(node->mn_flags, F_BIGDATA))
-					psize += sizeof(pgno_t);
-				else
-					psize += NODEDSZ(node);
-				psize += psize & 1;
-				if (psize > pmax) {
-					split_indx = i+1;
-					break;
+			} else {
+				psize = nsize;
+				for (i=nkeys-1; i>=split_indx; i--) {
+					node = NODEPTR(mp, i);
+					psize += NODESIZE + NODEKSZ(node) + sizeof(indx_t);
+					if (F_ISSET(node->mn_flags, F_BIGDATA))
+						psize += sizeof(pgno_t);
+					else
+						psize += NODEDSZ(node);
+					psize += psize & 1;
+					if (psize > pmax) {
+						split_indx = i+1;
+						break;
+					}
 				}
 			}
 		}
@@ -5918,6 +5927,7 @@ newsep:
 		}
 
 		rc = mdb_node_add(mc, j, &rkey, rdata, pgno, flags);
+		if (rc) break;
 	}
 
 	nkeys = NUMKEYS(copy);
