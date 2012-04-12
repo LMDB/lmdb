@@ -238,12 +238,12 @@
 	 *	@note In the #MDB_node structure, we only store 48 bits of this value,
 	 *	which thus limits us to only 60 bits of addressable data.
 	 */
-typedef ID	pgno_t;
+typedef MDB_ID	pgno_t;
 
 	/** A transaction ID.
 	 *	See struct MDB_txn.mt_txnid for details.
 	 */
-typedef ID	txnid_t;
+typedef MDB_ID	txnid_t;
 
 /** @defgroup debug	Debug Macros
  *	@{
@@ -819,9 +819,9 @@ struct MDB_txn {
 	MDB_env		*mt_env;		/**< the DB environment */
 	/** The list of pages that became unused during this transaction.
 	 */
-	IDL			mt_free_pgs;
+	MDB_IDL		mt_free_pgs;
 	union {
-		ID2L	dirty_list;	/**< modified pages */
+		MDB_ID2L	dirty_list;	/**< modified pages */
 		MDB_reader	*reader;	/**< this thread's slot in the reader table */
 	} mt_u;
 	/** Array of records for each DB known in the environment. */
@@ -961,9 +961,9 @@ struct MDB_env {
 	pthread_key_t	me_txkey;	/**< thread-key for readers */
 	MDB_page	*me_dpages;		/**< list of malloc'd blocks for re-use */
 	/** IDL of pages that became unused in a write txn */
-	IDL			me_free_pgs;
+	MDB_IDL		me_free_pgs;
 	/** ID2L of pages that were written during a write txn */
-	ID2			me_dirty_list[MDB_IDL_UM_SIZE];
+	MDB_ID2		me_dirty_list[MDB_IDL_UM_SIZE];
 	/** rwlock for the DB tables, if #LAZY_LOCKS is false */
 	LAZY_RWLOCK_DEF(me_dblock)
 #ifdef _WIN32
@@ -1129,14 +1129,14 @@ static void mdb_audit(MDB_txn *txn)
 {
 	MDB_cursor mc;
 	MDB_val key, data;
+	MDB_ID freecount, count;
 	MDB_dbi i;
 	int rc;
-	ID freecount, count;
 
 	freecount = 0;
 	mdb_cursor_init(&mc, txn, FREE_DBI, NULL);
 	while ((rc = mdb_cursor_get(&mc, &key, &data, MDB_NEXT)) == 0)
-		freecount += *(ID *)data.mv_data;
+		freecount += *(MDB_ID *)data.mv_data;
 	freecount += txn->mt_dbs[0].md_branch_pages + txn->mt_dbs[0].md_leaf_pages +
 		txn->mt_dbs[0].md_overflow_pages;
 
@@ -1217,7 +1217,7 @@ mdb_page_alloc(MDB_cursor *mc, int num)
 	MDB_txn *txn = mc->mc_txn;
 	MDB_page *np;
 	pgno_t pgno = P_INVALID;
-	ID2 mid;
+	MDB_ID2 mid;
 
 	if (txn->mt_txnid > 2) {
 
@@ -1272,7 +1272,7 @@ again:
 				txn->mt_env->me_pglast = last;
 				if (!txn->mt_env->me_pgfirst)
 					txn->mt_env->me_pgfirst = last;
-				idl = (ID *) data.mv_data;
+				idl = (MDB_ID *) data.mv_data;
 				/* We might have a zero-length IDL due to freelist growth
 				 * during a prior commit
 				 */
@@ -1410,7 +1410,7 @@ finish:
 			mc->mc_db->md_root = mp->mp_pgno;
 	} else if (mc->mc_txn->mt_parent) {
 		MDB_page *np;
-		ID2 mid;
+		MDB_ID2 mid;
 		/* If txn has a parent, make sure the page is in our
 		 * dirty list.
 		 */
@@ -1679,7 +1679,7 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 			free(txn);
 			return ENOMEM;
 		}
-		txn->mt_u.dirty_list = malloc(sizeof(ID2)*MDB_IDL_UM_SIZE);
+		txn->mt_u.dirty_list = malloc(sizeof(MDB_ID2)*MDB_IDL_UM_SIZE);
 		if (!txn->mt_u.dirty_list) {
 			free(txn->mt_free_pgs);
 			free(txn);
@@ -1866,7 +1866,7 @@ mdb_txn_commit(MDB_txn *txn)
 		MDB_db *ip, *jp;
 		MDB_dbi i;
 		unsigned x, y;
-		ID2L dst, src;
+		MDB_ID2L dst, src;
 
 		/* Update parent's DB table */
 		ip = &txn->mt_parent->mt_dbs[2];
@@ -1961,7 +1961,7 @@ free2:
 #if MDB_DEBUG > 1
 		{
 			unsigned int i;
-			ID *idl = txn->mt_free_pgs;
+			MDB_IDL idl = txn->mt_free_pgs;
 			DPRINTF("IDL write txn %zu root %zu num %zu",
 				txn->mt_txnid, txn->mt_dbs[FREE_DBI].md_root, idl[0]);
 			for (i=0; i<idl[0]; i++) {

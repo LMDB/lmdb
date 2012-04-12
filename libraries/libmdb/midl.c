@@ -31,7 +31,7 @@
 #define CMP(x,y)	 ( (x) < (y) ? -1 : (x) > (y) )
 
 #if 0	/* superseded by append/sort */
-static unsigned mdb_midl_search( IDL ids, ID id )
+static unsigned mdb_midl_search( MDB_IDL ids, MDB_ID id )
 {
 	/*
 	 * binary search of id in ids
@@ -66,7 +66,7 @@ static unsigned mdb_midl_search( IDL ids, ID id )
 	return cursor;
 }
 
-int mdb_midl_insert( IDL ids, ID id )
+int mdb_midl_insert( MDB_IDL ids, MDB_ID id )
 {
 	unsigned x, i;
 
@@ -104,7 +104,7 @@ int mdb_midl_insert( IDL ids, ID id )
 		} else {
 			ids[2] = ids[ids[0]-1];
 		}
-		ids[0] = NOID;
+		ids[0] = MDB_NOID;
 	
 	} else {
 		/* insert id */
@@ -117,23 +117,23 @@ int mdb_midl_insert( IDL ids, ID id )
 }
 #endif
 
-IDL mdb_midl_alloc()
+MDB_IDL mdb_midl_alloc()
 {
-	IDL ids = malloc((MDB_IDL_UM_MAX+1) * sizeof(ID));
+	MDB_IDL ids = malloc((MDB_IDL_UM_MAX+1) * sizeof(MDB_ID));
 	*ids++ = MDB_IDL_UM_MAX;
 	return ids;
 }
 
-void mdb_midl_free(IDL ids)
+void mdb_midl_free(MDB_IDL ids)
 {
 	free(ids-1);
 }
 
-int mdb_midl_shrink( IDL *idp )
+int mdb_midl_shrink( MDB_IDL *idp )
 {
-	IDL ids = *idp;
+	MDB_IDL ids = *idp;
 	if (ids[-1] > MDB_IDL_UM_MAX) {
-		ids = realloc(ids, (MDB_IDL_UM_MAX+1) * sizeof(ID));
+		ids = realloc(ids, (MDB_IDL_UM_MAX+1) * sizeof(MDB_ID));
 		*ids++ = MDB_IDL_UM_MAX;
 		*idp = ids;
 		return 1;
@@ -141,14 +141,14 @@ int mdb_midl_shrink( IDL *idp )
 	return 0;
 }
 
-int mdb_midl_append( IDL *idp, ID id )
+int mdb_midl_append( MDB_IDL *idp, MDB_ID id )
 {
-	IDL ids = *idp;
+	MDB_IDL ids = *idp;
 	/* Too big? */
 	if (ids[0] >= ids[-1]) {
-		IDL idn = ids-1;
+		MDB_IDL idn = ids-1;
 		/* grow it */
-		idn = realloc(idn, (*idn + MDB_IDL_UM_MAX + 1) * sizeof(ID));
+		idn = realloc(idn, (*idn + MDB_IDL_UM_MAX + 1) * sizeof(MDB_ID));
 		if (!idn)
 			return -1;
 		*idn++ += MDB_IDL_UM_MAX;
@@ -160,21 +160,21 @@ int mdb_midl_append( IDL *idp, ID id )
 	return 0;
 }
 
-int mdb_midl_append_list( IDL *idp, IDL app )
+int mdb_midl_append_list( MDB_IDL *idp, MDB_IDL app )
 {
-	IDL ids = *idp;
+	MDB_IDL ids = *idp;
 	/* Too big? */
 	if (ids[0] + app[0] >= ids[-1]) {
-		IDL idn = ids-1;
+		MDB_IDL idn = ids-1;
 		/* grow it */
-		idn = realloc(idn, (*idn + app[-1]) * sizeof(ID));
+		idn = realloc(idn, (*idn + app[-1]) * sizeof(MDB_ID));
 		if (!idn)
 			return -1;
 		*idn++ += app[-1];
 		ids = idn;
 		*idp = ids;
 	}
-	memcpy(&ids[ids[0]+1], &app[1], app[0] * sizeof(ID));
+	memcpy(&ids[ids[0]+1], &app[1], app[0] * sizeof(MDB_ID));
 	ids[0] += app[0];
 	return 0;
 }
@@ -185,12 +185,12 @@ int mdb_midl_append_list( IDL *idp, IDL app )
 #define	SWAP(a,b)	{ itmp=(a); (a)=(b); (b)=itmp; }
 
 void
-mdb_midl_sort( IDL ids )
+mdb_midl_sort( MDB_IDL ids )
 {
 	/* Max possible depth of int-indexed tree * 2 items/level */
 	int istack[sizeof(int)*CHAR_BIT * 2];
 	int i,j,k,l,ir,jstack;
-	ID a, itmp;
+	MDB_ID a, itmp;
 
 	ir = ids[0];
 	l = 1;
@@ -245,7 +245,7 @@ mdb_midl_sort( IDL ids )
 	}
 }
 
-unsigned mdb_mid2l_search( ID2L ids, ID id )
+unsigned mdb_mid2l_search( MDB_ID2L ids, MDB_ID id )
 {
 	/*
 	 * binary search of id in ids
@@ -280,7 +280,7 @@ unsigned mdb_mid2l_search( ID2L ids, ID id )
 	return cursor;
 }
 
-int mdb_mid2l_insert( ID2L ids, ID2 *id )
+int mdb_mid2l_insert( MDB_ID2L ids, MDB_ID2 *id )
 {
 	unsigned x, i;
 
