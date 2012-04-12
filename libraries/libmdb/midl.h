@@ -28,6 +28,10 @@
 
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /** @defgroup internal	MDB Internals
  *	@{
  */
@@ -178,4 +182,7 @@ int mdb_mid2l_insert( ID2L ids, ID2 *id );
 
 /** @} */
 /** @} */
+#ifdef __cplusplus
+}
+#endif
 #endif	/* _MDB_MIDL_H_ */

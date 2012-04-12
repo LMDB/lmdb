@@ -65,6 +65,10 @@
 
 #include <sys/types.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /** @defgroup public Public API
  *	@{
  */
@@ -976,4 +980,8 @@ int  mdb_cmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b);
 	 */
 int  mdb_dcmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b);
 /**	@} */
+
+#ifdef __cplusplus
+}
+#endif
 #endif /* _MDB_H_ */
