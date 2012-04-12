@@ -6117,27 +6117,17 @@ mdb_env_stat(MDB_env *env, MDB_stat *arg)
 static void
 mdb_default_cmp(MDB_txn *txn, MDB_dbi dbi)
 {
-	if (txn->mt_dbs[dbi].md_flags & MDB_REVERSEKEY)
-		txn->mt_dbxs[dbi].md_cmp = mdb_cmp_memnr;
-	else if (txn->mt_dbs[dbi].md_flags & MDB_INTEGERKEY)
-		txn->mt_dbxs[dbi].md_cmp = mdb_cmp_cint;
-	else
-		txn->mt_dbxs[dbi].md_cmp = mdb_cmp_memn;
+	uint16_t f = txn->mt_dbs[dbi].md_flags;
 
-	if (txn->mt_dbs[dbi].md_flags & MDB_DUPSORT) {
-		if (txn->mt_dbs[dbi].md_flags & MDB_INTEGERDUP) {
-			if (txn->mt_dbs[dbi].md_flags & MDB_DUPFIXED)
-				txn->mt_dbxs[dbi].md_dcmp = mdb_cmp_int;
-			else
-				txn->mt_dbxs[dbi].md_dcmp = mdb_cmp_cint;
-		} else if (txn->mt_dbs[dbi].md_flags & MDB_REVERSEDUP) {
-			txn->mt_dbxs[dbi].md_dcmp = mdb_cmp_memnr;
-		} else {
-			txn->mt_dbxs[dbi].md_dcmp = mdb_cmp_memn;
-		}
-	} else {
-		txn->mt_dbxs[dbi].md_dcmp = NULL;
-	}
+	txn->mt_dbxs[dbi].md_cmp =
+		(f & MDB_REVERSEKEY) ? mdb_cmp_memnr :
+		(f & MDB_INTEGERKEY) ? mdb_cmp_cint  : mdb_cmp_memn;
+
+	txn->mt_dbxs[dbi].md_dcmp =
+		!(f & MDB_DUPSORT) ? 0 :
+		((f & MDB_INTEGERDUP)
+		 ? ((f & MDB_DUPFIXED)   ? mdb_cmp_int   : mdb_cmp_cint)
+		 : ((f & MDB_REVERSEDUP) ? mdb_cmp_memnr : mdb_cmp_memn));
 }
 
 int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
