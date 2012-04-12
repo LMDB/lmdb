@@ -260,11 +260,12 @@ typedef ID	txnid_t;
 # define DPRINTF	(void)	/* Vararg macros may be unsupported */
 #elif MDB_DEBUG
 static int mdb_debug;
-static int mdb_debug_start;
+static txnid_t mdb_debug_start;
 
 	/**	Print a debug message with printf formatting. */
 # define DPRINTF(fmt, ...)	/**< Requires 2 or more args */ \
-	if (mdb_debug) fprintf(stderr, "%s:%d " fmt "\n", __func__, __LINE__, __VA_ARGS__)
+	((void) ((mdb_debug) && \
+	 fprintf(stderr, "%s:%d " fmt "\n", __func__, __LINE__, __VA_ARGS__)))
 #else
 # define DPRINTF(fmt, ...)	((void) 0)
 #endif
