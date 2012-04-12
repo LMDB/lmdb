@@ -144,7 +144,7 @@
 #define LOCK_MUTEX_W(env)	pthread_mutex_lock((env)->me_wmutex)
 #define UNLOCK_MUTEX_W(env)	pthread_mutex_unlock((env)->me_wmutex)
 #define getpid()	GetCurrentProcessId()
-#define	fdatasync(fd)	(!FlushFileBuffers(fd))
+#define	MDB_FDATASYNC(fd)	(!FlushFileBuffers(fd))
 #define	ErrCode()	GetLastError()
 #define GET_PAGESIZE(x) {SYSTEM_INFO si; GetSystemInfo(&si); (x) = si.dwPageSize;}
 #define	close(fd)	CloseHandle(fd)
@@ -155,10 +155,10 @@
 #define UNLOCK_MUTEX_R(env)	sem_post((env)->me_rmutex)
 #define LOCK_MUTEX_W(env)	sem_wait((env)->me_wmutex)
 #define UNLOCK_MUTEX_W(env)	sem_post((env)->me_wmutex)
-#define fdatasync(fd)	fsync(fd)
+#define MDB_FDATASYNC(fd)	fsync(fd)
 #else
 #ifdef ANDROID
-#define fdatasync(fd)	fsync(fd)
+#define MDB_FDATASYNC(fd)	fsync(fd)
 #endif
 	/** Lock the reader mutex.
 	 */
