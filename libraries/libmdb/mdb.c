@@ -1129,7 +1129,8 @@ static void mdb_audit(MDB_txn *txn)
 {
 	MDB_cursor mc;
 	MDB_val key, data;
-	int rc, i;
+	MDB_dbi i;
+	int rc;
 	ID freecount, count;
 
 	freecount = 0;
@@ -1149,7 +1150,7 @@ static void mdb_audit(MDB_txn *txn)
 			mdb_cursor_init(&mc, txn, i, &mx);
 			mdb_page_search(&mc, NULL, 0);
 			do {
-				int j;
+				unsigned j;
 				MDB_page *mp;
 				mp = mc.mc_pg[mc.mc_top];
 				for (j=0; j<NUMKEYS(mp); j++) {
