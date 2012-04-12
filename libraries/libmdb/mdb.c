@@ -2983,41 +2983,38 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 		len = OPEN_ALWAYS;
 	}
 	mode = FILE_ATTRIBUTE_NORMAL;
-	if ((env->me_fd = CreateFile(dpath, oflags, FILE_SHARE_READ|FILE_SHARE_WRITE,
-			NULL, len, mode, NULL)) == INVALID_HANDLE_VALUE) {
-		rc = ErrCode();
-		goto leave;
-	}
+	env->me_fd = CreateFile(dpath, oflags, FILE_SHARE_READ|FILE_SHARE_WRITE,
+		NULL, len, mode, NULL);
 #else
 	if (F_ISSET(flags, MDB_RDONLY))
 		oflags = O_RDONLY;
 	else
 		oflags = O_RDWR | O_CREAT;
 
-	if ((env->me_fd = open(dpath, oflags, mode)) == -1) {
+	env->me_fd = open(dpath, oflags, mode);
+#endif
+	if (env->me_fd == INVALID_HANDLE_VALUE) {
 		rc = ErrCode();
 		goto leave;
 	}
-#endif
 
 	if ((rc = mdb_env_open2(env, flags)) == MDB_SUCCESS) {
-		/* synchronous fd for meta writes */
+		if (flags & (MDB_RDONLY|MDB_NOSYNC)) {
+			env->me_mfd = env->me_fd;
+		} else {
+			/* synchronous fd for meta writes */
 #ifdef _WIN32
-		if (!(flags & (MDB_RDONLY|MDB_NOSYNC)))
-			mode |= FILE_FLAG_WRITE_THROUGH;
-		if ((env->me_mfd = CreateFile(dpath, oflags, FILE_SHARE_READ|FILE_SHARE_WRITE,
-			NULL, len, mode, NULL)) == INVALID_HANDLE_VALUE) {
-			rc = ErrCode();
-			goto leave;
-		}
+			env->me_mfd = CreateFile(dpath, oflags,
+				FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, len,
+				mode | FILE_FLAG_WRITE_THROUGH, NULL);
 #else
-		if (!(flags & (MDB_RDONLY|MDB_NOSYNC)))
-			oflags |= MDB_DSYNC;
-		if ((env->me_mfd = open(dpath, oflags, mode)) == -1) {
-			rc = ErrCode();
-			goto leave;
-		}
+			env->me_mfd = open(dpath, oflags | MDB_DSYNC, mode);
 #endif
+			if (env->me_mfd == INVALID_HANDLE_VALUE) {
+				rc = ErrCode();
+				goto leave;
+			}
+		}
 		env->me_path = strdup(path);
 		DPRINTF("opened dbenv %p", (void *) env);
 		pthread_key_create(&env->me_txkey, mdb_env_reader_dest);
@@ -3072,7 +3069,8 @@ mdb_env_close(MDB_env *env)
 	if (env->me_map) {
 		munmap(env->me_map, env->me_mapsize);
 	}
-	close(env->me_mfd);
+	if (env->me_mfd != env->me_fd)
+		close(env->me_mfd);
 	close(env->me_fd);
 	if (env->me_txns) {
 		pid_t pid = getpid();
