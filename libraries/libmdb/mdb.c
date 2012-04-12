@@ -2734,11 +2734,22 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		}
 	}
 	size = GetFileSize(env->me_lfd, NULL);
+
 #else
-	if ((env->me_lfd = open(lpath, O_RDWR|O_CREAT, mode)) == -1) {
-		rc = ErrCode();
-		return rc;
+#if !(O_CLOEXEC)
+	{
+		int fdflags;
+		if ((env->me_lfd = open(lpath, O_RDWR|O_CREAT, mode)) == -1)
+			return ErrCode();
+		/* Lose record locks when exec*() */
+		if ((fdflags = fcntl(env->me_lfd, F_GETFD) | FD_CLOEXEC) >= 0)
+			fcntl(env->me_lfd, F_SETFD, fdflags);
 	}
+#else /* O_CLOEXEC on Linux: Open file and set FD_CLOEXEC atomically */
+	if ((env->me_lfd = open(lpath, O_RDWR|O_CREAT|O_CLOEXEC, mode)) == -1)
+		return ErrCode();
+#endif
+
 	/* Try to get exclusive lock. If we succeed, then
 	 * nobody is using the lock region and we should initialize it.
 	 */
