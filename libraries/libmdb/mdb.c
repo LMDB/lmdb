@@ -996,7 +996,7 @@ static int	mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata,
 				pgno_t newpgno, unsigned int nflags);
 
 static int  mdb_env_read_header(MDB_env *env, MDB_meta *meta);
-static int  mdb_env_read_meta(MDB_env *env, int *which);
+static int  mdb_env_pick_meta(const MDB_env *env);
 static int  mdb_env_write_meta(MDB_txn *txn);
 
 static MDB_node *mdb_node_search(MDB_cursor *mc, MDB_val *key, int *exactp);
@@ -2394,23 +2394,12 @@ mdb_env_write_meta(MDB_txn *txn)
 
 /** Check both meta pages to see which one is newer.
  * @param[in] env the environment handle
- * @param[out] which address of where to store the meta toggle ID
- * @return 0 on success, non-zero on failure.
+ * @return meta toggle (0 or 1).
  */
 static int
-mdb_env_read_meta(MDB_env *env, int *which)
+mdb_env_pick_meta(const MDB_env *env)
 {
-	int toggle = 0;
-
-	assert(env != NULL);
-
-	if (env->me_metas[0]->mm_txnid < env->me_metas[1]->mm_txnid)
-		toggle = 1;
-
-	DPRINTF("Using meta page %d", toggle);
-	*which = toggle;
-
-	return MDB_SUCCESS;
+	return (env->me_metas[0]->mm_txnid < env->me_metas[1]->mm_txnid);
 }
 
 int
@@ -2480,7 +2469,7 @@ mdb_env_get_maxreaders(MDB_env *env, unsigned int *readers)
 static int
 mdb_env_open2(MDB_env *env, unsigned int flags)
 {
-	int i, newenv = 0, toggle;
+	int i, newenv = 0;
 	MDB_meta meta;
 	MDB_page *p;
 
@@ -2555,20 +2544,26 @@ mdb_env_open2(MDB_env *env, unsigned int flags)
 	env->me_metas[0] = METADATA(p);
 	env->me_metas[1] = (MDB_meta *)((char *)env->me_metas[0] + meta.mm_psize);
 
-	if ((i = mdb_env_read_meta(env, &toggle)) != 0)
-		return i;
+#if MDB_DEBUG
+	{
+		int toggle = mdb_env_pick_meta(env);
+		MDB_db *db = &env->me_metas[toggle]->mm_dbs[MAIN_DBI];
 
-	DPRINTF("opened database version %u, pagesize %u",
-	    env->me_metas[toggle]->mm_version, env->me_psize);
-	DPRINTF("depth: %u", env->me_metas[toggle]->mm_dbs[MAIN_DBI].md_depth);
-	DPRINTF("entries: %zu", env->me_metas[toggle]->mm_dbs[MAIN_DBI].md_entries);
-	DPRINTF("branch pages: %zu", env->me_metas[toggle]->mm_dbs[MAIN_DBI].md_branch_pages);
-	DPRINTF("leaf pages: %zu", env->me_metas[toggle]->mm_dbs[MAIN_DBI].md_leaf_pages);
-	DPRINTF("overflow pages: %zu", env->me_metas[toggle]->mm_dbs[MAIN_DBI].md_overflow_pages);
-	DPRINTF("root: %zu", env->me_metas[toggle]->mm_dbs[MAIN_DBI].md_root);
+		DPRINTF("opened database version %u, pagesize %u",
+			env->me_metas[0]->mm_version, env->me_psize);
+		DPRINTF("using meta page %d",  toggle);
+		DPRINTF("depth: %u",           db->md_depth);
+		DPRINTF("entries: %zu",        db->md_entries);
+		DPRINTF("branch pages: %zu",   db->md_branch_pages);
+		DPRINTF("leaf pages: %zu",     db->md_leaf_pages);
+		DPRINTF("overflow pages: %zu", db->md_overflow_pages);
+		DPRINTF("root: %zu",           db->md_root);
+	}
+#endif
 
 	return MDB_SUCCESS;
 }
+
 
 #ifndef _WIN32
 /** Release a reader thread's slot in the reader lock table.
@@ -2592,10 +2587,8 @@ mdb_env_reader_dest(void *ptr)
 static void
 mdb_env_share_locks(MDB_env *env)
 {
-	int toggle = 0;
+	int toggle = mdb_env_pick_meta(env);
 
-	if (env->me_metas[0]->mm_txnid < env->me_metas[1]->mm_txnid)
-		toggle = 1;
 	env->me_txns->mti_me_toggle = toggle;
 	env->me_txns->mti_txnid = env->me_metas[toggle]->mm_txnid;
 
@@ -6102,7 +6095,7 @@ mdb_env_stat(MDB_env *env, MDB_stat *arg)
 	if (env == NULL || arg == NULL)
 		return EINVAL;
 
-	mdb_env_read_meta(env, &toggle);
+	toggle = mdb_env_pick_meta(env);
 
 	return mdb_stat0(env, &env->me_metas[toggle]->mm_dbs[MAIN_DBI], arg);
 }
