@@ -2656,13 +2656,14 @@ typedef unsigned long long	mdb_hash_t;
  * 	 hval arg on the first call.
  */
 static mdb_hash_t
-mdb_hash_str(char *str, mdb_hash_t hval)
+mdb_hash_val(MDB_val *val, mdb_hash_t hval)
 {
-	unsigned char *s = (unsigned char *)str;	/* unsigned string */
+	unsigned char *s = (unsigned char *)val->mv_data;	/* unsigned string */
+	unsigned char *end = s + val->mv_size;
 	/*
 	 * FNV-1a hash each octet of the string
 	 */
-	while (*s) {
+	while (s < end) {
 		/* xor the bottom with the current octet */
 		hval ^= (mdb_hash_t)*s++;
 
@@ -2679,10 +2680,10 @@ mdb_hash_str(char *str, mdb_hash_t hval)
  * @param[out] hexbuf an array of 17 chars to hold the hash
  */
 static void
-mdb_hash_hex(char *str, char *hexbuf)
+mdb_hash_hex(MDB_val *val, char *hexbuf)
 {
 	int i;
-	mdb_hash_t h = mdb_hash_str(str, MDB_HASH_INIT);
+	mdb_hash_t h = mdb_hash_val(val, MDB_HASH_INIT);
 	for (i=0; i<8; i++) {
 		hexbuf += sprintf(hexbuf, "%02x", (unsigned int)h & 0xff);
 		h >>= 8;
@@ -2815,7 +2816,15 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 	}
 	if (*excl) {
 #ifdef _WIN32
+		BY_HANDLE_FILE_INFORMATION stbuf;
+		struct {
+			DWORD volume;
+			DWORD nhigh;
+			DWORD nlow;
+		} idbuf;
+		MDB_val val;
 		char hexbuf[17];
+
 		if (!mdb_sec_inited) {
 			InitializeSecurityDescriptor(&mdb_null_sd,
 				SECURITY_DESCRIPTOR_REVISION);
@@ -2825,7 +2834,13 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 			mdb_all_sa.lpSecurityDescriptor = &mdb_null_sd;
 			mdb_sec_inited = 1;
 		}
-		mdb_hash_hex(lpath, hexbuf);
+		GetFileInformationByHandle(env->me_lfd, &stbuf);
+		idbuf.volume = stbuf.dwVolumeSerialNumber;
+		idbuf.nhigh  = stbuf.nFileIndexHigh;
+		idbuf.nlow   = stbuf.nFileIndexLow;
+		val.mv_data = &idbuf;
+		val.mv_size = sizeof(idbuf);
+		mdb_hash_hex(&val, hexbuf);
 		sprintf(env->me_txns->mti_rmname, "Global\\MDBr%s", hexbuf);
 		env->me_rmutex = CreateMutex(&mdb_all_sa, FALSE, env->me_txns->mti_rmname);
 		if (!env->me_rmutex) {
@@ -2840,8 +2855,20 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		}
 #else	/* _WIN32 */
 #ifdef __APPLE__
+		struct stat stbuf;
+		struct {
+			dev_t dev;
+			ino_t ino;
+		} idbuf;
+		MDB_val val;
 		char hexbuf[17];
-		mdb_hash_hex(lpath, hexbuf);
+
+		fstat(env->me_lfd, &stbuf);
+		idbuf.dev = stbuf.st_dev;
+		idbuf.ino = stbuf.st_ino;
+		val.mv_data = &idbuf;
+		val.mv_size = sizeof(idbuf);
+		mdb_hash_hex(&val, hexbuf);
 		sprintf(env->me_txns->mti_rmname, "MDBr%s", hexbuf);
 		if (sem_unlink(env->me_txns->mti_rmname)) {
 			rc = ErrCode();
