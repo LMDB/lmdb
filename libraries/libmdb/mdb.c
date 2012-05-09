@@ -5214,9 +5214,14 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 			MDB_node *s2;
 			/* must find the lowest key below src */
 			mdb_page_search_root(csrc, NULL, 0);
-			s2 = NODEPTR(csrc->mc_pg[csrc->mc_top], 0);
-			key.mv_size = NODEKSZ(s2);
-			key.mv_data = NODEKEY(s2);
+			if (IS_LEAF2(csrc->mc_pg[csrc->mc_top])) {
+				key.mv_size = csrc->mc_db->md_pad;
+				key.mv_data = LEAF2KEY(csrc->mc_pg[csrc->mc_top], 0, key.mv_size);
+			} else {
+				s2 = NODEPTR(csrc->mc_pg[csrc->mc_top], 0);
+				key.mv_size = NODEKSZ(s2);
+				key.mv_data = NODEKEY(s2);
+			}
 			csrc->mc_snum = snum--;
 			csrc->mc_top = snum;
 		} else {
@@ -5232,9 +5237,14 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 		MDB_val bkey;
 		/* must find the lowest key below dst */
 		mdb_page_search_root(cdst, NULL, 0);
-		s2 = NODEPTR(cdst->mc_pg[cdst->mc_top], 0);
-		bkey.mv_size = NODEKSZ(s2);
-		bkey.mv_data = NODEKEY(s2);
+		if (IS_LEAF2(cdst->mc_pg[cdst->mc_top])) {
+			bkey.mv_size = cdst->mc_db->md_pad;
+			bkey.mv_data = LEAF2KEY(cdst->mc_pg[cdst->mc_top], 0, bkey.mv_size);
+		} else {
+			s2 = NODEPTR(cdst->mc_pg[cdst->mc_top], 0);
+			bkey.mv_size = NODEKSZ(s2);
+			bkey.mv_data = NODEKEY(s2);
+		}
 		cdst->mc_snum = snum--;
 		cdst->mc_top = snum;
 		rc = mdb_update_key(cdst->mc_pg[cdst->mc_top], 0, &bkey);
@@ -5377,9 +5387,14 @@ mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst)
 				MDB_node *s2;
 				/* must find the lowest key below src */
 				mdb_page_search_root(csrc, NULL, 0);
-				s2 = NODEPTR(csrc->mc_pg[csrc->mc_top], 0);
-				key.mv_size = NODEKSZ(s2);
-				key.mv_data = NODEKEY(s2);
+				if (IS_LEAF2(csrc->mc_pg[csrc->mc_top])) {
+					key.mv_size = csrc->mc_db->md_pad;
+					key.mv_data = LEAF2KEY(csrc->mc_pg[csrc->mc_top], 0, key.mv_size);
+				} else {
+					s2 = NODEPTR(csrc->mc_pg[csrc->mc_top], 0);
+					key.mv_size = NODEKSZ(s2);
+					key.mv_data = NODEKEY(s2);
+				}
 				csrc->mc_snum = snum--;
 				csrc->mc_top = snum;
 			} else {
