@@ -958,6 +958,7 @@ struct MDB_env {
 	MDB_dbx		*me_dbxs;		/**< array of static DB info */
 	MDB_db		*me_dbs[2];		/**< two arrays of MDB_db info */
 	MDB_oldpages *me_pghead;	/**< list of old page records */
+	MDB_oldpages *me_pgfree;	/**< list of page records to free */
 	pthread_key_t	me_txkey;	/**< thread-key for readers */
 	MDB_page	*me_dpages;		/**< list of malloc'd blocks for re-use */
 	/** IDL of pages that became unused in a write txn */
@@ -1316,7 +1317,12 @@ none:
 				}
 				if (MDB_IDL_IS_ZERO(mop->mo_pages)) {
 					txn->mt_env->me_pghead = mop->mo_next;
-					free(mop);
+					if (mc->mc_dbi == FREE_DBI) {
+						mop->mo_next = txn->mt_env->me_pgfree;
+						txn->mt_env->me_pgfree = mop;
+					} else {
+						free(mop);
+					}
 				}
 			}
 		}
@@ -2025,6 +2031,13 @@ again:
 		env->me_pgfirst = 0;
 		env->me_pglast = 0;
 	}
+
+	while (env->me_pgfree) {
+		MDB_oldpages *mop = env->me_pgfree;
+		env->me_pgfree = mop->mo_next;
+		free(mop);;
+	}
+
 	/* Check for growth of freelist again */
 	if (freecnt != txn->mt_free_pgs[0])
 		goto free2;
