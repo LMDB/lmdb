@@ -6184,6 +6184,7 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 	MDB_dbi i;
 	MDB_cursor mc;
 	int rc, dbflag, exact;
+	unsigned int unused = 0;
 	size_t len;
 
 	if (txn->mt_dbxs[FREE_DBI].md_cmp == NULL) {
@@ -6206,6 +6207,11 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 	/* Is the DB already open? */
 	len = strlen(name);
 	for (i=2; i<txn->mt_numdbs; i++) {
+		if (!txn->mt_dbxs[i].md_name.mv_size) {
+			/* Remember this free slot */
+			unused = i;
+			continue;
+		}
 		if (len == txn->mt_dbxs[i].md_name.mv_size &&
 			!strncmp(name, txn->mt_dbxs[i].md_name.mv_data, len)) {
 			*dbi = i;
@@ -6213,7 +6219,8 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 		}
 	}
 
-	if (txn->mt_numdbs >= txn->mt_env->me_maxdbs - 1)
+	/* If no free slot and max hit, fail */
+	if (!unused && txn->mt_numdbs >= txn->mt_env->me_maxdbs - 1)
 		return ENFILE;
 
 	/* Find the DB info */
@@ -6242,16 +6249,20 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 
 	/* OK, got info, add to table */
 	if (rc == MDB_SUCCESS) {
-		txn->mt_dbxs[txn->mt_numdbs].md_name.mv_data = strdup(name);
-		txn->mt_dbxs[txn->mt_numdbs].md_name.mv_size = len;
-		txn->mt_dbxs[txn->mt_numdbs].md_rel = NULL;
-		txn->mt_dbflags[txn->mt_numdbs] = dbflag;
-		memcpy(&txn->mt_dbs[txn->mt_numdbs], data.mv_data, sizeof(MDB_db));
-		*dbi = txn->mt_numdbs;
-		txn->mt_env->me_dbs[0][txn->mt_numdbs] = txn->mt_dbs[txn->mt_numdbs];
-		txn->mt_env->me_dbs[1][txn->mt_numdbs] = txn->mt_dbs[txn->mt_numdbs];
-		mdb_default_cmp(txn, txn->mt_numdbs);
-		txn->mt_numdbs++;
+		unsigned int slot = unused ? unused : txn->mt_numdbs;
+		txn->mt_dbxs[slot].md_name.mv_data = strdup(name);
+		txn->mt_dbxs[slot].md_name.mv_size = len;
+		txn->mt_dbxs[slot].md_rel = NULL;
+		txn->mt_dbflags[slot] = dbflag;
+		memcpy(&txn->mt_dbs[slot], data.mv_data, sizeof(MDB_db));
+		*dbi = slot;
+		txn->mt_env->me_dbs[0][slot] = txn->mt_dbs[slot];
+		txn->mt_env->me_dbs[1][slot] = txn->mt_dbs[slot];
+		mdb_default_cmp(txn, slot);
+		if (!unused) {
+			txn->mt_numdbs++;
+			txn->mt_env->me_numdbs++;
+		}
 	}
 
 	return rc;
