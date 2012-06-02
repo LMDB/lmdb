@@ -6209,7 +6209,7 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 	for (i=2; i<txn->mt_numdbs; i++) {
 		if (!txn->mt_dbxs[i].md_name.mv_size) {
 			/* Remember this free slot */
-			unused = i;
+			if (!unused) unused = i;
 			continue;
 		}
 		if (len == txn->mt_dbxs[i].md_name.mv_size &&
