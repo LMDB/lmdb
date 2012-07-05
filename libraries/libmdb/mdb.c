@@ -1220,7 +1220,11 @@ mdb_page_alloc(MDB_cursor *mc, int num)
 	pgno_t pgno = P_INVALID;
 	MDB_ID2 mid;
 
-	if (txn->mt_txnid > 2) {
+	/* The free list won't have any content at all until txn 2 has
+	 * committed. The pages from txn 1 will be free after txn 3 has
+	 * committed. It will be safe to re-use them during txn 4.
+	 */
+	if (txn->mt_txnid > 3) {
 
 		if (!txn->mt_env->me_pghead &&
 			txn->mt_dbs[FREE_DBI].md_root != P_INVALID) {
@@ -1253,7 +1257,7 @@ again:
 
 			{
 				unsigned int i;
-				oldest = txn->mt_txnid - 1;
+				oldest = txn->mt_txnid - 2;
 				for (i=0; i<txn->mt_env->me_txns->mti_numreaders; i++) {
 					txnid_t mr = txn->mt_env->me_txns->mti_readers[i].mr_txnid;
 					if (mr && mr < oldest)
