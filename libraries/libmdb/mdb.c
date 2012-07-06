@@ -926,7 +926,7 @@ typedef struct MDB_oldpages {
 	struct MDB_oldpages *mo_next;
 	/**	The ID of the transaction in which these pages were freed. */
 	txnid_t		mo_txnid;
-	/** An #IDL of the pages */
+	/** An #MDB_IDL of the pages */
 	pgno_t		mo_pages[1];	/* dynamic */
 } MDB_oldpages;
 
@@ -1221,8 +1221,8 @@ mdb_page_alloc(MDB_cursor *mc, int num)
 	MDB_ID2 mid;
 
 	/* The free list won't have any content at all until txn 2 has
-	 * committed. The pages from txn 1 will be free after txn 3 has
-	 * committed. It will be safe to re-use them during txn 4.
+	 * committed. The pages freed by txn 2 will be unreferenced
+	 * after txn 3 commits, and so will be safe to re-use in txn 4.
 	 */
 	if (txn->mt_txnid > 3) {
 
@@ -1257,7 +1257,7 @@ again:
 
 			{
 				unsigned int i;
-				oldest = txn->mt_txnid - 2;
+				oldest = txn->mt_txnid - 1;
 				for (i=0; i<txn->mt_env->me_txns->mti_numreaders; i++) {
 					txnid_t mr = txn->mt_env->me_txns->mti_readers[i].mr_txnid;
 					if (mr && mr < oldest)
@@ -5715,6 +5715,7 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
  * @param[in] newkey The key for the newly inserted node.
  * @param[in] newdata The data for the newly inserted node.
  * @param[in] newpgno The page number, if the new node is a branch node.
+ * @param[in] nflags The #NODE_ADD_FLAGS for the new node.
  * @return 0 on success, non-zero on failure.
  */
 static int
