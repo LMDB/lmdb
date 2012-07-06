@@ -159,6 +159,8 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
 #define MDB_NOSYNC		0x10000
 	/** read only */
 #define MDB_RDONLY		0x20000
+	/** don't fsync metapage after commit */
+#define MDB_NOMETASYNC		0x40000
 /** @} */
 
 /**	@defgroup	mdb_open	Database Flags
@@ -334,6 +336,13 @@ int  mdb_env_create(MDB_env **env);
 	 *		at risk is governed by how often the system flushes dirty buffers to disk
 	 *		and how often #mdb_env_sync() is called. This flag may be changed
 	 *		at any time using #mdb_env_set_flags().
+	 *	<li>#MDB_NOMETASYNC
+	 *		Don't perform a synchronous flush of the meta page after committing
+	 *		a transaction. This is similar to the #MDB_NOSYNC case, but safer
+	 *		because the transaction data is still flushed. The meta page for any
+	 *		transaction N will be flushed by the data flush of transaction N+1.
+	 *		In case of a system crash, the last committed transaction may be
+	 *		lost. This flag may be changed at any time using #mdb_env_set_flags().
 	 *	<li>#MDB_RDONLY
 	 *		Open the environment in read-only mode. No write operations will be allowed.
 	 * </ul>
@@ -392,8 +401,7 @@ void mdb_env_close(MDB_env *env);
 	/** @brief Set environment flags.
 	 *
 	 * This may be used to set some flags that weren't already set during
-	 * #mdb_env_open(), or to unset these flags. Currently only the
-	 * #MDB_NOSYNC flag setting may be changed with this function.
+	 * #mdb_env_open(), or to unset these flags.
 	 * @param[in] env An environment handle returned by #mdb_env_create()
 	 * @param[in] flags The flags to change, bitwise OR'ed together
 	 * @param[in] onoff A non-zero value sets the flags, zero clears them.

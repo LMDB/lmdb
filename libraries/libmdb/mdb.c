@@ -3037,7 +3037,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 	}
 
 	if ((rc = mdb_env_open2(env, flags)) == MDB_SUCCESS) {
-		if (flags & (MDB_RDONLY|MDB_NOSYNC)) {
+		if (flags & (MDB_RDONLY|MDB_NOSYNC|MDB_NOMETASYNC)) {
 			env->me_mfd = env->me_fd;
 		} else {
 			/* synchronous fd for meta writes */
@@ -6096,7 +6096,7 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
  *	at runtime. Changing other flags requires closing the environment
  *	and re-opening it with the new flags.
  */
-#define	CHANGEABLE	(MDB_NOSYNC)
+#define	CHANGEABLE	(MDB_NOSYNC|MDB_NOMETASYNC)
 int
 mdb_env_set_flags(MDB_env *env, unsigned int flag, int onoff)
 {
