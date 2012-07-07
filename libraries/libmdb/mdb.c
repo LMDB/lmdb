@@ -1608,9 +1608,9 @@ mdb_txn_renew0(MDB_txn *txn)
 		txn->mt_u.dirty_list[0].mid = 0;
 		txn->mt_free_pgs = env->me_free_pgs;
 		txn->mt_free_pgs[0] = 0;
-		txn->mt_next_pgno = env->me_metas[txn->mt_toggle]->mm_last_pg+1;
 		env->me_txn = txn;
 	}
+	txn->mt_next_pgno = env->me_metas[txn->mt_toggle]->mm_last_pg+1;
 
 	/* Copy the DB arrays */
 	LAZY_RWLOCK_RDLOCK(&env->me_dblock);
@@ -3380,7 +3380,7 @@ mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret)
 		}
 	}
 	if (!p) {
-		if (pgno <= txn->mt_env->me_metas[txn->mt_toggle]->mm_last_pg)
+		if (pgno < txn->mt_next_pgno)
 			p = (MDB_page *)(txn->mt_env->me_map + txn->mt_env->me_psize * pgno);
 	}
 	*ret = p;
