@@ -2568,11 +2568,8 @@ mdb_env_open2(MDB_env *env, unsigned int flags)
 }
 
 
-#ifndef _WIN32
 /** Release a reader thread's slot in the reader lock table.
  *	This function is called automatically when a thread exits.
- *	Windows doesn't support destructor callbacks for thread-specific storage,
- *	so this function is not compiled there.
  * @param[in] ptr This points to the slot in the reader lock table.
  */
 static void
@@ -2584,6 +2581,60 @@ mdb_env_reader_dest(void *ptr)
 	reader->mr_pid = 0;
 	reader->mr_tid = 0;
 }
+
+#ifdef _WIN32
+/** Junk for arranging thread-specific callbacks on Windows. This is
+ *	necessarily platform and compiler-specific. Windows supports up
+ *	to 1088 keys. Let's assume nobody opens more than 64 environments
+ *	in a single process, for now. They can override this if needed.
+ */
+#ifndef MAX_TLS_KEYS
+#define MAX_TLS_KEYS	64
+#endif
+static pthread_key_t mdb_tls_keys[MAX_TLS_KEYS];
+static int mdb_tls_nkeys;
+
+static void NTAPI mdb_tls_callback(PVOID module, DWORD reason, PVOID ptr)
+{
+	int i;
+	switch(reason) {
+	case DLL_PROCESS_ATTACH: break;
+	case DLL_THREAD_ATTACH: break;
+	case DLL_THREAD_DETACH:
+		for (i=0; i<mdb_tls_nkeys; i++) {
+			MDB_reader *r = pthread_getspecific(mdb_tls_keys[i]);
+			mdb_env_reader_dest(r);
+		}
+		break;
+	case DLL_PROCESS_DETACH: break;
+	}
+}
+#ifdef __GNUC__
+#ifdef _WIN64
+const PIMAGE_TLS_CALLBACK mdb_tls_cbp __attribute__((section (".CRT$XLB"))) = mdb_tls_callback;
+#else
+PIMAGE_TLS_CALLBACK mdb_tls_cbp __attribute__((section (".CRT$XLB"))) = mdb_tls_callback;
+#endif
+#else
+#ifdef _WIN64
+/* Force some symbol references.
+ *	_tls_used forces the linker to create the TLS directory if not already done
+ *	mdb_tls_cbp prevents whole-program-optimizer from dropping the symbol.
+ */
+#pragma comment(linker, "/INCLUDE:_tls_used")
+#pragma comment(linker, "/INCLUDE:mdb_tls_cbp")
+#pragma const_seg(".CRT$XLB")
+extern const PIMAGE_TLS_CALLBACK mdb_tls_callback;
+const PIMAGE_TLS_CALLBACK mdb_tls_cbp = mdb_tls_callback;
+#pragma const_seg()
+#else	/* WIN32 */
+#pragma comment(linker, "/INCLUDE:__tls_used")
+#pragma comment(linker, "/INCLUDE:_mdb_tls_cbp")
+#pragma data_seg(".CRT$XLB")
+PIMAGE_TLS_CALLBACK mdb_tls_cbp = mdb_tls_callback;
+#pragma data_seg()
+#endif	/* WIN 32/64 */
+#endif	/* !__GNUC__ */
 #endif
 
 /** Downgrade the exclusive lock on the region back to shared */
@@ -3040,6 +3091,15 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 		env->me_path = strdup(path);
 		DPRINTF("opened dbenv %p", (void *) env);
 		pthread_key_create(&env->me_txkey, mdb_env_reader_dest);
+#ifdef _WIN32
+		/* Windows TLS callbacks need help finding their TLS info. */
+		if (mdb_tls_nkeys < MAX_TLS_KEYS)
+			mdb_tls_keys[mdb_tls_nkeys++] = env->me_txkey;
+		else {
+			rc = ENOMEM;
+			goto leave;
+		}
+#endif
 		LAZY_RWLOCK_INIT(&env->me_dblock, NULL);
 		if (excl)
 			mdb_env_share_locks(env);
@@ -3087,6 +3147,17 @@ mdb_env_close(MDB_env *env)
 
 	LAZY_RWLOCK_DESTROY(&env->me_dblock);
 	pthread_key_delete(env->me_txkey);
+#ifdef _WIN32
+	/* Delete our key from the global list */
+	{ int i;
+		for (i=0; i<mdb_tls_nkeys; i++)
+			if (mdb_tls_keys[i] == env->me_txkey) {
+				mdb_tls_keys[i] = mdb_tls_keys[mdb_tls_nkeys-1];
+				mdb_tls_nkeys--;
+				break;
+			}
+	}
+#endif
 
 	if (env->me_map) {
 		munmap(env->me_map, env->me_mapsize);
