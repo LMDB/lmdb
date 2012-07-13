@@ -2922,7 +2922,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		val.mv_data = &idbuf;
 		val.mv_size = sizeof(idbuf);
 		mdb_hash_hex(&val, hexbuf);
-		sprintf(env->me_txns->mti_rmname, "MDBr%s", hexbuf);
+		sprintf(env->me_txns->mti_rmname, "/MDBr%s", hexbuf);
 		if (sem_unlink(env->me_txns->mti_rmname)) {
 			rc = ErrCode();
 			if (rc != ENOENT && rc != EINVAL)
@@ -2933,7 +2933,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 			rc = ErrCode();
 			goto fail;
 		}
-		sprintf(env->me_txns->mti_wmname, "MDBw%s", hexbuf);
+		sprintf(env->me_txns->mti_wmname, "/MDBw%s", hexbuf);
 		if (sem_unlink(env->me_txns->mti_wmname)) {
 			rc = ErrCode();
 			if (rc != ENOENT && rc != EINVAL)
