@@ -27,7 +27,7 @@ int main(int argc,char * argv[])
 	MDB_txn *txn;
 	MDB_stat mst;
 	MDB_cursor *cursor;
-	ID i, j, *iptr;
+	MDB_ID i, j, *iptr;
 
 	if (argc != 2) {
 		fprintf(stderr, "usage: %s <pathname>\n", argv[0]);
@@ -41,7 +41,7 @@ int main(int argc,char * argv[])
 	rc = mdb_cursor_open(txn, dbi, &cursor);
 	while ((rc = mdb_cursor_get(cursor, &key, &data, MDB_NEXT)) == 0) {
 		printf("key: %p %zu, data: %p\n",
-			key.mv_data,  *(ID *) key.mv_data,
+			key.mv_data,  *(MDB_ID *) key.mv_data,
 			data.mv_data);
 		iptr = data.mv_data;
 		j = *iptr++;
