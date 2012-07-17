@@ -932,8 +932,10 @@ static int 		mdb_page_touch(MDB_cursor *mc);
 static int  mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **mp);
 static int  mdb_page_search_root(MDB_cursor *mc,
 			    MDB_val *key, int modify);
+#define MDB_PS_MODIFY	1
+#define MDB_PS_ROOTONLY	2
 static int  mdb_page_search(MDB_cursor *mc,
-			    MDB_val *key, int modify);
+			    MDB_val *key, int flags);
 static int	mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst);
 static int	mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata,
 				pgno_t newpgno, unsigned int nflags);
@@ -1554,7 +1556,8 @@ mdb_txn_renew0(MDB_txn *txn)
 	memcpy(txn->mt_dbs, env->me_metas[txn->mt_toggle]->mm_dbs, 2 * sizeof(MDB_db));
 	for (i=2; i<txn->mt_numdbs; i++)
 		txn->mt_dbs[i].md_flags = env->me_dbflags[i];
-	memset(txn->mt_dbflags, DB_STALE, env->me_numdbs);
+	txn->mt_dbflags[0] = txn->mt_dbflags[1] = 0;
+	memset(txn->mt_dbflags+2, DB_STALE, env->me_numdbs-2);
 
 	return MDB_SUCCESS;
 }
@@ -1858,7 +1861,7 @@ mdb_txn_commit(MDB_txn *txn)
 	/* should only be one record now */
 	if (env->me_pghead) {
 		/* make sure first page of freeDB is touched and on freelist */
-		mdb_page_search(&mc, NULL, 1);
+		mdb_page_search(&mc, NULL, MDB_PS_MODIFY);
 	}
 
 	/* Delete IDLs we used from the free list */
@@ -1887,7 +1890,7 @@ free2:
 		/* make sure last page of freeDB is touched and on freelist */
 		key.mv_size = MAXKEYSIZE+1;
 		key.mv_data = NULL;
-		mdb_page_search(&mc, &key, 1);
+		mdb_page_search(&mc, &key, MDB_PS_MODIFY);
 
 		mdb_midl_sort(txn->mt_free_pgs);
 #if MDB_DEBUG > 1
@@ -3371,7 +3374,8 @@ mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret)
  * @param[in,out] mc the cursor for this operation.
  * @param[in] key the key to search for. If NULL, search for the lowest
  * page. (This is used by #mdb_cursor_first().)
- * @param[in] modify If true, visited pages are updated with new page numbers.
+ * @param[in] flags If MDB_PS_MODIFY set, visited pages are updated with new page numbers.
+ *   If MDB_PS_ROOTONLY set, just fetch root node, no further lookups.
  * @return 0 on success, non-zero on failure.
  */
 static int
@@ -3453,7 +3457,7 @@ mdb_page_search_root(MDB_cursor *mc, MDB_val *key, int modify)
  * @return 0 on success, non-zero on failure.
  */
 static int
-mdb_page_search(MDB_cursor *mc, MDB_val *key, int modify)
+mdb_page_search(MDB_cursor *mc, MDB_val *key, int flags)
 {
 	int		 rc;
 	pgno_t		 root;
@@ -3468,11 +3472,11 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int modify)
 		/* Make sure we're using an up-to-date root */
 		if (mc->mc_dbi > MAIN_DBI) {
 			if ((*mc->mc_dbflag & DB_STALE) ||
-			(modify && !(*mc->mc_dbflag & DB_DIRTY))) {
+			((flags & MDB_PS_MODIFY) && !(*mc->mc_dbflag & DB_DIRTY))) {
 				MDB_cursor mc2;
 				unsigned char dbflag = 0;
 				mdb_cursor_init(&mc2, mc->mc_txn, MAIN_DBI, NULL);
-				rc = mdb_page_search(&mc2, &mc->mc_dbx->md_name, modify);
+				rc = mdb_page_search(&mc2, &mc->mc_dbx->md_name, flags & MDB_PS_MODIFY);
 				if (rc)
 					return rc;
 				if (*mc->mc_dbflag & DB_STALE) {
@@ -3485,7 +3489,7 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int modify)
 					mdb_node_read(mc->mc_txn, leaf, &data);
 					memcpy(mc->mc_db, data.mv_data, sizeof(MDB_db));
 				}
-				if (modify)
+				if (flags & MDB_PS_MODIFY)
 					dbflag = DB_DIRTY;
 				*mc->mc_dbflag = dbflag;
 			}
@@ -3508,12 +3512,15 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int modify)
 	DPRINTF("db %u root page %zu has flags 0x%X",
 		mc->mc_dbi, root, mc->mc_pg[0]->mp_flags);
 
-	if (modify) {
+	if (flags & MDB_PS_MODIFY) {
 		if ((rc = mdb_page_touch(mc)))
 			return rc;
 	}
 
-	return mdb_page_search_root(mc, key, modify);
+	if (flags & MDB_PS_ROOTONLY)
+		return MDB_SUCCESS;
+
+	return mdb_page_search_root(mc, key, flags);
 }
 
 /** Return the data associated with a given node.
@@ -4149,7 +4156,7 @@ mdb_cursor_touch(MDB_cursor *mc)
 	if (mc->mc_dbi > MAIN_DBI && !(*mc->mc_dbflag & DB_DIRTY)) {
 		MDB_cursor mc2;
 		mdb_cursor_init(&mc2, mc->mc_txn, MAIN_DBI, NULL);
-		rc = mdb_page_search(&mc2, &mc->mc_dbx->md_name, 1);
+		rc = mdb_page_search(&mc2, &mc->mc_dbx->md_name, MDB_PS_MODIFY);
 		if (rc)
 			 return rc;
 		*mc->mc_dbflag = DB_DIRTY;
@@ -4994,6 +5001,9 @@ mdb_cursor_init(MDB_cursor *mc, MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx)
 		mdb_xcursor_init0(mc);
 	} else {
 		mc->mc_xcursor = NULL;
+	}
+	if (*mc->mc_dbflag & DB_STALE) {
+		mdb_page_search(mc, NULL, MDB_PS_ROOTONLY);
 	}
 }
 
