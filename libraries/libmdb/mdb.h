@@ -201,8 +201,10 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
 #define MDB_RESERVE	0x10000
 /** Data is being appended, don't split full pages. */
 #define MDB_APPEND	0x20000
+/** Duplicate data is being appended, don't split full pages. */
+#define MDB_APPENDDUP	0x40000
 /** Store multiple data items in one call. */
-#define MDB_MULTIPLE	0x40000
+#define MDB_MULTIPLE	0x80000
 /*	@} */
 
 /** @brief Cursor Get operations.
@@ -806,6 +808,16 @@ int  mdb_get(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data);
 	 *		#MDB_KEYEXIST if the key already appears in the database, even if
 	 *		the database supports duplicates (#MDB_DUPSORT). The \b data
 	 *		parameter will be set to point to the existing item.
+	 *	<li>#MDB_RESERVE - reserve space for data of the given size, but
+	 *		don't copy the given data. Instead, return a pointer to the
+	 *		reserved space, which the caller can fill in later. This saves
+	 *		an extra memcpy if the data is being generated later.
+	 *	<li>#MDB_APPEND - append the given key/data pair to the end of the
+	 *		database. No key comparisons are performed. This option allows
+	 *		fast bulk loading when keys are already known to be in the
+	 *		correct order. Loading unsorted keys with this flag will cause
+	 *		data corruption.
+	 *	<li>#MDB_APPENDDUP - as above, but for sorted dup data.
 	 * </ul>
 	 * @return A non-zero error value on failure and 0 on success. Some possible
 	 * errors are:
@@ -921,6 +933,16 @@ int  mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	 *		does not already appear in the database. The function will return
 	 *		#MDB_KEYEXIST if the key already appears in the database, even if
 	 *		the database supports duplicates (#MDB_DUPSORT).
+	 *	<li>#MDB_RESERVE - reserve space for data of the given size, but
+	 *		don't copy the given data. Instead, return a pointer to the
+	 *		reserved space, which the caller can fill in later. This saves
+	 *		an extra memcpy if the data is being generated later.
+	 *	<li>#MDB_APPEND - append the given key/data pair to the end of the
+	 *		database. No key comparisons are performed. This option allows
+	 *		fast bulk loading when keys are already known to be in the
+	 *		correct order. Loading unsorted keys with this flag will cause
+	 *		data corruption.
+	 *	<li>#MDB_APPENDDUP - as above, but for sorted dup data.
 	 * </ul>
 	 * @return A non-zero error value on failure and 0 on success. Some possible
 	 * errors are:
