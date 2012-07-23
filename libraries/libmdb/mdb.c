@@ -4321,6 +4321,7 @@ more:
 				if (mc->mc_db->md_flags & MDB_DUPFIXED) {
 					fp->mp_flags |= P_LEAF2;
 					fp->mp_pad = data->mv_size;
+					fp->mp_upper += 2 * data->mv_size;	/* leave space for 2 more */
 				} else {
 					fp->mp_upper += 2 * sizeof(indx_t) + 2 * NODESIZE +
 						(dkey.mv_size & 1) + (data->mv_size & 1);
@@ -4341,6 +4342,7 @@ more:
 
 				fp = NODEDATA(leaf);
 				if (flags == MDB_CURRENT) {
+reuse:
 					fp->mp_flags |= P_DIRTY;
 					COPY_PGNO(fp->mp_pgno, mc->mc_pg[mc->mc_top]->mp_pgno);
 					mc->mc_xcursor->mx_cursor.mc_pg[0] = fp;
@@ -4349,6 +4351,9 @@ more:
 				}
 				if (mc->mc_db->md_flags & MDB_DUPFIXED) {
 					offset = fp->mp_pad;
+					if (SIZELEFT(fp) >= offset)
+						goto reuse;
+					offset *= 4;	/* space for 4 more */
 				} else {
 					offset = NODESIZE + sizeof(indx_t) + data->mv_size;
 				}
