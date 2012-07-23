@@ -4247,8 +4247,11 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 			MDB_val k2;
 			rc = mdb_cursor_last(mc, &k2, &d2);
 			if (rc == 0) {
-				rc = MDB_NOTFOUND;
-				mc->mc_ki[mc->mc_top]++;
+				rc = mc->mc_dbx->md_cmp(key, &k2);
+				if (rc) {
+					rc = MDB_NOTFOUND;
+					mc->mc_ki[mc->mc_top]++;
+				}
 			}
 		} else {
 		rc = mdb_cursor_set(mc, key, &d2, MDB_SET, &exact);
