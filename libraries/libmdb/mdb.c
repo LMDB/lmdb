@@ -3524,8 +3524,9 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int flags)
 	}
 
 	assert(root > 1);
-	if ((rc = mdb_page_get(mc->mc_txn, root, &mc->mc_pg[0])))
-		return rc;
+	if (!mc->mc_pg[0] || mc->mc_pg[0]->mp_pgno != root)
+		if ((rc = mdb_page_get(mc->mc_txn, root, &mc->mc_pg[0])))
+			return rc;
 
 	mc->mc_snum = 1;
 	mc->mc_top = 0;
@@ -3832,7 +3833,6 @@ mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 			 * was the one we wanted.
 			 */
 			mc->mc_ki[mc->mc_top] = 0;
-			leaf = NODEPTR(mp, 0);
 			if (exactp)
 				*exactp = 1;
 			goto set1;
@@ -3852,13 +3852,26 @@ mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 				if (rc == 0) {
 					/* last node was the one we wanted */
 					mc->mc_ki[mc->mc_top] = nkeys-1;
-					leaf = NODEPTR(mp, nkeys-1);
 					if (exactp)
 						*exactp = 1;
 					goto set1;
 				}
 				if (rc < 0) {
 					/* This is definitely the right page, skip search_page */
+					if (mp->mp_flags & P_LEAF2) {
+						nodekey.mv_data = LEAF2KEY(mp,
+							 mc->mc_ki[mc->mc_top], nodekey.mv_size);
+					} else {
+						leaf = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
+						MDB_SET_KEY(leaf, &nodekey);
+					}
+					rc = mc->mc_dbx->md_cmp(key, &nodekey);
+					if (rc == 0) {
+						/* current node was the one we wanted */
+						if (exactp)
+							*exactp = 1;
+						goto set1;
+					}
 					rc = 0;
 					goto set2;
 				}
@@ -4986,6 +4999,7 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
 
 	if (node->mn_flags & F_SUBDATA) {
 		memcpy(&mx->mx_db, NODEDATA(node), sizeof(MDB_db));
+		mx->mx_cursor.mc_pg[0] = 0;
 		mx->mx_cursor.mc_snum = 0;
 		mx->mx_cursor.mc_flags = C_SUB;
 	} else {
@@ -5038,6 +5052,7 @@ mdb_cursor_init(MDB_cursor *mc, MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx)
 	mc->mc_dbflag = &txn->mt_dbflags[dbi];
 	mc->mc_snum = 0;
 	mc->mc_top = 0;
+	mc->mc_pg[0] = 0;
 	mc->mc_flags = 0;
 	if (txn->mt_dbs[dbi].md_flags & MDB_DUPSORT) {
 		assert(mx != NULL);
