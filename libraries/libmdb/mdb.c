@@ -4261,9 +4261,11 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 			rc = mdb_cursor_last(mc, &k2, &d2);
 			if (rc == 0) {
 				rc = mc->mc_dbx->md_cmp(key, &k2);
-				if (rc) {
+				if (rc > 0) {
 					rc = MDB_NOTFOUND;
 					mc->mc_ki[mc->mc_top]++;
+				} else {
+					rc = 0;
 				}
 			}
 		} else {
