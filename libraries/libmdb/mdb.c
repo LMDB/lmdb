@@ -1913,7 +1913,11 @@ mdb_txn_commit(MDB_txn *txn)
 			key.mv_data = &cur;
 
 			mdb_cursor_set(&mc, &key, NULL, MDB_SET, &exact);
-			mdb_cursor_del(&mc, 0);
+			rc = mdb_cursor_del(&mc, 0);
+			if (rc) {
+				mdb_txn_abort(txn);
+				return rc;
+			}
 		}
 		env->me_pgfirst = 0;
 		env->me_pglast = 0;
