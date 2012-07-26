@@ -3858,20 +3858,22 @@ mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 					goto set1;
 				}
 				if (rc < 0) {
-					/* This is definitely the right page, skip search_page */
-					if (mp->mp_flags & P_LEAF2) {
-						nodekey.mv_data = LEAF2KEY(mp,
-							 mc->mc_ki[mc->mc_top], nodekey.mv_size);
-					} else {
-						leaf = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
-						MDB_SET_KEY(leaf, &nodekey);
-					}
-					rc = mc->mc_dbx->md_cmp(key, &nodekey);
-					if (rc == 0) {
-						/* current node was the one we wanted */
-						if (exactp)
-							*exactp = 1;
-						goto set1;
+					if (mc->mc_ki[mc->mc_top] < NUMKEYS(mp)) {
+						/* This is definitely the right page, skip search_page */
+						if (mp->mp_flags & P_LEAF2) {
+							nodekey.mv_data = LEAF2KEY(mp,
+								 mc->mc_ki[mc->mc_top], nodekey.mv_size);
+						} else {
+							leaf = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
+							MDB_SET_KEY(leaf, &nodekey);
+						}
+						rc = mc->mc_dbx->md_cmp(key, &nodekey);
+						if (rc == 0) {
+							/* current node was the one we wanted */
+							if (exactp)
+								*exactp = 1;
+							goto set1;
+						}
 					}
 					rc = 0;
 					goto set2;
