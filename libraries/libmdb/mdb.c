@@ -1604,7 +1604,8 @@ mdb_txn_renew0(MDB_txn *txn)
 	for (i=2; i<txn->mt_numdbs; i++)
 		txn->mt_dbs[i].md_flags = env->me_dbflags[i];
 	txn->mt_dbflags[0] = txn->mt_dbflags[1] = 0;
-	memset(txn->mt_dbflags+2, DB_STALE, env->me_numdbs-2);
+	if (txn->mt_numdbs > 2)
+		memset(txn->mt_dbflags+2, DB_STALE, txn->mt_numdbs-2);
 
 	return MDB_SUCCESS;
 }
@@ -1906,7 +1907,7 @@ mdb_txn_commit(MDB_txn *txn)
 	/* Update DB root pointers. Their pages have already been
 	 * touched so this is all in-place and cannot fail.
 	 */
-	{
+	if (txn->mt_numdbs > 2) {
 		MDB_dbi i;
 		MDB_val data;
 		data.mv_size = sizeof(MDB_db);
@@ -3357,10 +3358,10 @@ mdb_cursor_adjust(MDB_cursor *mc, func)
 static void
 mdb_cursor_pop(MDB_cursor *mc)
 {
-	MDB_page	*top;
-
 	if (mc->mc_snum) {
-		top = mc->mc_pg[mc->mc_top];
+#if MDB_DEBUG
+		MDB_page	*top = mc->mc_pg[mc->mc_top];
+#endif
 		mc->mc_snum--;
 		if (mc->mc_snum)
 			mc->mc_top--;
@@ -3835,7 +3836,7 @@ mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 {
 	int		 rc;
 	MDB_page	*mp;
-	MDB_node	*leaf;
+	MDB_node	*leaf = NULL;
 	DKBUF;
 
 	assert(mc);
