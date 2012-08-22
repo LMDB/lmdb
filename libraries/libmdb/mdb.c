@@ -2648,6 +2648,39 @@ mdb_env_share_locks(MDB_env *env)
 	}
 #endif
 }
+
+static int
+mdb_env_excl_lock(MDB_env *env, int *excl)
+{
+#ifdef _WIN32
+	if (LockFile(env->me_lfd, 0, 0, 1, 0)) {
+		*excl = 1;
+	} else {
+		OVERLAPPED ov;
+		memset(&ov, 0, sizeof(ov));
+		if (!LockFileEx(env->me_lfd, 0, 0, 1, 0, &ov)) {
+			return ErrCode();
+		}
+	}
+#else
+	struct flock lock_info;
+	memset((void *)&lock_info, 0, sizeof(lock_info));
+	lock_info.l_type = F_WRLCK;
+	lock_info.l_whence = SEEK_SET;
+	lock_info.l_start = 0;
+	lock_info.l_len = 1;
+	if (!fcntl(env->me_lfd, F_SETLK, &lock_info)) {
+		*excl = 1;
+	} else {
+		lock_info.l_type = F_RDLCK;
+		if (fcntl(env->me_lfd, F_SETLKW, &lock_info)) {
+			return ErrCode();
+		}
+	}
+#endif
+	return 0;
+}
+
 #if defined(_WIN32) || defined(USE_POSIX_SEM)
 /*
  * hash_64 - 64 bit Fowler/Noll/Vo-0 FNV-1a hash code
@@ -2749,18 +2782,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 	/* Try to get exclusive lock. If we succeed, then
 	 * nobody is using the lock region and we should initialize it.
 	 */
-	{
-		if (LockFile(env->me_lfd, 0, 0, 1, 0)) {
-			*excl = 1;
-		} else {
-			OVERLAPPED ov;
-			memset(&ov, 0, sizeof(ov));
-			if (!LockFileEx(env->me_lfd, 0, 0, 1, 0, &ov)) {
-				rc = ErrCode();
-				goto fail;
-			}
-		}
-	}
+	if ((rc = mdb_env_excl_lock(env, excl))) goto fail;
 	size = GetFileSize(env->me_lfd, NULL);
 
 #else
@@ -2781,25 +2803,8 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 	/* Try to get exclusive lock. If we succeed, then
 	 * nobody is using the lock region and we should initialize it.
 	 */
-	{
-		struct flock lock_info;
-		memset((void *)&lock_info, 0, sizeof(lock_info));
-		lock_info.l_type = F_WRLCK;
-		lock_info.l_whence = SEEK_SET;
-		lock_info.l_start = 0;
-		lock_info.l_len = 1;
-		rc = fcntl(env->me_lfd, F_SETLK, &lock_info);
-		if (rc == 0) {
-			*excl = 1;
-		} else {
-			lock_info.l_type = F_RDLCK;
-			rc = fcntl(env->me_lfd, F_SETLKW, &lock_info);
-			if (rc) {
-				rc = ErrCode();
-				goto fail;
-			}
-		}
-	}
+	if ((rc = mdb_env_excl_lock(env, excl))) goto fail;
+
 	size = lseek(env->me_lfd, 0, SEEK_END);
 #endif
 	rsize = (env->me_maxreaders-1) * sizeof(MDB_reader) + sizeof(MDB_txninfo);
@@ -3149,6 +3154,16 @@ mdb_env_close(MDB_env *env)
 		for (i=0; i<env->me_txns->mti_numreaders; i++)
 			if (env->me_txns->mti_readers[i].mr_pid == pid)
 				env->me_txns->mti_readers[i].mr_pid = 0;
+#ifdef USE_POSIX_SEM
+		{ int excl = 0;
+			if (!mdb_env_excl_lock(env, &excl) && excl) {
+				/* we are the only remaining user of the environment.
+				   clean up semaphores. */
+				sem_unlink(env->me_txns->mti_rmname);
+				sem_unlink(env->me_txns->mti_wmname);
+			}
+		}
+#endif
 		munmap((void *)env->me_txns, (env->me_maxreaders-1)*sizeof(MDB_reader)+sizeof(MDB_txninfo));
 	}
 	close(env->me_lfd);
