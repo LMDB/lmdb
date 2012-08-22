@@ -61,9 +61,13 @@
 #include <resolv.h>	/* defines BYTE_ORDER on HPUX and Solaris */
 #endif
 
+#if defined(__APPLE__) || defined (BSD)
+#define USE_POSIX_SEM
+#endif
+
 #ifndef _WIN32
 #include <pthread.h>
-#ifdef __APPLE__
+#ifdef USE_POSIX_SEM
 #include <semaphore.h>
 #endif
 #endif
@@ -150,7 +154,7 @@
 #define	close(fd)	CloseHandle(fd)
 #define	munmap(ptr,len)	UnmapViewOfFile(ptr)
 #else
-#ifdef __APPLE__
+#ifdef USE_POSIX_SEM
 #define LOCK_MUTEX_R(env)	sem_wait((env)->me_rmutex)
 #define UNLOCK_MUTEX_R(env)	sem_post((env)->me_rmutex)
 #define LOCK_MUTEX_W(env)	sem_wait((env)->me_wmutex)
@@ -175,7 +179,7 @@
 	/** Unlock the writer mutex.
 	 */
 #define UNLOCK_MUTEX_W(env)	pthread_mutex_unlock(&(env)->me_txns->mti_wmutex)
-#endif	/* __APPLE__ */
+#endif	/* USE_POSIX_SEM */
 
 	/** Get the error code for the last failed system function.
 	 */
@@ -200,7 +204,7 @@
 #define	GET_PAGESIZE(x)	((x) = sysconf(_SC_PAGE_SIZE))
 #endif
 
-#if defined(_WIN32) || defined(__APPLE__)
+#if defined(_WIN32) || defined(USE_POSIX_SEM)
 #define MNAME_LEN	32
 #else
 #define MNAME_LEN	(sizeof(pthread_mutex_t))
@@ -464,7 +468,7 @@ typedef struct MDB_txbody {
 	uint32_t	mtb_magic;
 		/** Version number of this lock file. Must be set to #MDB_VERSION. */
 	uint32_t	mtb_version;
-#if defined(_WIN32) || defined(__APPLE__)
+#if defined(_WIN32) || defined(USE_POSIX_SEM)
 	char	mtb_rmname[MNAME_LEN];
 #else
 		/** Mutex protecting access to this table.
@@ -497,7 +501,7 @@ typedef struct MDB_txninfo {
 		char pad[(sizeof(MDB_txbody)+CACHELINE-1) & ~(CACHELINE-1)];
 	} mt1;
 	union {
-#if defined(_WIN32) || defined(__APPLE__)
+#if defined(_WIN32) || defined(USE_POSIX_SEM)
 		char mt2_wmname[MNAME_LEN];
 #define	mti_wmname	mt2.mt2_wmname
 #else
@@ -914,7 +918,7 @@ struct MDB_env {
 	HANDLE		me_rmutex;		/* Windows mutexes don't reside in shared mem */
 	HANDLE		me_wmutex;
 #endif
-#ifdef __APPLE__
+#ifdef USE_POSIX_SEM
 	sem_t		*me_rmutex;		/* Apple doesn't support shared mutexes */
 	sem_t		*me_wmutex;
 #endif
@@ -2644,7 +2648,7 @@ mdb_env_share_locks(MDB_env *env)
 	}
 #endif
 }
-#if defined(_WIN32) || defined(__APPLE__)
+#if defined(_WIN32) || defined(USE_POSIX_SEM)
 /*
  * hash_64 - 64 bit Fowler/Noll/Vo-0 FNV-1a hash code
  *
@@ -2883,7 +2887,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 			goto fail;
 		}
 #else	/* _WIN32 */
-#ifdef __APPLE__
+#ifdef USE_POSIX_SEM
 		struct stat stbuf;
 		struct {
 			dev_t dev;
@@ -2920,7 +2924,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 			rc = ErrCode();
 			goto fail;
 		}
-#else	/* __APPLE__ */
+#else	/* USE_POSIX_SEM */
 		pthread_mutexattr_t mattr;
 
 		pthread_mutexattr_init(&mattr);
@@ -2930,7 +2934,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		}
 		pthread_mutex_init(&env->me_txns->mti_mutex, &mattr);
 		pthread_mutex_init(&env->me_txns->mti_wmutex, &mattr);
-#endif	/* __APPLE__ */
+#endif	/* USE_POSIX_SEM */
 #endif	/* _WIN32 */
 		env->me_txns->mti_version = MDB_VERSION;
 		env->me_txns->mti_magic = MDB_MAGIC;
@@ -2965,7 +2969,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 			goto fail;
 		}
 #endif
-#ifdef __APPLE__
+#ifdef USE_POSIX_SEM
 		env->me_rmutex = sem_open(env->me_txns->mti_rmname, 0);
 		if (!env->me_rmutex) {
 			rc = ErrCode();
