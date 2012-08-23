@@ -3154,7 +3154,16 @@ mdb_env_close(MDB_env *env)
 		for (i=0; i<env->me_txns->mti_numreaders; i++)
 			if (env->me_txns->mti_readers[i].mr_pid == pid)
 				env->me_txns->mti_readers[i].mr_pid = 0;
+#ifdef _WIN32
+		CloseHandle(env->me_rmutex);
+		CloseHandle(env->me_wmutex);
+		/* Windows automatically destroys the mutexes when
+		 * the last handle closes.
+		 */
+#else
 #ifdef USE_POSIX_SEM
+		sem_close(env->me_rmutex);
+		sem_close(env->me_wmutex);
 		{ int excl = 0;
 			if (!mdb_env_excl_lock(env, &excl) && excl) {
 				/* we are the only remaining user of the environment.
@@ -3163,6 +3172,7 @@ mdb_env_close(MDB_env *env)
 				sem_unlink(env->me_txns->mti_wmname);
 			}
 		}
+#endif
 #endif
 		munmap((void *)env->me_txns, (env->me_maxreaders-1)*sizeof(MDB_reader)+sizeof(MDB_txninfo));
 	}
