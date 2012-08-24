@@ -36,18 +36,17 @@ int main(int argc,char * argv[])
 	rc = mdb_env_open(env, envname, MDB_RDONLY, 0);
 	if (rc) {
 		printf("mdb_env_open failed, error %d\n", rc);
-		exit(1);
+		goto env_close;
 	}
 	rc = mdb_txn_begin(env, NULL, 1, &txn);
 	if (rc) {
 		printf("mdb_txn_begin failed, error %d\n", rc);
-		exit(1);
+		goto env_close;
 	}
 	rc = mdb_open(txn, subname, 0, &dbi);
 	if (rc) {
 		printf("mdb_open failed, error %d\n", rc);
-		mdb_txn_abort(txn);
-		exit(1);
+		goto txn_abort;
 	}
    
 	rc = mdb_stat(txn, dbi, &mst);
@@ -58,8 +57,10 @@ int main(int argc,char * argv[])
 	printf("Overflow pages: %zu\n", mst.ms_overflow_pages);
 	printf("Entries: %zu\n", mst.ms_entries);
 	mdb_close(env, dbi);
+txn_abort:
 	mdb_txn_abort(txn);
+env_close:
 	mdb_env_close(env);
 
-	return 0;
+	return rc ? EXIT_FAILURE : EXIT_SUCCESS;
 }
