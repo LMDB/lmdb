@@ -46,6 +46,7 @@ int main(int argc,char * argv[])
 	rc = mdb_open(txn, subname, 0, &dbi);
 	if (rc) {
 		printf("mdb_open failed, error %d\n", rc);
+		mdb_txn_abort(txn);
 		exit(1);
 	}
    
