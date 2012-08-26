@@ -1107,17 +1107,18 @@ static void mdb_audit(MDB_txn *txn)
 	mdb_cursor_init(&mc, txn, FREE_DBI, NULL);
 	while ((rc = mdb_cursor_get(&mc, &key, &data, MDB_NEXT)) == 0)
 		freecount += *(MDB_ID *)data.mv_data;
-	freecount += txn->mt_dbs[0].md_branch_pages + txn->mt_dbs[0].md_leaf_pages +
-		txn->mt_dbs[0].md_overflow_pages;
 
 	count = 0;
 	for (i = 0; i<txn->mt_numdbs; i++) {
+		MDB_xcursor mx, *mxp;
+		mxp = (txn->mt_dbs[i].md_flags & MDB_DUPSORT) ? &mx : NULL;
+		mdb_cursor_init(&mc, txn, i, mxp);
+		if (txn->mt_dbs[i].md_root == P_INVALID)
+			continue;
 		count += txn->mt_dbs[i].md_branch_pages +
 			txn->mt_dbs[i].md_leaf_pages +
 			txn->mt_dbs[i].md_overflow_pages;
 		if (txn->mt_dbs[i].md_flags & MDB_DUPSORT) {
-			MDB_xcursor mx;
-			mdb_cursor_init(&mc, txn, i, &mx);
 			mdb_page_search(&mc, NULL, 0);
 			do {
 				unsigned j;
@@ -1136,7 +1137,7 @@ static void mdb_audit(MDB_txn *txn)
 			while (mdb_cursor_sibling(&mc, 1) == 0);
 		}
 	}
-	assert(freecount + count + 2 >= txn->mt_next_pgno - 1);
+	assert(freecount + count + 2 /* metapages */ == txn->mt_next_pgno);
 }
 #endif
 
