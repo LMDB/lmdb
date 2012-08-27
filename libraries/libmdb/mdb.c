@@ -1137,7 +1137,10 @@ static void mdb_audit(MDB_txn *txn)
 			while (mdb_cursor_sibling(&mc, 1) == 0);
 		}
 	}
-	assert(freecount + count + 2 /* metapages */ == txn->mt_next_pgno);
+	if (freecount + count + 2 /* metapages */ != txn->mt_next_pgno) {
+		fprintf(stderr, "audit: %lu freecount: %lu count: %lu total: %lu next_pgno: %lu\n",
+			txn->mt_txnid, freecount, count+2, freecount+count+2, txn->mt_next_pgno);
+	}
 }
 #endif
 
