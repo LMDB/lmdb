@@ -342,7 +342,7 @@ static txnid_t mdb_debug_start;
 	/** An invalid page number.
 	 *	Mainly used to denote an empty tree.
 	 */
-#define P_INVALID	 (~0UL)
+#define P_INVALID	 (~(pgno_t)0)
 
 	/** Test if a flag \b f is set in a flag word \b w. */
 #define F_ISSET(w, f)	 (((w) & (f)) == (f))
