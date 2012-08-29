@@ -2918,7 +2918,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 				goto fail;
 		}
 		env->me_rmutex = sem_open(env->me_txns->mti_rmname, O_CREAT, mode, 1);
-		if (!env->me_rmutex) {
+		if (env->me_rmutex == SEM_FAILED) {
 			rc = ErrCode();
 			goto fail;
 		}
@@ -2929,7 +2929,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 				goto fail;
 		}
 		env->me_wmutex = sem_open(env->me_txns->mti_wmname, O_CREAT, mode, 1);
-		if (!env->me_wmutex) {
+		if (env->me_wmutex == SEM_FAILED) {
 			rc = ErrCode();
 			goto fail;
 		}
@@ -2980,12 +2980,12 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 #endif
 #ifdef USE_POSIX_SEM
 		env->me_rmutex = sem_open(env->me_txns->mti_rmname, 0);
-		if (!env->me_rmutex) {
+		if (env->me_rmutex == SEM_FAILED) {
 			rc = ErrCode();
 			goto fail;
 		}
 		env->me_wmutex = sem_open(env->me_txns->mti_wmname, 0);
-		if (!env->me_wmutex) {
+		if (env->me_wmutex == SEM_FAILED) {
 			rc = ErrCode();
 			goto fail;
 		}
