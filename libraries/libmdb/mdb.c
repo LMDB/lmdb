@@ -1757,7 +1757,7 @@ mdb_txn_reset0(MDB_txn *txn)
 
 		if (txn->mt_parent) {
 			txn->mt_parent->mt_child = NULL;
-			free(txn->mt_free_pgs);
+			mdb_midl_free(txn->mt_free_pgs);
 			free(txn->mt_u.dirty_list);
 			return;
 		} else {
