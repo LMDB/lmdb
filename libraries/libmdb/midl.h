@@ -180,6 +180,13 @@ unsigned mdb_mid2l_search( MDB_ID2L ids, MDB_ID id );
 	 */
 int mdb_mid2l_insert( MDB_ID2L ids, MDB_ID2 *id );
 
+	/** Append an ID2 into a ID2L.
+	 * @param[in,out] ids	The ID2L to append into.
+	 * @param[in] id	The ID2 to append.
+	 * @return	0 on success, -2 if the ID2L is too big.
+	 */
+int mdb_mid2l_append( MDB_ID2L ids, MDB_ID2 *id );
+
 /** @} */
 /** @} */
 #ifdef __cplusplus

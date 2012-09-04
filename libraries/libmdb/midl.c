@@ -311,5 +311,17 @@ int mdb_mid2l_insert( MDB_ID2L ids, MDB_ID2 *id )
 
 	return 0;
 }
+
+int mdb_mid2l_append( MDB_ID2L ids, MDB_ID2 *id )
+{
+	/* Too big? */
+	if (ids[0].mid >= MDB_IDL_UM_MAX) {
+		return -2;
+	}
+	ids[0].mid++;
+	ids[ids[0].mid] = *id;
+	return 0;
+}
+
 /** @} */
 /** @} */

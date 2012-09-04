@@ -1312,26 +1312,39 @@ none:
 			return NULL;
 		}
 	}
-	if (txn->mt_env->me_dpages && num == 1) {
-		np = txn->mt_env->me_dpages;
-		VGMEMP_ALLOC(txn->mt_env, np, txn->mt_env->me_psize);
-		VGMEMP_DEFINED(np, sizeof(np->mp_next));
-		txn->mt_env->me_dpages = np->mp_next;
-	} else {
-		size_t sz = txn->mt_env->me_psize * num;
-		if ((np = malloc(sz)) == NULL)
-			return NULL;
-		VGMEMP_ALLOC(txn->mt_env, np, sz);
-	}
-	if (pgno == P_INVALID) {
-		np->mp_pgno = txn->mt_next_pgno;
-		txn->mt_next_pgno += num;
-	} else {
+	if (txn->mt_env->me_flags & MDB_WRITEMAP) {
+		if (pgno == P_INVALID) {
+			pgno = txn->mt_next_pgno;
+			txn->mt_next_pgno += num;
+		}
+		np = (MDB_page *)(txn->mt_env->me_map + txn->mt_env->me_psize * pgno);
 		np->mp_pgno = pgno;
+	} else {
+		if (txn->mt_env->me_dpages && num == 1) {
+			np = txn->mt_env->me_dpages;
+			VGMEMP_ALLOC(txn->mt_env, np, txn->mt_env->me_psize);
+			VGMEMP_DEFINED(np, sizeof(np->mp_next));
+			txn->mt_env->me_dpages = np->mp_next;
+		} else {
+			size_t sz = txn->mt_env->me_psize * num;
+			if ((np = malloc(sz)) == NULL)
+				return NULL;
+			VGMEMP_ALLOC(txn->mt_env, np, sz);
+		}
+		if (pgno == P_INVALID) {
+			np->mp_pgno = txn->mt_next_pgno;
+			txn->mt_next_pgno += num;
+		} else {
+			np->mp_pgno = pgno;
+		}
 	}
 	mid.mid = np->mp_pgno;
 	mid.mptr = np;
-	mdb_mid2l_insert(txn->mt_u.dirty_list, &mid);
+	if (txn->mt_env->me_flags & MDB_WRITEMAP) {
+		mdb_mid2l_append(txn->mt_u.dirty_list, &mid);
+	} else {
+		mdb_mid2l_insert(txn->mt_u.dirty_list, &mid);
+	}
 
 	return np;
 }
@@ -1655,6 +1668,9 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 		if (parent->mt_child) {
 			return EINVAL;
 		}
+		/* nested TXNs not supported here */
+		if (env->me_flags & MDB_WRITEMAP)
+			return EINVAL;
 	}
 	size = sizeof(MDB_txn) + env->me_maxdbs * (sizeof(MDB_db)+1);
 	if (!(flags & MDB_RDONLY))
@@ -1741,17 +1757,19 @@ mdb_txn_reset0(MDB_txn *txn)
 			}
 		}
 
-		/* return all dirty pages to dpage list */
-		for (i=1; i<=txn->mt_u.dirty_list[0].mid; i++) {
-			dp = txn->mt_u.dirty_list[i].mptr;
-			if (!IS_OVERFLOW(dp) || dp->mp_pages == 1) {
-				dp->mp_next = txn->mt_env->me_dpages;
-				VGMEMP_FREE(txn->mt_env, dp);
-				txn->mt_env->me_dpages = dp;
-			} else {
-				/* large pages just get freed directly */
-				VGMEMP_FREE(txn->mt_env, dp);
-				free(dp);
+		if (!(env->me_flags & MDB_WRITEMAP)) {
+			/* return all dirty pages to dpage list */
+			for (i=1; i<=txn->mt_u.dirty_list[0].mid; i++) {
+				dp = txn->mt_u.dirty_list[i].mptr;
+				if (!IS_OVERFLOW(dp) || dp->mp_pages == 1) {
+					dp->mp_next = txn->mt_env->me_dpages;
+					VGMEMP_FREE(txn->mt_env, dp);
+					txn->mt_env->me_dpages = dp;
+				} else {
+					/* large pages just get freed directly */
+					VGMEMP_FREE(txn->mt_env, dp);
+					free(dp);
+				}
 			}
 		}
 
@@ -2057,6 +2075,17 @@ again:
 	mdb_audit(txn);
 #endif
 
+	if (env->me_flags & MDB_WRITEMAP) {
+		for (i=1; i<=txn->mt_u.dirty_list[0].mid; i++) {
+			dp = txn->mt_u.dirty_list[i].mptr;
+			/* clear dirty flag */
+			dp->mp_flags &= ~P_DIRTY;
+			txn->mt_u.dirty_list[i].mid = 0;
+		}
+		txn->mt_u.dirty_list[0].mid = 0;
+		goto sync;
+	}
+
 	/* Commit up to MDB_COMMIT_PAGES dirty pages to disk until done.
 	 */
 	next = 0;
@@ -2165,6 +2194,7 @@ again:
 	}
 	txn->mt_u.dirty_list[0].mid = 0;
 
+sync:
 	if ((n = mdb_env_sync(env, 0)) != 0 ||
 	    (n = mdb_env_write_meta(txn)) != MDB_SUCCESS) {
 		mdb_txn_abort(txn);
@@ -2323,6 +2353,14 @@ mdb_env_write_meta(MDB_txn *txn)
 
 	env = txn->mt_env;
 
+	if (env->me_flags & MDB_WRITEMAP) {
+		MDB_meta *mp = env->me_metas[toggle];
+		mp->mm_dbs[0] = txn->mt_dbs[0];
+		mp->mm_dbs[1] = txn->mt_dbs[1];
+		mp->mm_last_pg = txn->mt_next_pgno - 1;
+		mp->mm_txnid = txn->mt_txnid;
+		goto done;
+	}
 	metab.mm_txnid = env->me_metas[toggle]->mm_txnid;
 	metab.mm_last_pg = env->me_metas[toggle]->mm_last_pg;
 
@@ -2368,6 +2406,7 @@ mdb_env_write_meta(MDB_txn *txn)
 		env->me_flags |= MDB_FATAL_ERROR;
 		return rc;
 	}
+done:
 	/* Memory ordering issues are irrelevant; since the entire writer
 	 * is wrapped by wmutex, all of these changes will become visible
 	 * after the wmutex is unlocked. Since the DB is multi-version,
@@ -2456,7 +2495,7 @@ mdb_env_get_maxreaders(MDB_env *env, unsigned int *readers)
 static int
 mdb_env_open2(MDB_env *env, unsigned int flags)
 {
-	int i, newenv = 0;
+	int i, newenv = 0, prot;
 	MDB_meta meta;
 	MDB_page *p;
 
@@ -2505,7 +2544,12 @@ mdb_env_open2(MDB_env *env, unsigned int flags)
 	i = MAP_SHARED;
 	if (meta.mm_address && (flags & MDB_FIXEDMAP))
 		i |= MAP_FIXED;
-	env->me_map = mmap(meta.mm_address, env->me_mapsize, PROT_READ, i,
+	prot = PROT_READ;
+	if (flags & MDB_WRITEMAP) {
+		prot |= PROT_WRITE;
+		ftruncate(env->me_fd, env->me_mapsize);
+	}
+	env->me_map = mmap(meta.mm_address, env->me_mapsize, prot, i,
 		env->me_fd, 0);
 	if (env->me_map == MAP_FAILED) {
 		env->me_map = NULL;
@@ -3434,6 +3478,11 @@ mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret)
 {
 	MDB_page *p = NULL;
 
+	if (txn->mt_env->me_flags & MDB_WRITEMAP) {
+		if (pgno < txn->mt_next_pgno)
+			p = (MDB_page *)(txn->mt_env->me_map + txn->mt_env->me_psize * pgno);
+		goto done;
+	}
 	if (!F_ISSET(txn->mt_flags, MDB_TXN_RDONLY) && txn->mt_u.dirty_list[0].mid) {
 		unsigned x;
 		x = mdb_mid2l_search(txn->mt_u.dirty_list, pgno);
@@ -3445,6 +3494,7 @@ mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret)
 		if (pgno < txn->mt_next_pgno)
 			p = (MDB_page *)(txn->mt_env->me_map + txn->mt_env->me_psize * pgno);
 	}
+done:
 	*ret = p;
 	if (!p) {
 		DPRINTF("page %zu not found", pgno);
