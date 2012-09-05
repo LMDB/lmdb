@@ -149,6 +149,7 @@
 #define UNLOCK_MUTEX_W(env)	pthread_mutex_unlock((env)->me_wmutex)
 #define getpid()	GetCurrentProcessId()
 #define	MDB_FDATASYNC(fd)	(!FlushFileBuffers(fd))
+#define	MDB_MSYNC(addr,len,flags)	(!FlushViewOfFile(addr,len))
 #define	ErrCode()	GetLastError()
 #define GET_PAGESIZE(x) {SYSTEM_INFO si; GetSystemInfo(&si); (x) = si.dwPageSize;}
 #define	close(fd)	CloseHandle(fd)
@@ -232,6 +233,18 @@
  */
 #ifndef MDB_FDATASYNC
 # define MDB_FDATASYNC	fdatasync
+#endif
+
+#ifndef MDB_MSYNC
+# define MDB_MSYNC(addr,len,flags)	msync(addr,len,flags)
+#endif
+
+#ifndef MS_SYNC
+#define	MS_SYNC	1
+#endif
+
+#ifndef MS_ASYNC
+#define	MS_ASYNC	0
 #endif
 
 	/** A page number in the database.
@@ -1464,8 +1477,18 @@ mdb_env_sync(MDB_env *env, int force)
 {
 	int rc = 0;
 	if (force || !F_ISSET(env->me_flags, MDB_NOSYNC)) {
-		if (MDB_FDATASYNC(env->me_fd))
-			rc = ErrCode();
+		if (env->me_flags & MDB_WRITEMAP) {
+			int flags = (env->me_flags & MDB_MAPSYNC) ? MS_SYNC : MS_ASYNC;
+			if (MDB_MSYNC(env->me_map, env->me_mapsize, flags))
+				rc = ErrCode();
+#ifdef _WIN32
+			else if (flags == MS_SYNC && MDB_FDATASYNC(env->me_fd))
+				rc = ErrCode();
+#endif
+		} else {
+			if (MDB_FDATASYNC(env->me_fd))
+				rc = ErrCode();
+		}
 	}
 	return rc;
 }
@@ -2359,6 +2382,16 @@ mdb_env_write_meta(MDB_txn *txn)
 		mp->mm_dbs[1] = txn->mt_dbs[1];
 		mp->mm_last_pg = txn->mt_next_pgno - 1;
 		mp->mm_txnid = txn->mt_txnid;
+		if (!(env->me_flags & (MDB_NOMETASYNC|MDB_NOSYNC))) {
+			rc = (env->me_flags & MDB_MAPSYNC) ? MS_SYNC : MS_ASYNC;
+			ptr = env->me_map;
+			if (toggle)
+				ptr += env->me_psize;
+			if (MDB_MSYNC(ptr, env->me_psize, rc)) {
+				rc = ErrCode();
+				goto fail;
+			}
+		}
 		goto done;
 	}
 	metab.mm_txnid = env->me_metas[toggle]->mm_txnid;
@@ -2403,6 +2436,7 @@ mdb_env_write_meta(MDB_txn *txn)
 #else
 		r2 = pwrite(env->me_fd, ptr, len, off);
 #endif
+fail:
 		env->me_flags |= MDB_FATAL_ERROR;
 		return rc;
 	}
@@ -2530,12 +2564,14 @@ mdb_env_open2(MDB_env *env, unsigned int flags)
 				return ErrCode();
 			SetFilePointer(env->me_fd, 0, NULL, 0);
 		}
-		mh = CreateFileMapping(env->me_fd, NULL, PAGE_READONLY,
+		mh = CreateFileMapping(env->me_fd, NULL, flags & MDB_WRITEMAP ?
+			PAGE_READWRITE : PAGE_READONLY,
 			sizehi, sizelo, NULL);
 		if (!mh)
 			return ErrCode();
-		env->me_map = MapViewOfFileEx(mh, FILE_MAP_READ, 0, 0, env->me_mapsize,
-			meta.mm_address);
+		env->me_map = MapViewOfFileEx(mh, flags & MDB_WRITEMAP ?
+			FILE_MAP_WRITE : FILE_MAP_READ,
+			0, 0, env->me_mapsize, meta.mm_address);
 		CloseHandle(mh);
 		if (!env->me_map)
 			return ErrCode();
