@@ -1478,7 +1478,7 @@ mdb_env_sync(MDB_env *env, int force)
 	int rc = 0;
 	if (force || !F_ISSET(env->me_flags, MDB_NOSYNC)) {
 		if (env->me_flags & MDB_WRITEMAP) {
-			int flags = (env->me_flags & MDB_MAPSYNC) ? MS_SYNC : MS_ASYNC;
+			int flags = (env->me_flags & MDB_MAPASYNC) ? MS_ASYNC : MS_SYNC;
 			if (MDB_MSYNC(env->me_map, env->me_mapsize, flags))
 				rc = ErrCode();
 #ifdef _WIN32
@@ -2383,7 +2383,7 @@ mdb_env_write_meta(MDB_txn *txn)
 		mp->mm_last_pg = txn->mt_next_pgno - 1;
 		mp->mm_txnid = txn->mt_txnid;
 		if (!(env->me_flags & (MDB_NOMETASYNC|MDB_NOSYNC))) {
-			rc = (env->me_flags & MDB_MAPSYNC) ? MS_SYNC : MS_ASYNC;
+			rc = (env->me_flags & MDB_MAPASYNC) ? MS_ASYNC : MS_SYNC;
 			ptr = env->me_map;
 			if (toggle)
 				ptr += env->me_psize;
