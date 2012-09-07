@@ -4,12 +4,12 @@
  *	@mainpage	MDB Memory-Mapped Database Manager
  *	MDB is a Btree-based database management library modeled loosely on the
  *	BerkeleyDB API, but much simplified. The entire database is exposed
- *	in a read-only memory map, and all data fetches return data directly
+ *	in a memory map, and all data fetches return data directly
  *	from the mapped memory, so no malloc's or memcpy's occur during
  *	data fetches. As such, the library is extremely simple because it
  *	requires no page caching layer of its own, and it is extremely high
  *	performance and memory-efficient. It is also fully transactional with
- *	full ACID semantics, and because the memory map is read-only, the
+ *	full ACID semantics, and when the memory map is read-only, the
  *	database integrity cannot be corrupted by stray pointer writes from
  *	application code.
  *
@@ -30,6 +30,13 @@
  *	files otherwise they grow without bound. MDB tracks free pages within
  *	the database and re-uses them for new write operations, so the database
  *	size does not grow without bound in normal use.
+ *
+ *	The memory map can be used as a read-only or read-write map. It is
+ *	read-only by default as this provides total immunity to corruption.
+ *	Using read-write mode offers much higher write performance, but adds
+ *	the possibility for stray application writes thru pointers to silently
+ *	corrupt the database. Of course if your application code is known to
+ *	be bug-free (...) then this is not an issue.
  *
  *	@author	Howard Chu, Symas Corporation.
  *
@@ -80,7 +87,7 @@ extern "C" {
 /** Library minor version */
 #define MDB_VERSION_MINOR	9
 /** Library patch version */
-#define MDB_VERSION_PATCH	2
+#define MDB_VERSION_PATCH	3
 
 /** Combine args a,b,c into a single integer for easy version comparisons */
 #define MDB_VERINT(a,b,c)	(((a) << 24) | ((b) << 16) | (c))
@@ -90,7 +97,7 @@ extern "C" {
 	MDB_VERINT(MDB_VERSION_MAJOR,MDB_VERSION_MINOR,MDB_VERSION_PATCH)
 
 /** The release date of this library version */
-#define MDB_VERSION_DATE	"August 2, 2012"
+#define MDB_VERSION_DATE	"September 7, 2012"
 
 /** A stringifier for the version info */
 #define MDB_VERSTR(a,b,c,d)	"MDB " #a "." #b "." #c ": (" d ")"
