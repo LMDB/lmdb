@@ -1067,10 +1067,10 @@ mdb_dkey(MDB_val *key, char *buf)
 
 /** Display all the keys in the page. */
 static void
-mdb_page_keys(MDB_page *mp)
+mdb_page_list(MDB_page *mp)
 {
 	MDB_node *node;
-	unsigned int i, nkeys;
+	unsigned int i, nkeys, nsize;
 	MDB_val key;
 	DKBUF;
 
@@ -1080,7 +1080,12 @@ mdb_page_keys(MDB_page *mp)
 		node = NODEPTR(mp, i);
 		key.mv_size = node->mn_ksize;
 		key.mv_data = node->mn_data;
-		fprintf(stderr, "key %d: %s\n", i, DKEY(&key));
+		nsize = NODESIZE + NODEKSZ(node) + sizeof(indx_t);
+		if (F_ISSET(node->mn_flags, F_BIGDATA))
+			nsize += sizeof(pgno_t);
+		else
+			nsize += NODEDSZ(node);
+		fprintf(stderr, "key %d: nsize %d, %s\n", i, nsize, DKEY(&key));
 	}
 }
 
@@ -5988,7 +5993,7 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 	}
 
 	nkeys = NUMKEYS(mp);
-	split_indx = (nkeys + 1) / 2;
+	split_indx = nkeys / 2;
 	if (newindx < split_indx)
 		newpos = 0;
 
@@ -6062,8 +6067,11 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 						psize += NODEDSZ(node);
 					psize += psize & 1;
 					if (psize > pmax) {
-						if (i == split_indx - 1 && newindx == split_indx)
-							newpos = 1;
+						if (i <= newindx) {
+							split_indx = newindx;
+							if (i < newindx)
+								newpos = 1;
+						}
 						else
 							split_indx = i;
 						break;
@@ -6080,7 +6088,10 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 						psize += NODEDSZ(node);
 					psize += psize & 1;
 					if (psize > pmax) {
-						split_indx = i+1;
+						if (i >= newindx)
+							split_indx = newindx;
+						else
+							split_indx = i+1;
 						break;
 					}
 				}
