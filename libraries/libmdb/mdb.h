@@ -87,7 +87,7 @@ extern "C" {
 /** Library minor version */
 #define MDB_VERSION_MINOR	9
 /** Library patch version */
-#define MDB_VERSION_PATCH	3
+#define MDB_VERSION_PATCH	4
 
 /** Combine args a,b,c into a single integer for easy version comparisons */
 #define MDB_VERINT(a,b,c)	(((a) << 24) | ((b) << 16) | (c))
@@ -97,7 +97,7 @@ extern "C" {
 	MDB_VERINT(MDB_VERSION_MAJOR,MDB_VERSION_MINOR,MDB_VERSION_PATCH)
 
 /** The release date of this library version */
-#define MDB_VERSION_DATE	"September 7, 2012"
+#define MDB_VERSION_DATE	"September 14, 2012"
 
 /** A stringifier for the version info */
 #define MDB_VERSTR(a,b,c,d)	"MDB " #a "." #b "." #c ": (" d ")"
@@ -269,6 +269,22 @@ typedef enum MDB_cursor_op {
 #define MDB_PANIC		(-30795)
 	/** Environment version mismatch */
 #define MDB_VERSION_MISMATCH	(-30794)
+	/** File is not a valid MDB file */
+#define MDB_INVALID	(-30793)
+	/** Environment mapsize reached */
+#define MDB_MAP_FULL	(-30792)
+	/** Environment maxdbs reached */
+#define MDB_DBS_FULL	(-30791)
+	/** Environment maxreaders reached */
+#define MDB_READERS_FULL	(-30790)
+	/** Too many TLS keys in use - Windows only */
+#define MDB_TLS_FULL	(-30789)
+	/** Nested txn has too many dirty pages */
+#define MDB_TXN_FULL	(-30788)
+	/** Cursor stack too deep - internal error */
+#define MDB_CURSOR_FULL	(-30787)
+	/** Page has not enough space - internal error */
+#define MDB_PAGE_FULL	(-30786)
 /** @} */
 
 /** @brief Statistics for a database in the environment */

@@ -943,9 +943,9 @@ struct MDB_env {
 #define MDB_COMMIT_PAGES	IOV_MAX
 #endif
 
-static MDB_page *mdb_page_alloc(MDB_cursor *mc, int num);
-static MDB_page *mdb_page_new(MDB_cursor *mc, uint32_t flags, int num);
-static int 		mdb_page_touch(MDB_cursor *mc);
+static int  mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp);
+static int  mdb_page_new(MDB_cursor *mc, uint32_t flags, int num, MDB_page **mp);
+static int  mdb_page_touch(MDB_cursor *mc);
 
 static int  mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **mp);
 static int  mdb_page_search_root(MDB_cursor *mc,
@@ -1023,7 +1023,15 @@ static char *const mdb_errstr[] = {
 	"MDB_PAGE_NOTFOUND: Requested page not found",
 	"MDB_CORRUPTED: Located page was wrong type",
 	"MDB_PANIC: Update of meta page failed",
-	"MDB_VERSION_MISMATCH: Database environment version mismatch"
+	"MDB_VERSION_MISMATCH: Database environment version mismatch",
+	"MDB_INVALID: File is not an MDB file"
+	"MDB_MAP_FULL: Environment mapsize limit reached",
+	"MDB_DBS_FULL: Environment maxdbs limit reached",
+	"MDB_READERS_FULL: Environment maxreaders limit reached",
+	"MDB_TLS_FULL: Thread-local storage keys full - too many environments open",
+	"MDB_TXN_FULL: Nested transaction has too many dirty pages - transaction too big",
+	"MDB_CURSOR_FULL: Internal error - cursor stack limit reached",
+	"MDB_PAGE_FULL: Internal error - page has no more space",
 };
 
 char *
@@ -1200,17 +1208,20 @@ mdb_page_malloc(MDB_cursor *mc) {
  * @param[in] mc cursor A cursor handle identifying the transaction and
  *	database for which we are allocating.
  * @param[in] num the number of pages to allocate.
- * @return Address of the allocated page(s). Requests for multiple pages
+ * @param[out] mp Address of the allocated page(s). Requests for multiple pages
  *  will always be satisfied by a single contiguous chunk of memory.
+ * @return 0 on success, non-zero on failure.
  */
-static MDB_page *
-mdb_page_alloc(MDB_cursor *mc, int num)
+static int
+mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 {
 	MDB_txn *txn = mc->mc_txn;
 	MDB_page *np;
 	pgno_t pgno = P_INVALID;
 	MDB_ID2 mid;
+	int rc;
 
+	*mp = NULL;
 	/* The free list won't have any content at all until txn 2 has
 	 * committed. The pages freed by txn 2 will be unreferenced
 	 * after txn 3 commits, and so will be safe to re-use in txn 4.
@@ -1233,7 +1244,7 @@ mdb_page_alloc(MDB_cursor *mc, int num)
 				last = *kptr;
 			} else {
 				MDB_val key;
-				int rc, exact;
+				int exact;
 again:
 				exact = 0;
 				last = txn->mt_env->me_pglast + 1;
@@ -1274,6 +1285,8 @@ again:
 				 */
 				if (!idl[0]) goto again;
 				mop = malloc(sizeof(MDB_oldpages) + MDB_IDL_SIZEOF(idl) - sizeof(pgno_t));
+				if (!mop)
+					return ENOMEM;
 				mop->mo_next = txn->mt_env->me_pghead;
 				mop->mo_txnid = last;
 				txn->mt_env->me_pghead = mop;
@@ -1327,7 +1340,7 @@ none:
 		/* DB size is maxed out */
 		if (txn->mt_next_pgno + num >= txn->mt_env->me_maxpg) {
 			DPUTS("DB size maxed out");
-			return NULL;
+			return MDB_MAP_FULL;
 		}
 	}
 	if (txn->mt_env->me_flags & MDB_WRITEMAP) {
@@ -1346,7 +1359,7 @@ none:
 		} else {
 			size_t sz = txn->mt_env->me_psize * num;
 			if ((np = malloc(sz)) == NULL)
-				return NULL;
+				return ENOMEM;
 			VGMEMP_ALLOC(txn->mt_env, np, sz);
 		}
 		if (pgno == P_INVALID) {
@@ -1363,8 +1376,9 @@ none:
 	} else {
 		mdb_mid2l_insert(txn->mt_u.dirty_list, &mid);
 	}
+	*mp = np;
 
-	return np;
+	return MDB_SUCCESS;
 }
 
 /** Copy a page: avoid copying unused portions of the page.
@@ -1397,11 +1411,12 @@ mdb_page_touch(MDB_cursor *mc)
 {
 	MDB_page *mp = mc->mc_pg[mc->mc_top];
 	pgno_t	pgno;
+	int rc;
 
 	if (!F_ISSET(mp->mp_flags, P_DIRTY)) {
 		MDB_page *np;
-		if ((np = mdb_page_alloc(mc, 1)) == NULL)
-			return ENOMEM;
+		if ((rc = mdb_page_alloc(mc, 1, &np)))
+			return rc;
 		DPRINTF("touched db %u page %zu -> %zu", mc->mc_dbi, mp->mp_pgno, np->mp_pgno);
 		assert(mp->mp_pgno != np->mp_pgno);
 		mdb_midl_append(&mc->mc_txn->mt_free_pgs, mp->mp_pgno);
@@ -1467,6 +1482,8 @@ finish:
 		}
 		/* No - copy it */
 		np = mdb_page_malloc(mc);
+		if (!np)
+			return ENOMEM;
 		memcpy(np, mp, mc->mc_txn->mt_env->me_psize);
 		mid.mid = np->mp_pgno;
 		mid.mptr = np;
@@ -1616,7 +1633,7 @@ mdb_txn_renew0(MDB_txn *txn)
 					break;
 			if (i == env->me_maxreaders) {
 				UNLOCK_MUTEX_R(env);
-				return ENOMEM;
+				return MDB_READERS_FULL;
 			}
 			env->me_txns->mti_readers[i].mr_pid = pid;
 			env->me_txns->mti_readers[i].mr_tid = tid;
@@ -1691,6 +1708,8 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 		DPUTS("environment had fatal error, must shutdown!");
 		return MDB_PANIC;
 	}
+	if ((env->me_flags & MDB_RDONLY) && !(flags & MDB_RDONLY))
+		return EACCES;
 	if (parent) {
 		/* parent already has an active child txn */
 		if (parent->mt_child) {
@@ -1935,7 +1954,7 @@ mdb_txn_commit(MDB_txn *txn)
 		for (; y<=src[0].mid; y++) {
 			if (++x >= MDB_IDL_UM_MAX) {
 				mdb_txn_abort(txn);
-				return ENOMEM;
+				return MDB_TXN_FULL;
 			}
 			dst[x] = src[y];
 		}
@@ -2273,7 +2292,7 @@ mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 	else if (rc != MDB_PAGESIZE) {
 		err = ErrCode();
 		if (rc > 0)
-			err = EINVAL;
+			err = MDB_INVALID;
 		DPRINTF("read: %s", strerror(err));
 		return err;
 	}
@@ -2282,13 +2301,13 @@ mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 
 	if (!F_ISSET(p->mp_flags, P_META)) {
 		DPRINTF("page %zu not a meta page", p->mp_pgno);
-		return EINVAL;
+		return MDB_INVALID;
 	}
 
 	m = METADATA(p);
 	if (m->mm_magic != MDB_MAGIC) {
 		DPUTS("meta has invalid magic");
-		return EINVAL;
+		return MDB_INVALID;
 	}
 
 	if (m->mm_version != MDB_VERSION) {
@@ -3038,7 +3057,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 	} else {
 		if (env->me_txns->mti_magic != MDB_MAGIC) {
 			DPUTS("lock region has invalid magic");
-			rc = EINVAL;
+			rc = MDB_INVALID;
 			goto fail;
 		}
 		if (env->me_txns->mti_version != MDB_VERSION) {
@@ -3170,7 +3189,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 		if (mdb_tls_nkeys < MAX_TLS_KEYS)
 			mdb_tls_keys[mdb_tls_nkeys++] = env->me_txkey;
 		else {
-			rc = ENOMEM;
+			rc = MDB_TLS_FULL;
 			goto leave;
 		}
 #endif
@@ -3498,7 +3517,7 @@ mdb_cursor_push(MDB_cursor *mc, MDB_page *mp)
 
 	if (mc->mc_snum >= CURSOR_STACK) {
 		assert(mc->mc_snum < CURSOR_STACK);
-		return ENOMEM;
+		return MDB_CURSOR_FULL;
 	}
 
 	mc->mc_top = mc->mc_snum++;
@@ -4397,8 +4416,8 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 		MDB_page *np;
 		/* new database, write a root leaf page */
 		DPUTS("allocating new root leaf page");
-		if ((np = mdb_page_new(mc, P_LEAF, 1)) == NULL) {
-			return ENOMEM;
+		if ((rc = mdb_page_new(mc, P_LEAF, 1, &np))) {
+			return rc;
 		}
 		mc->mc_snum = 0;
 		mdb_cursor_push(mc, np);
@@ -4550,9 +4569,8 @@ reuse:
 					rdata = &xdata;
 					xdata.mv_size = sizeof(MDB_db);
 					xdata.mv_data = &dummy;
-					mp = mdb_page_alloc(mc, 1);
-					if (!mp)
-						return ENOMEM;
+					if ((rc = mdb_page_alloc(mc, 1, &mp)))
+						return rc;
 					offset = mc->mc_txn->mt_env->me_psize - NODEDSZ(leaf);
 					flags |= F_DUPDATA|F_SUBDATA;
 					dummy.md_root = mp->mp_pgno;
@@ -4795,15 +4813,17 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
  * @param[in] flags flags defining what type of page is being allocated.
  * @param[in] num the number of pages to allocate. This is usually 1,
  * unless allocating overflow pages for a large record.
- * @return Address of a page, or NULL on failure.
+ * @param[out] mp Address of a page, or NULL on failure.
+ * @return 0 on success, non-zero on failure.
  */
-static MDB_page *
-mdb_page_new(MDB_cursor *mc, uint32_t flags, int num)
+static int
+mdb_page_new(MDB_cursor *mc, uint32_t flags, int num, MDB_page **mp)
 {
 	MDB_page	*np;
+	int rc;
 
-	if ((np = mdb_page_alloc(mc, num)) == NULL)
-		return NULL;
+	if ((rc = mdb_page_alloc(mc, num, &np)))
+		return rc;
 	DPRINTF("allocated new mpage %zu, page size %u",
 	    np->mp_pgno, mc->mc_txn->mt_env->me_psize);
 	np->mp_flags = flags | P_DIRTY;
@@ -4818,8 +4838,9 @@ mdb_page_new(MDB_cursor *mc, uint32_t flags, int num)
 		mc->mc_db->md_overflow_pages += num;
 		np->mp_pages = num;
 	}
+	*mp = np;
 
-	return np;
+	return 0;
 }
 
 /** Calculate the size of a leaf node.
@@ -4883,7 +4904,7 @@ mdb_branch_size(MDB_env *env, MDB_val *key)
  * @return 0 on success, non-zero on failure. Possible errors are:
  * <ul>
  *	<li>ENOMEM - failed to allocate overflow pages for the node.
- *	<li>ENOSPC - there is insufficient room in the page. This error
+ *	<li>MDB_PAGE_FULL - there is insufficient room in the page. This error
  *	should never happen since all callers already calculate the
  *	page's free space before calling this function.
  * </ul>
@@ -4934,12 +4955,13 @@ mdb_node_add(MDB_cursor *mc, indx_t indx,
 			node_size += sizeof(pgno_t);
 		} else if (node_size + data->mv_size >= mc->mc_txn->mt_env->me_psize / MDB_MINKEYS) {
 			int ovpages = OVPAGES(data->mv_size, mc->mc_txn->mt_env->me_psize);
+			int rc;
 			/* Put data on overflow page. */
 			DPRINTF("data size is %zu, node would be %zu, put data on overflow page",
 			    data->mv_size, node_size+data->mv_size);
 			node_size += sizeof(pgno_t);
-			if ((ofp = mdb_page_new(mc, P_OVERFLOW, ovpages)) == NULL)
-				return ENOMEM;
+			if ((rc = mdb_page_new(mc, P_OVERFLOW, ovpages, &ofp)))
+				return rc;
 			DPRINTF("allocated overflow page %zu", ofp->mp_pgno);
 			flags |= F_BIGDATA;
 		} else {
@@ -4954,7 +4976,7 @@ mdb_node_add(MDB_cursor *mc, indx_t indx,
 		DPRINTF("upper - lower = %u - %u = %u", mp->mp_upper, mp->mp_lower,
 		    mp->mp_upper - mp->mp_lower);
 		DPRINTF("node size = %zu", node_size);
-		return ENOSPC;
+		return MDB_PAGE_FULL;
 	}
 
 	/* Move higher pointers up one slot. */
@@ -5357,7 +5379,7 @@ mdb_update_key(MDB_page *mp, indx_t indx, MDB_val *key)
 	if (delta) {
 		if (delta > 0 && SIZELEFT(mp) < delta) {
 			DPRINTF("OUCH! Not enough room, delta = %d", delta);
-			return ENOSPC;
+			return MDB_PAGE_FULL;
 		}
 
 		numkeys = NUMKEYS(mp);
@@ -5945,13 +5967,13 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 	    DKEY(newkey), mc->mc_ki[mc->mc_top]);
 
 	/* Create a right sibling. */
-	if ((rp = mdb_page_new(mc, mp->mp_flags, 1)) == NULL)
-		return ENOMEM;
+	if ((rc = mdb_page_new(mc, mp->mp_flags, 1, &rp)))
+		return rc;
 	DPRINTF("new right sibling: page %zu", rp->mp_pgno);
 
 	if (mc->mc_snum < 2) {
-		if ((pp = mdb_page_new(mc, P_BRANCH, 1)) == NULL)
-			return ENOMEM;
+		if ((rc = mdb_page_new(mc, P_BRANCH, 1, &pp)))
+			return rc;
 		/* shift current top to make room for new parent */
 		mc->mc_pg[1] = mc->mc_pg[0];
 		mc->mc_ki[1] = mc->mc_ki[0];
@@ -6340,7 +6362,7 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
  *	at runtime. Changing other flags requires closing the environment
  *	and re-opening it with the new flags.
  */
-#define	CHANGEABLE	(MDB_NOSYNC|MDB_NOMETASYNC)
+#define	CHANGEABLE	(MDB_NOSYNC|MDB_NOMETASYNC|MDB_MAPASYNC)
 int
 mdb_env_set_flags(MDB_env *env, unsigned int flag, int onoff)
 {
@@ -6470,7 +6492,7 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 
 	/* If no free slot and max hit, fail */
 	if (!unused && txn->mt_numdbs >= txn->mt_env->me_maxdbs - 1)
-		return ENFILE;
+		return MDB_DBS_FULL;
 
 	/* Find the DB info */
 	dbflag = 0;
