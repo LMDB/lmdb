@@ -704,7 +704,7 @@ typedef struct MDB_node {
 #define LEAF2KEY(p, i, ks)	((char *)(p) + PAGEHDRSZ + ((i)*(ks)))
 
 	/** Set the \b node's key into \b key, if requested. */
-#define MDB_SET_KEY(node, key)	{ if ((key) != NULL) { \
+#define MDB_GET_KEY(node, key)	{ if ((key) != NULL) { \
 	(key)->mv_size = NODEKSZ(node); (key)->mv_data = NODEKEY(node); } }
 
 	/** Information about a single database in the environment. */
@@ -3895,7 +3895,7 @@ mdb_cursor_next(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 		}
 	}
 
-	MDB_SET_KEY(leaf, key);
+	MDB_GET_KEY(leaf, key);
 	return MDB_SUCCESS;
 }
 
@@ -3968,7 +3968,7 @@ mdb_cursor_prev(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 		}
 	}
 
-	MDB_SET_KEY(leaf, key);
+	MDB_GET_KEY(leaf, key);
 	return MDB_SUCCESS;
 }
 
@@ -4000,7 +4000,7 @@ mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 			nodekey.mv_data = LEAF2KEY(mp, 0, nodekey.mv_size);
 		} else {
 			leaf = NODEPTR(mp, 0);
-			MDB_SET_KEY(leaf, &nodekey);
+			MDB_GET_KEY(leaf, &nodekey);
 		}
 		rc = mc->mc_dbx->md_cmp(key, &nodekey);
 		if (rc == 0) {
@@ -4021,7 +4021,7 @@ mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 						 nkeys-1, nodekey.mv_size);
 				} else {
 					leaf = NODEPTR(mp, nkeys-1);
-					MDB_SET_KEY(leaf, &nodekey);
+					MDB_GET_KEY(leaf, &nodekey);
 				}
 				rc = mc->mc_dbx->md_cmp(key, &nodekey);
 				if (rc == 0) {
@@ -4039,7 +4039,7 @@ mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 								 mc->mc_ki[mc->mc_top], nodekey.mv_size);
 						} else {
 							leaf = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
-							MDB_SET_KEY(leaf, &nodekey);
+							MDB_GET_KEY(leaf, &nodekey);
 						}
 						rc = mc->mc_dbx->md_cmp(key, &nodekey);
 						if (rc == 0) {
@@ -4111,7 +4111,7 @@ set1:
 	}
 	if (data) {
 		if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
-			if (op == MDB_SET || op == MDB_SET_RANGE) {
+			if (op == MDB_SET || op == MDB_SET_KEY || op == MDB_SET_RANGE) {
 				rc = mdb_cursor_first(&mc->mc_xcursor->mx_cursor, data, NULL);
 			} else {
 				int ex2, *ex2p;
@@ -4144,8 +4144,8 @@ set1:
 	}
 
 	/* The key already matches in all other cases */
-	if (op == MDB_SET_RANGE)
-		MDB_SET_KEY(leaf, key);
+	if (op == MDB_SET_RANGE || op == MDB_SET_KEY)
+		MDB_GET_KEY(leaf, key);
 	DPRINTF("==> cursor placed on key [%s]", DKEY(key));
 
 	return rc;
@@ -4190,7 +4190,7 @@ mdb_cursor_first(MDB_cursor *mc, MDB_val *key, MDB_val *data)
 				return rc;
 		}
 	}
-	MDB_SET_KEY(leaf, key);
+	MDB_GET_KEY(leaf, key);
 	return MDB_SUCCESS;
 }
 
@@ -4239,7 +4239,7 @@ mdb_cursor_last(MDB_cursor *mc, MDB_val *key, MDB_val *data)
 		}
 	}
 
-	MDB_SET_KEY(leaf, key);
+	MDB_GET_KEY(leaf, key);
 	return MDB_SUCCESS;
 }
 
@@ -4261,6 +4261,7 @@ mdb_cursor_get(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 		}
 		/* FALLTHRU */
 	case MDB_SET:
+	case MDB_SET_KEY:
 	case MDB_SET_RANGE:
 		if (key == NULL || key->mv_size == 0 || key->mv_size > MAXKEYSIZE) {
 			rc = EINVAL;
