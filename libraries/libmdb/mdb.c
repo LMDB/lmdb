@@ -3163,7 +3163,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 	}
 
 	if ((rc = mdb_env_open2(env, flags)) == MDB_SUCCESS) {
-		if (flags & (MDB_RDONLY|MDB_NOSYNC|MDB_NOMETASYNC)) {
+		if (flags & (MDB_RDONLY|MDB_NOSYNC|MDB_NOMETASYNC|MDB_WRITEMAP)) {
 			env->me_mfd = env->me_fd;
 		} else {
 			/* synchronous fd for meta writes */
