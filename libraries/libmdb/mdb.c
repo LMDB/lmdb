@@ -158,11 +158,22 @@
 #define	close(fd)	CloseHandle(fd)
 #define	munmap(ptr,len)	UnmapViewOfFile(ptr)
 #else
+
 #ifdef MDB_USE_POSIX_SEM
-#define LOCK_MUTEX_R(env)	sem_wait((env)->me_rmutex)
+
+#define LOCK_MUTEX_R(env)	mdb_sem_wait((env)->me_rmutex)
 #define UNLOCK_MUTEX_R(env)	sem_post((env)->me_rmutex)
-#define LOCK_MUTEX_W(env)	sem_wait((env)->me_wmutex)
+#define LOCK_MUTEX_W(env)	mdb_sem_wait((env)->me_wmutex)
 #define UNLOCK_MUTEX_W(env)	sem_post((env)->me_wmutex)
+
+static int
+mdb_sem_wait(sem_t *sem)
+{
+   int rc;
+   while ((rc = sem_wait(sem)) && (rc = errno) == EINTR) ;
+   return rc;
+}
+
 #else
 	/** Lock the reader mutex.
 	 */
@@ -2730,10 +2741,10 @@ PIMAGE_TLS_CALLBACK mdb_tls_cbp = mdb_tls_callback;
 #endif
 
 /** Downgrade the exclusive lock on the region back to shared */
-static void
+static int
 mdb_env_share_locks(MDB_env *env)
 {
-	int toggle = mdb_env_pick_meta(env);
+	int rc = 0, toggle = mdb_env_pick_meta(env);
 
 	env->me_txns->mti_txnid = env->me_metas[toggle]->mm_txnid;
 
@@ -2756,14 +2767,18 @@ mdb_env_share_locks(MDB_env *env)
 		lock_info.l_whence = SEEK_SET;
 		lock_info.l_start = 0;
 		lock_info.l_len = 1;
-		fcntl(env->me_lfd, F_SETLK, &lock_info);
+		while ((rc = fcntl(env->me_lfd, F_SETLK, &lock_info)) &&
+				(rc = ErrCode()) == EINTR) ;
 	}
 #endif
+
+	return rc;
 }
 
 static int
 mdb_env_excl_lock(MDB_env *env, int *excl)
 {
+	int rc = 0;
 #ifdef _WIN32
 	if (LockFile(env->me_lfd, 0, 0, 1, 0)) {
 		*excl = 1;
@@ -2771,7 +2786,7 @@ mdb_env_excl_lock(MDB_env *env, int *excl)
 		OVERLAPPED ov;
 		memset(&ov, 0, sizeof(ov));
 		if (!LockFileEx(env->me_lfd, 0, 0, 1, 0, &ov)) {
-			return ErrCode();
+			rc = ErrCode();
 		}
 	}
 #else
@@ -2785,12 +2800,11 @@ mdb_env_excl_lock(MDB_env *env, int *excl)
 		*excl = 1;
 	} else {
 		lock_info.l_type = F_RDLCK;
-		if (fcntl(env->me_lfd, F_SETLKW, &lock_info)) {
-			return ErrCode();
-		}
+		while ((rc = fcntl(env->me_lfd, F_SETLKW, &lock_info)) &&
+				(rc = ErrCode()) == EINTR) ;
 	}
 #endif
-	return 0;
+	return rc;
 }
 
 #if defined(_WIN32) || defined(MDB_USE_POSIX_SEM)
@@ -3194,8 +3208,11 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 			goto leave;
 		}
 #endif
-		if (excl)
-			mdb_env_share_locks(env);
+		if (excl) {
+			rc = mdb_env_share_locks(env);
+			if (rc)
+				goto leave;
+		}
 		env->me_numdbs = 2;
 		env->me_dbxs = calloc(env->me_maxdbs, sizeof(MDB_dbx));
 		env->me_dbflags = calloc(env->me_maxdbs, sizeof(uint16_t));
