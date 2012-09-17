@@ -1024,24 +1024,27 @@ static char *const mdb_errstr[] = {
 	"MDB_CORRUPTED: Located page was wrong type",
 	"MDB_PANIC: Update of meta page failed",
 	"MDB_VERSION_MISMATCH: Database environment version mismatch",
-	"MDB_INVALID: File is not an MDB file"
+	"MDB_INVALID: File is not an MDB file",
 	"MDB_MAP_FULL: Environment mapsize limit reached",
 	"MDB_DBS_FULL: Environment maxdbs limit reached",
 	"MDB_READERS_FULL: Environment maxreaders limit reached",
 	"MDB_TLS_FULL: Thread-local storage keys full - too many environments open",
 	"MDB_TXN_FULL: Nested transaction has too many dirty pages - transaction too big",
 	"MDB_CURSOR_FULL: Internal error - cursor stack limit reached",
-	"MDB_PAGE_FULL: Internal error - page has no more space",
+	"MDB_PAGE_FULL: Internal error - page has no more space"
 };
 
 char *
 mdb_strerror(int err)
 {
+	int i;
 	if (!err)
 		return ("Successful return: 0");
 
-	if (err >= MDB_KEYEXIST && err <= MDB_VERSION_MISMATCH)
-		return mdb_errstr[err - MDB_KEYEXIST];
+	if (err >= MDB_KEYEXIST && err <= MDB_LAST_ERRCODE) {
+		i = err - MDB_KEYEXIST;
+		return mdb_errstr[i];
+	}
 
 	return strerror(err);
 }

@@ -286,6 +286,7 @@ typedef enum MDB_cursor_op {
 #define MDB_CURSOR_FULL	(-30787)
 	/** Page has not enough space - internal error */
 #define MDB_PAGE_FULL	(-30786)
+#define MDB_LAST_ERRCODE	MDB_PAGE_FULL
 /** @} */
 
 /** @brief Statistics for a database in the environment */
