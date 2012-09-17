@@ -6128,9 +6128,10 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 						psize += NODEDSZ(node);
 					psize += psize & 1;
 					if (psize > pmax) {
-						if (i >= newindx)
+						if (i >= newindx) {
 							split_indx = newindx;
-						else
+							newpos = 0;
+						} else
 							split_indx = i+1;
 						break;
 					}
