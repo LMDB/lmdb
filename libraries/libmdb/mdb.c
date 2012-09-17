@@ -5285,6 +5285,19 @@ mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **ret)
 	return MDB_SUCCESS;
 }
 
+int
+mdb_cursor_renew(MDB_txn *txn, MDB_cursor *mc)
+{
+	if (txn == NULL || mc == NULL || mc->mc_dbi >= txn->mt_numdbs)
+		return EINVAL;
+
+	if (txn->mt_cursors)
+		return EINVAL;
+
+	mdb_cursor_init(mc, txn, mc->mc_dbi, mc->mc_xcursor);
+	return MDB_SUCCESS;
+}
+
 /* Return the count of duplicate data items for the current key */
 int
 mdb_cursor_count(MDB_cursor *mc, size_t *countp)

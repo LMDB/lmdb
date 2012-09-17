@@ -904,6 +904,23 @@ int  mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **cursor);
 	 */
 void mdb_cursor_close(MDB_cursor *cursor);
 
+	/** @brief Renew a cursor handle.
+	 *
+	 * Cursors are associated with a specific transaction and database and
+	 * may not span threads. Cursors that are only used in read-only
+	 * transactions may be re-used, to avoid unnecessary malloc/free overhead.
+	 * The cursor may be associated with a new read-only transaction, and
+	 * referencing the same database handle as it was created with.
+	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
+	 * @param[in] cursor A cursor handle returned by #mdb_cursor_open()
+	 * @return A non-zero error value on failure and 0 on success. Some possible
+	 * errors are:
+	 * <ul>
+	 *	<li>EINVAL - an invalid parameter was specified.
+	 * </ul>
+	 */
+int  mdb_cursor_renew(MDB_txn *txn, MDB_cursor *cursor);
+
 	/** @brief Return the cursor's transaction handle.
 	 *
 	 * @param[in] cursor A cursor handle returned by #mdb_cursor_open()
