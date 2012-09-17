@@ -3006,12 +3006,12 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		val.mv_size = sizeof(idbuf);
 		mdb_hash_hex(&val, hexbuf);
 		sprintf(env->me_txns->mti_rmname, "Global\\MDBr%s", hexbuf);
+		sprintf(env->me_txns->mti_wmname, "Global\\MDBw%s", hexbuf);
 		env->me_rmutex = CreateMutex(&mdb_all_sa, FALSE, env->me_txns->mti_rmname);
 		if (!env->me_rmutex) {
 			rc = ErrCode();
 			goto fail;
 		}
-		sprintf(env->me_txns->mti_wmname, "Global\\MDBw%s", hexbuf);
 		env->me_wmutex = CreateMutex(&mdb_all_sa, FALSE, env->me_txns->mti_wmname);
 		if (!env->me_wmutex) {
 			rc = ErrCode();
@@ -3033,23 +3033,20 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		val.mv_size = sizeof(idbuf);
 		mdb_hash_hex(&val, hexbuf);
 		sprintf(env->me_txns->mti_rmname, "/MDBr%s", hexbuf);
-		if (sem_unlink(env->me_txns->mti_rmname)) {
-			rc = ErrCode();
-			if (rc != ENOENT && rc != EINVAL)
-				goto fail;
-		}
-		env->me_rmutex = sem_open(env->me_txns->mti_rmname, O_CREAT, mode, 1);
+		sprintf(env->me_txns->mti_wmname, "/MDBw%s", hexbuf);
+		/* Clean up after a previous run, if needed:  Try to
+		 * remove both semaphores before doing anything else.
+		 */
+		sem_unlink(env->me_txns->mti_rmname);
+		sem_unlink(env->me_txns->mti_wmname);
+		env->me_rmutex = sem_open(env->me_txns->mti_rmname,
+			O_CREAT|O_EXCL, mode, 1);
 		if (env->me_rmutex == SEM_FAILED) {
 			rc = ErrCode();
 			goto fail;
 		}
-		sprintf(env->me_txns->mti_wmname, "/MDBw%s", hexbuf);
-		if (sem_unlink(env->me_txns->mti_wmname)) {
-			rc = ErrCode();
-			if (rc != ENOENT && rc != EINVAL)
-				goto fail;
-		}
-		env->me_wmutex = sem_open(env->me_txns->mti_wmname, O_CREAT, mode, 1);
+		env->me_wmutex = sem_open(env->me_txns->mti_wmname,
+			O_CREAT|O_EXCL, mode, 1);
 		if (env->me_wmutex == SEM_FAILED) {
 			rc = ErrCode();
 			goto fail;
