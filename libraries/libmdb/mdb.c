@@ -2775,6 +2775,9 @@ mdb_env_share_locks(MDB_env *env)
 	return rc;
 }
 
+/** Try to get exlusive lock, otherwise shared.
+ *	Maintain *excl = -1: no/unknown lock, 0: shared, 1: exclusive.
+ */
 static int
 mdb_env_excl_lock(MDB_env *env, int *excl)
 {
@@ -2798,7 +2801,11 @@ mdb_env_excl_lock(MDB_env *env, int *excl)
 	lock_info.l_len = 1;
 	if (!fcntl(env->me_lfd, F_SETLK, &lock_info)) {
 		*excl = 1;
-	} else {
+	} else
+# ifdef MDB_USE_POSIX_SEM
+	if (*excl < 0) /* always true when !MDB_USE_POSIX_SEM */
+# endif
+	{
 		lock_info.l_type = F_RDLCK;
 		while ((rc = fcntl(env->me_lfd, F_SETLKW, &lock_info)) &&
 				(rc = ErrCode()) == EINTR) ;
@@ -2896,7 +2903,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 	int rc;
 	off_t size, rsize;
 
-	*excl = 0;
+	*excl = -1;
 
 #ifdef _WIN32
 	if ((env->me_lfd = CreateFile(lpath, GENERIC_READ|GENERIC_WRITE,
@@ -2934,7 +2941,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 	size = lseek(env->me_lfd, 0, SEEK_END);
 #endif
 	rsize = (env->me_maxreaders-1) * sizeof(MDB_reader) + sizeof(MDB_txninfo);
-	if (size < rsize && *excl) {
+	if (size < rsize && *excl > 0) {
 #ifdef _WIN32
 		SetFilePointer(env->me_lfd, rsize, NULL, 0);
 		if (!SetEndOfFile(env->me_lfd)) {
@@ -2978,7 +2985,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		env->me_txns = m;
 #endif
 	}
-	if (*excl) {
+	if (*excl > 0) {
 #ifdef _WIN32
 		BY_HANDLE_FILE_INFORMATION stbuf;
 		struct {
@@ -3205,7 +3212,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 			goto leave;
 		}
 #endif
-		if (excl) {
+		if (excl > 0) {
 			rc = mdb_env_share_locks(env);
 			if (rc)
 				goto leave;
