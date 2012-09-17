@@ -1698,7 +1698,7 @@ mdb_txn_renew(MDB_txn *txn)
 {
 	int rc;
 
-	if (!txn)
+	if (! (txn && txn->mt_flags & MDB_TXN_RDONLY))
 		return EINVAL;
 
 	if (txn->mt_env->me_flags & MDB_FATAL_ERROR) {
@@ -1728,13 +1728,13 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 	if ((env->me_flags & MDB_RDONLY) && !(flags & MDB_RDONLY))
 		return EACCES;
 	if (parent) {
-		/* parent already has an active child txn */
-		if (parent->mt_child) {
+		/* Nested transactions: Max 1 child, write txns only, no writemap */
+		if (parent->mt_child ||
+			(flags & MDB_RDONLY) || (parent->mt_flags & MDB_TXN_RDONLY) ||
+			(env->me_flags & MDB_WRITEMAP))
+		{
 			return EINVAL;
 		}
-		/* nested TXNs not supported here */
-		if (env->me_flags & MDB_WRITEMAP)
-			return EINVAL;
 	}
 	size = sizeof(MDB_txn) + env->me_maxdbs * (sizeof(MDB_db)+1);
 	if (!(flags & MDB_RDONLY))
@@ -3101,6 +3101,9 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 {
 	int		oflags, rc, len, excl;
 	char *lpath, *dpath;
+
+	if (env->me_fd != INVALID_HANDLE_VALUE)
+		return EINVAL;
 
 	len = strlen(path);
 	if (flags & MDB_NOSUBDIR) {
