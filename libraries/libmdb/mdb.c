@@ -906,6 +906,7 @@ struct MDB_env {
 	unsigned int	me_maxreaders;	/**< size of the reader table */
 	MDB_dbi		me_numdbs;		/**< number of DBs opened */
 	MDB_dbi		me_maxdbs;		/**< size of the DB table */
+	pid_t		me_pid;		/**< process ID of this env */
 	char		*me_path;		/**< path to the DB files */
 	char		*me_map;		/**< the memory map of the data file */
 	MDB_txninfo	*me_txns;		/**< the memory map of the lock file */
@@ -1625,7 +1626,7 @@ mdb_txn_renew0(MDB_txn *txn)
 	if (txn->mt_flags & MDB_TXN_RDONLY) {
 		MDB_reader *r = pthread_getspecific(env->me_txkey);
 		if (!r) {
-			pid_t pid = getpid();
+			pid_t pid = env->me_pid;
 			pthread_t tid = pthread_self();
 
 			LOCK_MUTEX_R(env);
@@ -2506,6 +2507,7 @@ mdb_env_create(MDB_env **env)
 	e->me_fd = INVALID_HANDLE_VALUE;
 	e->me_lfd = INVALID_HANDLE_VALUE;
 	e->me_mfd = INVALID_HANDLE_VALUE;
+	e->me_pid = getpid();
 	VGMEMP_CREATE(e,0,0);
 	*env = e;
 	return MDB_SUCCESS;
@@ -3255,7 +3257,7 @@ mdb_env_close(MDB_env *env)
 		close(env->me_mfd);
 	close(env->me_fd);
 	if (env->me_txns) {
-		pid_t pid = getpid();
+		pid_t pid = env->me_pid;
 		unsigned int i;
 		for (i=0; i<env->me_txns->mti_numreaders; i++)
 			if (env->me_txns->mti_readers[i].mr_pid == pid)
