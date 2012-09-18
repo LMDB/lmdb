@@ -3128,6 +3128,10 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 	if (rc)
 		goto leave;
 
+	/* silently ignore WRITEMAP if we're only getting read access */
+	if (F_ISSET(flags, MDB_RDONLY) && F_ISSET(flags, MDB_WRITEMAP))
+		flags ^= MDB_WRITEMAP;
+
 #ifdef _WIN32
 	if (F_ISSET(flags, MDB_RDONLY)) {
 		oflags = GENERIC_READ;
