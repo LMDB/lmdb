@@ -229,6 +229,7 @@ typedef enum MDB_cursor_op {
 								Only for #MDB_DUPSORT */
 	MDB_GET_BOTH,			/**< Position at key/data pair. Only for #MDB_DUPSORT */
 	MDB_GET_BOTH_RANGE,		/**< position at key, nearest data. Only for #MDB_DUPSORT */
+	MDB_GET_CURRENT,		/**< Return key/data at current cursor position */
 	MDB_GET_MULTIPLE,		/**< Return all the duplicate data items at the current
 								 cursor position. Only for #MDB_DUPFIXED */
 	MDB_LAST,				/**< Position at last key/data item */

@@ -4261,6 +4261,33 @@ mdb_cursor_get(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	assert(mc);
 
 	switch (op) {
+	case MDB_GET_CURRENT:
+		if (!mc->mc_flags & C_INITIALIZED) {
+			rc = EINVAL;
+		} else {
+			MDB_page *mp = mc->mc_pg[mc->mc_top];
+			if (!NUMKEYS(mp)) {
+				mc->mc_ki[mc->mc_top] = 0;
+				rc = MDB_NOTFOUND;
+				break;
+			}
+			rc = MDB_SUCCESS;
+			if (IS_LEAF2(mp)) {
+				key->mv_size = mc->mc_db->md_pad;
+				key->mv_data = LEAF2KEY(mp, mc->mc_ki[mc->mc_top], key->mv_size);
+			} else {
+				MDB_node *leaf = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
+				MDB_GET_KEY(leaf, key);
+				if (data) {
+					if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
+						rc = mdb_cursor_get(&mc->mc_xcursor->mx_cursor, data, NULL, MDB_GET_CURRENT);
+					} else {
+						rc = mdb_node_read(mc->mc_txn, leaf, data);
+					}
+				}
+			}
+		}
+		break;
 	case MDB_GET_BOTH:
 	case MDB_GET_BOTH_RANGE:
 		if (data == NULL || mc->mc_xcursor == NULL) {
