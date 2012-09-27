@@ -6117,15 +6117,19 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 	 * This check is only needed when the data items are
 	 * relatively large, such that being off by one will
 	 * make the difference between success or failure.
-	 * When the size of the data items is much smaller than
-	 * one-half of a page, this check is irrelevant.
+	 *
+	 * It's also relevant if a page happens to be laid out
+	 * such that one half of its nodes are all "small" and
+	 * the other half of its nodes are "large." If the new
+	 * item is also "large" and falls on the half with
+	 * "large" nodes, it also may not fit.
 	 */
 	if (IS_LEAF(mp)) {
 		unsigned int psize, nsize;
 		/* Maximum free space in an empty page */
 		pmax = mc->mc_txn->mt_env->me_psize - PAGEHDRSZ;
 		nsize = mdb_leaf_size(mc->mc_txn->mt_env, newkey, newdata);
-		if ((nkeys < 20) || (nsize > pmax/4)) {
+		if ((nkeys < 20) || (nsize > pmax/16)) {
 			if (newindx <= split_indx) {
 				psize = nsize;
 				newpos = 0;
