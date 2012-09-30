@@ -6696,6 +6696,7 @@ int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)
 		if (!rc)
 			mdb_close(txn->mt_env, dbi);
 	} else {
+		/* reset the DB record, mark it dirty */
 		txn->mt_dbflags[dbi] |= DB_DIRTY;
 		txn->mt_dbs[dbi].md_depth = 0;
 		txn->mt_dbs[dbi].md_branch_pages = 0;
@@ -6703,6 +6704,18 @@ int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)
 		txn->mt_dbs[dbi].md_overflow_pages = 0;
 		txn->mt_dbs[dbi].md_entries = 0;
 		txn->mt_dbs[dbi].md_root = P_INVALID;
+		{
+		MDB_cursor m2;
+		MDB_val key;
+		/* make sure last page of freeDB is touched and on freelist
+		 * otherwise if there are no other dirty pages in this txn,
+		 * these changes will be ignored.
+		 */
+		key.mv_size = MAXKEYSIZE+1;
+		key.mv_data = NULL;
+		mdb_cursor_init(&m2, txn, FREE_DBI, NULL);
+		mdb_page_search(&m2, &key, MDB_PS_MODIFY);
+		}
 	}
 leave:
 	mdb_cursor_close(mc);
