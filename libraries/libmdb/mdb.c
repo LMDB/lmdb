@@ -6704,17 +6704,19 @@ int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)
 		txn->mt_dbs[dbi].md_overflow_pages = 0;
 		txn->mt_dbs[dbi].md_entries = 0;
 		txn->mt_dbs[dbi].md_root = P_INVALID;
-		{
-		MDB_cursor m2;
-		MDB_val key;
-		/* make sure last page of freeDB is touched and on freelist
-		 * otherwise if there are no other dirty pages in this txn,
-		 * these changes will be ignored.
-		 */
-		key.mv_size = MAXKEYSIZE+1;
-		key.mv_data = NULL;
-		mdb_cursor_init(&m2, txn, FREE_DBI, NULL);
-		mdb_page_search(&m2, &key, MDB_PS_MODIFY);
+
+		if (!txn->mt_u.dirty_list[0].mid) {
+			MDB_cursor m2;
+			MDB_val key, data;
+			/* make sure we have at least one dirty page in this txn
+			 * otherwise these changes will be ignored.
+			 */
+			key.mv_size = sizeof(txnid_t);
+			key.mv_data = &txn->mt_txnid;
+			data.mv_size = sizeof(MDB_ID);
+			data.mv_data = txn->mt_free_pgs;
+			mdb_cursor_init(&m2, txn, FREE_DBI, NULL);
+			rc = mdb_cursor_put(&m2, &key, &data, 0);
 		}
 	}
 leave:
