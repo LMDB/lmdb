@@ -38,6 +38,61 @@
  *	corrupt the database. Of course if your application code is known to
  *	be bug-free (...) then this is not an issue.
  *
+ *	Troubleshooting the lock file, plus semaphores on BSD systems:
+ *
+ *	- A broken lockfile can cause sync issues.
+ *	  Stale reader transactions left behind by an aborted program
+ *	  cause further writes to grow the database quickly, and
+ *	  stale locks can block further operation.
+ *
+ *	  Fix: Terminate all programs using the database, or make
+ *	  them close it.  Next database user will reset the lockfile.
+ *
+ *	- On BSD systems or others configured with MDB_USE_POSIX_SEM,
+ *	  startup can fail due to semaphores owned by another userid.
+ *
+ *	  Fix: Open and close the database as the user which owns the
+ *	  semaphores (likely last user) or as root, while no other
+ *	  process is using the database.
+ *
+ *	Restrictions/caveats (in addition to those listed for some functions):
+ *
+ *	- Only the database owner should normally use the database on
+ *	  BSD systems or when otherwise configured with MDB_USE_POSIX_SEM.
+ *	  Multiple users can cause startup to fail later, as noted above.
+ *
+ *	- A thread can only use one transaction at a time, plus any child
+ *	  transactions.  Each transaction belongs to one thread.  See below.
+ *
+ *	- Use an MDB_env* in the process which opened it, without fork()ing.
+ *
+ *	- Do not have open an MDB database twice in the same process at
+ *	  the same time.  Not even from a plain open() call - close()ing it
+ *	  breaks flock() advisory locking.
+ *
+ *	- Avoid long-lived transactions.  Read transactions prevent
+ *	  reuse of pages freed by newer write transactions, thus the
+ *	  database can grow quickly.  Write transactions prevent
+ *	  other write transactions, since writes are serialized.
+ *
+ *	...when several processes can use a database concurrently:
+ *
+ *	- Avoid suspending a process with active transactions.  These
+ *	  would then be "long-lived" as above.
+ *
+ *	- Avoid aborting a process with an active transaction.
+ *	  The transaction becomes "long-lived" as above until the lockfile
+ *	  is reset, since the process may not remove it from the lockfile.
+ *
+ *	- If you do that anyway, close the environment once in a while,
+ *	  so the lockfile can get reset.
+ *
+ *	- Do not use MDB databases on remote filesystems.  This breaks
+ *	  flock() on some OSes, even between two processes on the same host.
+ *
+ *	- Opening a database can fail if another process is opening or
+ *	  closing it at exactly the same time.
+ *
  *	@author	Howard Chu, Symas Corporation.
  *
  *	@copyright Copyright 2011-2012 Howard Chu, Symas Corp. All rights reserved.
