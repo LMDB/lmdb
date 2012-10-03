@@ -6548,7 +6548,7 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 	}
 
 	/* If no free slot and max hit, fail */
-	if (!unused && txn->mt_numdbs >= txn->mt_env->me_maxdbs - 1)
+	if (!unused && txn->mt_numdbs >= txn->mt_env->me_maxdbs)
 		return MDB_DBS_FULL;
 
 	/* Find the DB info */
