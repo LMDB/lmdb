@@ -2629,7 +2629,8 @@ mdb_env_open2(MDB_env *env, unsigned int flags)
 	prot = PROT_READ;
 	if (flags & MDB_WRITEMAP) {
 		prot |= PROT_WRITE;
-		ftruncate(env->me_fd, env->me_mapsize);
+		if (ftruncate(env->me_fd, env->me_mapsize) < 0)
+			return ErrCode();
 	}
 	env->me_map = mmap(meta.mm_address, env->me_mapsize, prot, i,
 		env->me_fd, 0);
