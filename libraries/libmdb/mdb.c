@@ -2806,7 +2806,9 @@ mdb_env_excl_lock(MDB_env *env, int *excl)
 	lock_info.l_whence = SEEK_SET;
 	lock_info.l_start = 0;
 	lock_info.l_len = 1;
-	if (!fcntl(env->me_lfd, F_SETLK, &lock_info)) {
+	while ((rc = fcntl(env->me_lfd, F_SETLK, &lock_info)) &&
+			(rc = ErrCode()) == EINTR) ;
+	if (!rc) {
 		*excl = 1;
 	} else
 # ifdef MDB_USE_POSIX_SEM
