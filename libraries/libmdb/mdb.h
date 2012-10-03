@@ -87,8 +87,10 @@
  *	- If you do that anyway, close the environment once in a while,
  *	  so the lockfile can get reset.
  *
- *	- Do not use MDB databases on remote filesystems.  This breaks
- *	  flock() on some OSes, even between two processes on the same host.
+ *	- Do not use MDB databases on remote filesystems, even between
+ *	  processes on the same host.  This breaks flock() on some OSes,
+ *	  possibly memory map sync, and certainly sync between programs
+ *	  on different hosts.
  *
  *	- Opening a database can fail if another process is opening or
  *	  closing it at exactly the same time.
