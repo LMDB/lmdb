@@ -32,6 +32,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
+#define _GNU_SOURCE
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/param.h>
@@ -3278,6 +3279,101 @@ mdb_env_close0(MDB_env *env, int excl)
 	close(env->me_lfd);
 
 	env->me_lfd = INVALID_HANDLE_VALUE;	/* Mark env as reset */
+}
+
+int
+mdb_env_copy(MDB_env *env, const char *path)
+{
+	MDB_txn *txn = NULL;
+	int rc, len, oflags;
+	size_t wsize;
+	char *lpath, *ptr;
+	HANDLE newfd = INVALID_HANDLE_VALUE;
+
+	if (env->me_flags & MDB_NOSUBDIR) {
+		lpath = path;
+	} else {
+		len = strlen(path);
+		len += sizeof(DATANAME);
+		lpath = malloc(len);
+		if (!lpath)
+			return ENOMEM;
+		sprintf(lpath, "%s" DATANAME, path);
+	}
+
+	/* The destination path must exist, but the destination file must not.
+	 * We don't want the OS to cache the writes, since the source data is
+	 * already in the OS cache.
+	 */
+#ifdef _WIN32
+	newfd = CreateFile(lpath, GENERIC_WRITE, 0, NULL, CREATE_NEW,
+				FILE_FLAG_NO_BUFFERING|FILE_FLAG_WRITE_THROUGH, NULL);
+#else
+	newfd = open(lpath, O_WRONLY|O_CREAT|O_EXCL
+#ifdef O_DIRECT
+		|O_DIRECT
+#endif
+		, 0666);
+#endif
+	if (!(env->me_flags & MDB_NOSUBDIR))
+		free(lpath);
+	if (newfd == INVALID_HANDLE_VALUE) {
+		rc = ErrCode();
+		goto leave;
+	}
+
+#ifdef F_NOCACHE	/* __APPLE__ */
+	rc = fcntl(newfd, F_NOCACHE, 1);
+	if (rc) {
+		rc = ErrCode();
+		goto leave;
+	}
+#endif
+
+	/* Temporarily block writers until we snapshot the meta pages */
+	LOCK_MUTEX_W(env);
+
+	rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
+	if (rc) {
+		UNLOCK_MUTEX_W(env);
+		goto leave;
+	}
+
+	wsize = env->me_psize * 2;
+#ifdef _WIN32
+	{
+		DWORD len;
+		rc = WriteFile(newfd, env->me_map, wsize, &len, NULL);
+		rc = (len == wsize) ? MDB_SUCCESS : ErrCode();
+	}
+#else
+	rc = write(newfd, env->me_map, wsize);
+	rc = (rc == (int)wsize) ? MDB_SUCCESS : ErrCode();
+#endif
+	UNLOCK_MUTEX_W(env);
+
+	if (rc)
+		goto leave;
+
+	ptr = env->me_map + wsize;
+	wsize = txn->mt_next_pgno * env->me_psize - wsize;
+#ifdef _WIN32
+	{
+		DWORD len;
+		rc = WriteFile(newfd, ptr, wsize, &len, NULL);
+		rc = (len == wsize) ? MDB_SUCCESS : ErrCode();
+	}
+#else
+	rc = write(newfd, ptr, wsize);
+	rc = (rc == (int)wsize) ? MDB_SUCCESS : ErrCode();
+#endif
+	mdb_txn_abort(txn);
+
+leave:
+	if (newfd != INVALID_HANDLE_VALUE)
+		close(newfd);
+
+	return rc;
 }
 
 void

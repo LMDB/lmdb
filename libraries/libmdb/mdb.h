@@ -450,6 +450,18 @@ int  mdb_env_create(MDB_env **env);
 	 */
 int  mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode);
 
+	/** @brief Copy an MDB environment to the specified path.
+	 *
+	 * This function may be used to make a backup of an existing environment.
+	 * @param[in] env An environment handle returned by #mdb_env_create(). It
+	 * must have already been opened successfully.
+	 * @param[in] path The directory in which the copy will reside. This
+	 * directory must already exist and be writable but must otherwise be
+	 * empty.
+	 * @return A non-zero error value on failure and 0 on success.
+	 */
+int  mdb_env_copy(MDB_env *env, const char *path);
+
 	/** @brief Return statistics about the MDB environment.
 	 *
 	 * @param[in] env An environment handle returned by #mdb_env_create()
