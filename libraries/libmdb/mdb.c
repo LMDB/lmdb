@@ -3291,7 +3291,7 @@ mdb_env_copy(MDB_env *env, const char *path)
 	HANDLE newfd = INVALID_HANDLE_VALUE;
 
 	if (env->me_flags & MDB_NOSUBDIR) {
-		lpath = path;
+		lpath = (char *)path;
 	} else {
 		len = strlen(path);
 		len += sizeof(DATANAME);
