@@ -913,6 +913,8 @@ struct MDB_env {
 	HANDLE		me_mfd;			/**< just for writing the meta pages */
 	/** Failed to update the meta page. Probably an I/O error. */
 #define	MDB_FATAL_ERROR	0x80000000U
+	/** Read-only Filesystem. Allow read access, no locking. */
+#define	MDB_ROFS	0x40000000U
 	uint32_t 	me_flags;		/**< @ref mdb_env */
 	unsigned int	me_psize;	/**< size of a page, from #GET_PAGESIZE */
 	unsigned int	me_maxreaders;	/**< size of the reader table */
@@ -1638,33 +1640,39 @@ mdb_txn_renew0(MDB_txn *txn)
 	txn->mt_dbxs = env->me_dbxs;	/* mostly static anyway */
 
 	if (txn->mt_flags & MDB_TXN_RDONLY) {
-		MDB_reader *r = pthread_getspecific(env->me_txkey);
-		if (!r) {
-			pid_t pid = env->me_pid;
-			pthread_t tid = pthread_self();
+		if (env->me_flags & MDB_ROFS) {
+			i = mdb_env_pick_meta(env);
+			txn->mt_txnid = env->me_metas[i]->mm_txnid;
+			txn->mt_u.reader = NULL;
+		} else {
+			MDB_reader *r = pthread_getspecific(env->me_txkey);
+			if (!r) {
+				pid_t pid = env->me_pid;
+				pthread_t tid = pthread_self();
 
-			LOCK_MUTEX_R(env);
-			for (i=0; i<env->me_txns->mti_numreaders; i++)
-				if (env->me_txns->mti_readers[i].mr_pid == 0)
-					break;
-			if (i == env->me_maxreaders) {
+				LOCK_MUTEX_R(env);
+				for (i=0; i<env->me_txns->mti_numreaders; i++)
+					if (env->me_txns->mti_readers[i].mr_pid == 0)
+						break;
+				if (i == env->me_maxreaders) {
+					UNLOCK_MUTEX_R(env);
+					return MDB_READERS_FULL;
+				}
+				env->me_txns->mti_readers[i].mr_pid = pid;
+				env->me_txns->mti_readers[i].mr_tid = tid;
+				if (i >= env->me_txns->mti_numreaders)
+					env->me_txns->mti_numreaders = i+1;
+				/* Save numreaders for un-mutexed mdb_env_close() */
+				env->me_numreaders = env->me_txns->mti_numreaders;
 				UNLOCK_MUTEX_R(env);
-				return MDB_READERS_FULL;
+				r = &env->me_txns->mti_readers[i];
+				pthread_setspecific(env->me_txkey, r);
 			}
-			env->me_txns->mti_readers[i].mr_pid = pid;
-			env->me_txns->mti_readers[i].mr_tid = tid;
-			if (i >= env->me_txns->mti_numreaders)
-				env->me_txns->mti_numreaders = i+1;
-			/* Save numreaders for un-mutexed mdb_env_close() */
-			env->me_numreaders = env->me_txns->mti_numreaders;
-			UNLOCK_MUTEX_R(env);
-			r = &env->me_txns->mti_readers[i];
-			pthread_setspecific(env->me_txkey, r);
+			txn->mt_txnid = r->mr_txnid = env->me_txns->mti_txnid;
+			txn->mt_u.reader = r;
 		}
-		txn->mt_txnid = r->mr_txnid = env->me_txns->mti_txnid;
 		txn->mt_toggle = txn->mt_txnid & 1;
 		txn->mt_next_pgno = env->me_metas[txn->mt_toggle]->mm_last_pg+1;
-		txn->mt_u.reader = r;
 	} else {
 		LOCK_MUTEX_W(env);
 
@@ -1804,7 +1812,8 @@ mdb_txn_reset0(MDB_txn *txn)
 	MDB_env	*env = txn->mt_env;
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
-		txn->mt_u.reader->mr_txnid = (txnid_t)-1;
+		if (!(env->me_flags & MDB_ROFS))
+			txn->mt_u.reader->mr_txnid = (txnid_t)-1;
 	} else {
 		MDB_oldpages *mop;
 		MDB_page *dp;
@@ -2580,7 +2589,7 @@ mdb_env_open2(MDB_env *env, unsigned int flags)
 	MDB_meta meta;
 	MDB_page *p;
 
-	env->me_flags = flags;
+	env->me_flags |= flags;
 
 	memset(&meta, 0, sizeof(meta));
 
@@ -2921,6 +2930,11 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 	if ((env->me_lfd = CreateFile(lpath, GENERIC_READ|GENERIC_WRITE,
 		FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_ALWAYS,
 		FILE_ATTRIBUTE_NORMAL, NULL)) == INVALID_HANDLE_VALUE) {
+		rc = ErrCode();
+		if (rc == ERROR_WRITE_PROTECT) {
+			env->me_flags |= MDB_ROFS;
+			return MDB_SUCCESS;
+		}
 		goto fail_errno;
 	}
 	/* Try to get exclusive lock. If we succeed, then
@@ -2933,15 +2947,27 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 #if !(O_CLOEXEC)
 	{
 		int fdflags;
-		if ((env->me_lfd = open(lpath, O_RDWR|O_CREAT, mode)) == -1)
+		if ((env->me_lfd = open(lpath, O_RDWR|O_CREAT, mode)) == -1) {
+			rc = ErrCode();
+			if (rc == EROFS) {
+				env->me_flags |= MDB_ROFS;
+				return MDB_SUCCESS;
+			}
 			goto fail_errno;
+		}
 		/* Lose record locks when exec*() */
 		if ((fdflags = fcntl(env->me_lfd, F_GETFD) | FD_CLOEXEC) >= 0)
 			fcntl(env->me_lfd, F_SETFD, fdflags);
 	}
 #else /* O_CLOEXEC on Linux: Open file and set FD_CLOEXEC atomically */
-	if ((env->me_lfd = open(lpath, O_RDWR|O_CREAT|O_CLOEXEC, mode)) == -1)
+	if ((env->me_lfd = open(lpath, O_RDWR|O_CREAT|O_CLOEXEC, mode)) == -1) {
+		rc = ErrCode();
+		if (rc == EROFS) {
+			env->me_flags |= MDB_ROFS;
+			return MDB_SUCCESS;
+		}
 		goto fail_errno;
+	}
 #endif
 
 	/* Try to get exclusive lock. If we succeed, then
@@ -3128,6 +3154,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 		sprintf(dpath, "%s" DATANAME, path);
 	}
 
+	env->me_flags = 0;
 	rc = mdb_env_setup_locks(env, lpath, mode, &excl);
 	if (rc)
 		goto leave;
