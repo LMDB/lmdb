@@ -2806,7 +2806,9 @@ mdb_env_excl_lock(MDB_env *env, int *excl)
 	} else {
 		OVERLAPPED ov;
 		memset(&ov, 0, sizeof(ov));
-		if (!LockFileEx(env->me_lfd, 0, 0, 1, 0, &ov)) {
+		if (LockFileEx(env->me_lfd, 0, 0, 1, 0, &ov)) {
+			*excl = 0;
+		} else {
 			rc = ErrCode();
 		}
 	}
@@ -3306,6 +3308,14 @@ mdb_env_close0(MDB_env *env, int excl)
 		munmap((void *)env->me_txns, (env->me_maxreaders-1)*sizeof(MDB_reader)+sizeof(MDB_txninfo));
 	}
 	if (env->me_lfd != INVALID_HANDLE_VALUE) {
+#ifdef _WIN32
+		if (excl >= 0) {
+			/* Unlock the lockfile.  Windows would have unlocked it
+			 * after closing anyway, but not necessarily at once.
+			 */
+			UnlockFile(env->me_lfd, 0, 0, 1, 0);
+		}
+#endif
 		close(env->me_lfd);
 	}
 
