@@ -915,6 +915,8 @@ struct MDB_env {
 #define	MDB_FATAL_ERROR	0x80000000U
 	/** Read-only Filesystem. Allow read access, no locking. */
 #define	MDB_ROFS	0x40000000U
+	/** Some fields are initialized. */
+#define	MDB_ENV_ACTIVE	0x20000000U
 	uint32_t 	me_flags;		/**< @ref mdb_env */
 	unsigned int	me_psize;	/**< size of a page, from #GET_PAGESIZE */
 	unsigned int	me_maxreaders;	/**< size of the reader table */
@@ -2583,13 +2585,12 @@ mdb_env_get_maxreaders(MDB_env *env, unsigned int *readers)
 /** Further setup required for opening an MDB environment
  */
 static int
-mdb_env_open2(MDB_env *env, unsigned int flags)
+mdb_env_open2(MDB_env *env)
 {
+	unsigned int flags = env->me_flags;
 	int i, newenv = 0, prot;
 	MDB_meta meta;
 	MDB_page *p;
-
-	env->me_flags |= flags;
 
 	memset(&meta, 0, sizeof(meta));
 
@@ -2931,7 +2932,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_ALWAYS,
 		FILE_ATTRIBUTE_NORMAL, NULL)) == INVALID_HANDLE_VALUE) {
 		rc = ErrCode();
-		if (rc == ERROR_WRITE_PROTECT) {
+		if (rc == ERROR_WRITE_PROTECT && (env->me_flags & MDB_RDONLY)) {
 			env->me_flags |= MDB_ROFS;
 			return MDB_SUCCESS;
 		}
@@ -2949,7 +2950,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		int fdflags;
 		if ((env->me_lfd = open(lpath, O_RDWR|O_CREAT, mode)) == -1) {
 			rc = ErrCode();
-			if (rc == EROFS) {
+			if (rc == EROFS && (env->me_flags & MDB_RDONLY)) {
 				env->me_flags |= MDB_ROFS;
 				return MDB_SUCCESS;
 			}
@@ -2962,7 +2963,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 #else /* O_CLOEXEC on Linux: Open file and set FD_CLOEXEC atomically */
 	if ((env->me_lfd = open(lpath, O_RDWR|O_CREAT|O_CLOEXEC, mode)) == -1) {
 		rc = ErrCode();
-		if (rc == EROFS) {
+		if (rc == EROFS && (env->me_flags & MDB_RDONLY)) {
 			env->me_flags |= MDB_ROFS;
 			return MDB_SUCCESS;
 		}
@@ -3154,14 +3155,14 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 		sprintf(dpath, "%s" DATANAME, path);
 	}
 
-	env->me_flags = 0;
+	/* silently ignore WRITEMAP if we're only getting read access */
+	if (F_ISSET(flags, MDB_RDONLY|MDB_WRITEMAP))
+		flags ^= MDB_WRITEMAP;
+	env->me_flags = flags |= MDB_ENV_ACTIVE;
+
 	rc = mdb_env_setup_locks(env, lpath, mode, &excl);
 	if (rc)
 		goto leave;
-
-	/* silently ignore WRITEMAP if we're only getting read access */
-	if (F_ISSET(flags, MDB_RDONLY) && F_ISSET(flags, MDB_WRITEMAP))
-		flags ^= MDB_WRITEMAP;
 
 #ifdef _WIN32
 	if (F_ISSET(flags, MDB_RDONLY)) {
@@ -3187,7 +3188,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 		goto leave;
 	}
 
-	if ((rc = mdb_env_open2(env, flags)) == MDB_SUCCESS) {
+	if ((rc = mdb_env_open2(env)) == MDB_SUCCESS) {
 		if (flags & (MDB_RDONLY|MDB_NOSYNC|MDB_NOMETASYNC|MDB_WRITEMAP)) {
 			env->me_mfd = env->me_fd;
 		} else {
@@ -3242,7 +3243,7 @@ mdb_env_close0(MDB_env *env, int excl)
 {
 	int i;
 
-	if (env->me_lfd == INVALID_HANDLE_VALUE) /* 1st field to get inited */
+	if (!(env->me_flags & MDB_ENV_ACTIVE))
 		return;
 
 	free(env->me_dbflags);
@@ -3303,9 +3304,11 @@ mdb_env_close0(MDB_env *env, int excl)
 #endif
 		munmap((void *)env->me_txns, (env->me_maxreaders-1)*sizeof(MDB_reader)+sizeof(MDB_txninfo));
 	}
-	close(env->me_lfd);
+	if (env->me_lfd != INVALID_HANDLE_VALUE) {
+		close(env->me_lfd);
+	}
 
-	env->me_lfd = INVALID_HANDLE_VALUE;	/* Mark env as reset */
+	env->me_flags &= ~MDB_ENV_ACTIVE;
 }
 
 int
@@ -3357,13 +3360,25 @@ mdb_env_copy(MDB_env *env, const char *path)
 	}
 #endif
 
-	/* Temporarily block writers until we snapshot the meta pages */
-	LOCK_MUTEX_W(env);
-
+	/* Do the lock/unlock of the reader mutex before starting the
+	 * write txn.  Otherwise other read txns could block writers.
+	 */
 	rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
-	if (rc) {
-		UNLOCK_MUTEX_W(env);
+	if (rc)
 		goto leave;
+
+	if (!(env->me_flags & MDB_ROFS)) {
+		/* We must start the actual read txn after blocking writers */
+		mdb_txn_reset0(txn);
+
+		/* Temporarily block writers until we snapshot the meta pages */
+		LOCK_MUTEX_W(env);
+
+		rc = mdb_txn_renew0(txn);
+		if (rc) {
+			UNLOCK_MUTEX_W(env);
+			goto leave;
+		}
 	}
 
 	wsize = env->me_psize * 2;
@@ -3377,7 +3392,8 @@ mdb_env_copy(MDB_env *env, const char *path)
 	rc = write(newfd, env->me_map, wsize);
 	rc = (rc == (int)wsize) ? MDB_SUCCESS : ErrCode();
 #endif
-	UNLOCK_MUTEX_W(env);
+	if (! (env->me_flags & MDB_ROFS))
+		UNLOCK_MUTEX_W(env);
 
 	if (rc)
 		goto leave;
