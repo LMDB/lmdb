@@ -401,6 +401,7 @@ int  mdb_env_create(MDB_env **env);
 	 * @param[in] flags Special options for this environment. This parameter
 	 * must be set to 0 or by bitwise OR'ing together one or more of the
 	 * values described here.
+	 * Flags set by mdb_env_set_flags() are also used.
 	 * <ul>
 	 *	<li>#MDB_FIXEDMAP
 	 *      use a fixed address for the mmap region. This flag must be specified
@@ -501,7 +502,7 @@ void mdb_env_close(MDB_env *env);
 
 	/** @brief Set environment flags.
 	 *
-	 * This may be used to set some flags that weren't already set during
+	 * This may be used to set some flags in addition to those from
 	 * #mdb_env_open(), or to unset these flags.
 	 * @param[in] env An environment handle returned by #mdb_env_create()
 	 * @param[in] flags The flags to change, bitwise OR'ed together

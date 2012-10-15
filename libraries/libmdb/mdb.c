@@ -3155,6 +3155,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 		sprintf(dpath, "%s" DATANAME, path);
 	}
 
+	flags |= env->me_flags;
 	/* silently ignore WRITEMAP if we're only getting read access */
 	if (F_ISSET(flags, MDB_RDONLY|MDB_WRITEMAP))
 		flags ^= MDB_WRITEMAP;
