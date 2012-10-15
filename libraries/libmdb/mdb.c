@@ -141,10 +141,11 @@
 #define pthread_mutex_t	HANDLE
 #define pthread_key_t	DWORD
 #define pthread_self()	GetCurrentThreadId()
-#define pthread_key_create(x,y)	(*(x) = TlsAlloc())
+#define pthread_key_create(x,y)	\
+	((*(x) = TlsAlloc()) == TLS_OUT_OF_INDEXES ? ErrCode() : 0)
 #define pthread_key_delete(x)	TlsFree(x)
 #define pthread_getspecific(x)	TlsGetValue(x)
-#define pthread_setspecific(x,y)	TlsSetValue(x,y)
+#define pthread_setspecific(x,y)	(TlsSetValue(x,y) ? 0 : ErrCode())
 #define pthread_mutex_unlock(x)	ReleaseMutex(x)
 #define pthread_mutex_lock(x)	WaitForSingleObject(x, INFINITE)
 #define LOCK_MUTEX_R(env)	pthread_mutex_lock((env)->me_rmutex)
@@ -1636,6 +1637,7 @@ mdb_txn_renew0(MDB_txn *txn)
 {
 	MDB_env *env = txn->mt_env;
 	unsigned int i;
+	int rc;
 
 	/* Setup db info */
 	txn->mt_numdbs = env->me_numdbs;
@@ -1668,7 +1670,10 @@ mdb_txn_renew0(MDB_txn *txn)
 				env->me_numreaders = env->me_txns->mti_numreaders;
 				UNLOCK_MUTEX_R(env);
 				r = &env->me_txns->mti_readers[i];
-				pthread_setspecific(env->me_txkey, r);
+				if ((rc = pthread_setspecific(env->me_txkey, r)) != 0) {
+					env->me_txns->mti_readers[i].mr_pid = 0;
+					return rc;
+				}
 			}
 			txn->mt_txnid = r->mr_txnid = env->me_txns->mti_txnid;
 			txn->mt_u.reader = r;
@@ -2771,9 +2776,12 @@ mdb_env_share_locks(MDB_env *env, int *excl)
 		 * then release the existing exclusive lock.
 		 */
 		memset(&ov, 0, sizeof(ov));
-		LockFileEx(env->me_lfd, 0, 0, 1, 0, &ov);
-		UnlockFile(env->me_lfd, 0, 0, 1, 0);
-		*excl = 0;
+		if (!LockFileEx(env->me_lfd, 0, 0, 1, 0, &ov)) {
+			rc = ErrCode();
+		} else {
+			UnlockFile(env->me_lfd, 0, 0, 1, 0);
+			*excl = 0;
+		}
 	}
 #else
 	{
@@ -3029,7 +3037,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 			mdb_all_sa.lpSecurityDescriptor = &mdb_null_sd;
 			mdb_sec_inited = 1;
 		}
-		GetFileInformationByHandle(env->me_lfd, &stbuf);
+		if (!GetFileInformationByHandle(env->me_lfd, &stbuf)) goto fail_errno;
 		idbuf.volume = stbuf.dwVolumeSerialNumber;
 		idbuf.nhigh  = stbuf.nFileIndexHigh;
 		idbuf.nlow   = stbuf.nFileIndexLow;
@@ -3209,7 +3217,9 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 			}
 		}
 		DPRINTF("opened dbenv %p", (void *) env);
-		pthread_key_create(&env->me_txkey, mdb_env_reader_dest);
+		rc = pthread_key_create(&env->me_txkey, mdb_env_reader_dest);
+		if (rc)
+			goto leave;
 		env->me_numdbs = 2;	/* this notes that me_txkey was set */
 #ifdef _WIN32
 		/* Windows TLS callbacks need help finding their TLS info. */
