@@ -19,17 +19,19 @@
 
 static void prstat(MDB_stat *ms)
 {
-	printf("Page size: %u\n", ms->ms_psize);
-	printf("Tree depth: %u\n", ms->ms_depth);
-	printf("Branch pages: %zu\n", ms->ms_branch_pages);
-	printf("Leaf pages: %zu\n", ms->ms_leaf_pages);
-	printf("Overflow pages: %zu\n", ms->ms_overflow_pages);
-	printf("Entries: %zu\n", ms->ms_entries);
+#if 0
+	printf("  Page size: %u\n", ms->ms_psize);
+#endif
+	printf("  Tree depth: %u\n", ms->ms_depth);
+	printf("  Branch pages: %zu\n", ms->ms_branch_pages);
+	printf("  Leaf pages: %zu\n", ms->ms_leaf_pages);
+	printf("  Overflow pages: %zu\n", ms->ms_overflow_pages);
+	printf("  Entries: %zu\n", ms->ms_entries);
 }
 
 static void usage(char *prog)
 {
-	fprintf(stderr, "usage: %s dbpath [-a|-s subdb]\n", prog);
+	fprintf(stderr, "usage: %s dbpath [-e] [-f] [-n] [-a|-s subdb]\n", prog);
 	exit(EXIT_FAILURE);
 }
 
@@ -44,7 +46,7 @@ int main(int argc, char *argv[])
 	char *prog = argv[0];
 	char *envname;
 	char *subname = NULL;
-	int alldbs = 0, envinfo = 0;
+	int alldbs = 0, envinfo = 0, envflags = 0, freinfo = 0;
 
 	if (argc < 2) {
 		usage(prog);
@@ -53,9 +55,11 @@ int main(int argc, char *argv[])
 	/* -a: print stat of main DB and all subDBs
 	 * -s: print stat of only the named subDB
 	 * -e: print env info
+	 * -f: print freelist info
+	 * -n: use NOSUBDIR flag on env_open
 	 * (default) print stat of only the main DB
 	 */
-	while ((i = getopt(argc, argv, "aes:")) != EOF) {
+	while ((i = getopt(argc, argv, "aefns:")) != EOF) {
 		switch(i) {
 		case 'a':
 			alldbs++;
@@ -63,11 +67,16 @@ int main(int argc, char *argv[])
 		case 'e':
 			envinfo++;
 			break;
+		case 'f':
+			freinfo++;
+			break;
+		case 'n':
+			envflags |= MDB_NOSUBDIR;
+			break;
 		case 's':
 			subname = optarg;
 			break;
 		default:
-			fprintf(stderr, "%s: unrecognized option -%c\n", prog, optopt);
 			usage(prog);
 		}
 	}
@@ -82,7 +91,7 @@ int main(int argc, char *argv[])
 		mdb_env_set_maxdbs(env, 4);
 	}
 
-	rc = mdb_env_open(env, envname, MDB_RDONLY, 0664);
+	rc = mdb_env_open(env, envname, envflags | MDB_RDONLY, 0664);
 	if (rc) {
 		printf("mdb_env_open failed, error %d %s\n", rc, mdb_strerror(rc));
 		goto env_close;
@@ -94,12 +103,43 @@ int main(int argc, char *argv[])
 	}
 
 	if (envinfo) {
+		rc = mdb_env_stat(env, &mst);
 		rc = mdb_env_info(env, &mei);
-		printf("Map size: %zu \n", mei.me_mapsize);
-		printf("Last transaction ID: %zu\n", mei.me_last_txnid);
-		printf("Last page used: %zu\n", mei.me_last_pgno);
-		printf("Max readers: %u\n", mei.me_maxreaders);
-		printf("Number of readers used: %u\n", mei.me_numreaders);
+		printf("Environment Info\n");
+		printf("  Map address: %p\n", mei.me_mapaddr);
+		printf("  Map size: %zu\n", mei.me_mapsize);
+		printf("  Page size: %u\n", mst.ms_psize);
+		printf("  Max pages: %zu\n", mei.me_mapsize / mst.ms_psize);
+		printf("  Number of pages used: %zu\n", mei.me_last_pgno+1);
+		printf("  Last transaction ID: %zu\n", mei.me_last_txnid);
+		printf("  Max readers: %u\n", mei.me_maxreaders);
+		printf("  Number of readers used: %u\n", mei.me_numreaders);
+	}
+
+	if (freinfo) {
+		MDB_cursor *cursor;
+		MDB_val data;
+		size_t pages = 0, *iptr;
+
+		printf("Freelist Status\n");
+		dbi = 0;
+		rc = mdb_cursor_open(txn, dbi, &cursor);
+		if (rc) {
+			printf("mdb_cursor_open failed, error %d %s\n", rc, mdb_strerror(rc));
+			goto txn_abort;
+		}
+		rc = mdb_stat(txn, dbi, &mst);
+		if (rc) {
+			printf("mdb_stat failed, error %d %s\n", rc, mdb_strerror(rc));
+			goto txn_abort;
+		}
+		while ((rc = mdb_cursor_get(cursor, NULL, &data, MDB_NEXT)) == 0) {
+			iptr = data.mv_data;
+			pages += *iptr;
+		}
+		mdb_cursor_close(cursor);
+		prstat(&mst);
+		printf("  Free pages: %zu\n", pages);
 	}
 
 	rc = mdb_open(txn, subname, 0, &dbi);
@@ -113,6 +153,7 @@ int main(int argc, char *argv[])
 		printf("mdb_stat failed, error %d %s\n", rc, mdb_strerror(rc));
 		goto txn_abort;
 	}
+	printf("Status of %s\n", subname ? subname : "Main DB");
 	prstat(&mst);
 
 	if (alldbs) {
@@ -131,7 +172,7 @@ int main(int argc, char *argv[])
 			str[key.mv_size] = '\0';
 			rc = mdb_open(txn, str, 0, &db2);
 			if (rc == MDB_SUCCESS)
-				printf("\n%s\n", str);
+				printf("Status of %s\n", str);
 			free(str);
 			if (rc) continue;
 			rc = mdb_stat(txn, db2, &mst);

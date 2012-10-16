@@ -6660,11 +6660,12 @@ mdb_env_info(MDB_env *env, MDB_envinfo *arg)
 		return EINVAL;
 
 	toggle = mdb_env_pick_meta(env);
+	arg->me_mapaddr = (env->me_flags & MDB_FIXEDMAP) ? env->me_map : 0;
 	arg->me_mapsize = env->me_mapsize;
 	arg->me_maxreaders = env->me_maxreaders;
 	arg->me_numreaders = env->me_numreaders;
-	arg->me_last_txnid = env->me_metas[toggle]->mm_txnid;
 	arg->me_last_pgno = env->me_metas[toggle]->mm_last_pg;
+	arg->me_last_txnid = env->me_metas[toggle]->mm_txnid;
 	return MDB_SUCCESS;
 }
 
