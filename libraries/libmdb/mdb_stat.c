@@ -40,10 +40,11 @@ int main(int argc, char *argv[])
 	MDB_txn *txn;
 	MDB_dbi dbi;
 	MDB_stat mst;
+	MDB_envinfo mei;
 	char *prog = argv[0];
 	char *envname;
 	char *subname = NULL;
-	int alldbs = 0;
+	int alldbs = 0, envinfo = 0;
 
 	if (argc < 2) {
 		usage(prog);
@@ -51,12 +52,16 @@ int main(int argc, char *argv[])
 
 	/* -a: print stat of main DB and all subDBs
 	 * -s: print stat of only the named subDB
+	 * -e: print env info
 	 * (default) print stat of only the main DB
 	 */
-	while ((i = getopt(argc, argv, "as:")) != EOF) {
+	while ((i = getopt(argc, argv, "aes:")) != EOF) {
 		switch(i) {
 		case 'a':
 			alldbs++;
+			break;
+		case 'e':
+			envinfo++;
 			break;
 		case 's':
 			subname = optarg;
@@ -87,6 +92,16 @@ int main(int argc, char *argv[])
 		printf("mdb_txn_begin failed, error %d %s\n", rc, mdb_strerror(rc));
 		goto env_close;
 	}
+
+	if (envinfo) {
+		rc = mdb_env_info(env, &mei);
+		printf("Map size: %zu \n", mei.me_mapsize);
+		printf("Last transaction ID: %zu\n", mei.me_last_txnid);
+		printf("Last page used: %zu\n", mei.me_last_pgno);
+		printf("Max readers: %u\n", mei.me_maxreaders);
+		printf("Number of readers used: %u\n", mei.me_numreaders);
+	}
+
 	rc = mdb_open(txn, subname, 0, &dbi);
 	if (rc) {
 		printf("mdb_open failed, error %d %s\n", rc, mdb_strerror(rc));

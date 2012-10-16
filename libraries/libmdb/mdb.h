@@ -358,6 +358,15 @@ typedef struct MDB_stat {
 	size_t		ms_entries;			/**< Number of data items */
 } MDB_stat;
 
+/** @brief Information about the environment */
+typedef struct MDB_envinfo {
+	size_t	me_mapsize;				/**< Size of the data memory map */
+	size_t	me_last_txnid;			/**< ID of the last committed transaction */
+	size_t	me_last_pgno;			/**< ID of the last used page */
+	unsigned int me_maxreaders;		/**< maximum number of threads for the environment */
+	unsigned int me_numreaders;		/**< maximum number of threads used in the environment */
+} MDB_envinfo;
+
 	/** @brief Return the mdb library version information.
 	 *
 	 * @param[out] major if non-NULL, the library major version number is copied here
@@ -470,6 +479,14 @@ int  mdb_env_copy(MDB_env *env, const char *path);
 	 * 	where the statistics will be copied
 	 */
 int  mdb_env_stat(MDB_env *env, MDB_stat *stat);
+
+	/** @brief Return information about the MDB environment.
+	 *
+	 * @param[in] env An environment handle returned by #mdb_env_create()
+	 * @param[out] stat The address of an #MDB_envinfo structure
+	 * 	where the information will be copied
+	 */
+int  mdb_env_info(MDB_env *env, MDB_envinfo *stat);
 
 	/** @brief Flush the data buffers to disk.
 	 *

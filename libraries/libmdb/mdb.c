@@ -6651,6 +6651,23 @@ mdb_env_stat(MDB_env *env, MDB_stat *arg)
 	return mdb_stat0(env, &env->me_metas[toggle]->mm_dbs[MAIN_DBI], arg);
 }
 
+int
+mdb_env_info(MDB_env *env, MDB_envinfo *arg)
+{
+	int toggle;
+
+	if (env == NULL || arg == NULL)
+		return EINVAL;
+
+	toggle = mdb_env_pick_meta(env);
+	arg->me_mapsize = env->me_mapsize;
+	arg->me_maxreaders = env->me_maxreaders;
+	arg->me_numreaders = env->me_numreaders;
+	arg->me_last_txnid = env->me_metas[toggle]->mm_txnid;
+	arg->me_last_pgno = env->me_metas[toggle]->mm_last_pg;
+	return MDB_SUCCESS;
+}
+
 /** Set the default comparison functions for a database.
  * Called immediately after a database is opened to set the defaults.
  * The user can then override them with #mdb_set_compare() or
