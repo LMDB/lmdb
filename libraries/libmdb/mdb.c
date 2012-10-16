@@ -2417,7 +2417,7 @@ static int
 mdb_env_write_meta(MDB_txn *txn)
 {
 	MDB_env *env;
-	MDB_meta	meta, metab;
+	MDB_meta	meta, metab, *mp;
 	off_t off;
 	int rc, len, toggle;
 	char *ptr;
@@ -2433,9 +2433,12 @@ mdb_env_write_meta(MDB_txn *txn)
 		toggle, txn->mt_dbs[MAIN_DBI].md_root);
 
 	env = txn->mt_env;
+	mp = env->me_metas[toggle];
 
 	if (env->me_flags & MDB_WRITEMAP) {
-		MDB_meta *mp = env->me_metas[toggle];
+		/* Persist any increases of mapsize config */
+		if (env->me_mapsize > mp->mm_mapsize)
+			mp->mm_mapsize = env->me_mapsize;
 		mp->mm_dbs[0] = txn->mt_dbs[0];
 		mp->mm_dbs[1] = txn->mt_dbs[1];
 		mp->mm_last_pg = txn->mt_next_pgno - 1;
@@ -2456,7 +2459,13 @@ mdb_env_write_meta(MDB_txn *txn)
 	metab.mm_last_pg = env->me_metas[toggle]->mm_last_pg;
 
 	ptr = (char *)&meta;
-	off = offsetof(MDB_meta, mm_dbs[0].md_depth);
+	if (env->me_mapsize > mp->mm_mapsize) {
+		/* Persist any increases of mapsize config */
+		meta.mm_mapsize = env->me_mapsize;
+		off = offsetof(MDB_meta, mm_mapsize);
+	} else {
+		off = offsetof(MDB_meta, mm_dbs[0].md_depth);
+	}
 	len = sizeof(MDB_meta) - off;
 
 	ptr += off;
@@ -2604,11 +2613,11 @@ mdb_env_open2(MDB_env *env)
 			return i;
 		DPUTS("new mdbenv");
 		newenv = 1;
+		meta.mm_mapsize = env->me_mapsize > DEFAULT_MAPSIZE ? env->me_mapsize : DEFAULT_MAPSIZE;
 	}
 
-	if (!env->me_mapsize) {
-		env->me_mapsize = newenv ? DEFAULT_MAPSIZE : meta.mm_mapsize;
-	}
+	if (env->me_mapsize < meta.mm_mapsize)
+		env->me_mapsize = meta.mm_mapsize;
 
 #ifdef _WIN32
 	{
@@ -2657,7 +2666,6 @@ mdb_env_open2(MDB_env *env)
 #endif
 
 	if (newenv) {
-		meta.mm_mapsize = env->me_mapsize;
 		if (flags & MDB_FIXEDMAP)
 			meta.mm_address = env->me_map;
 		i = mdb_env_init_meta(env, &meta);
@@ -3336,7 +3344,7 @@ int
 mdb_env_copy(MDB_env *env, const char *path)
 {
 	MDB_txn *txn = NULL;
-	int rc, len, oflags;
+	int rc, len;
 	size_t wsize;
 	char *lpath, *ptr;
 	HANDLE newfd = INVALID_HANDLE_VALUE;
