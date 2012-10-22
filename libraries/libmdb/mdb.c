@@ -1949,14 +1949,14 @@ mdb_txn_commit(MDB_txn *txn)
 		return EINVAL;
 	}
 
-	/* Merge (and close) our cursors with parent's */
-	mdb_cursor_merge(txn);
-
 	if (txn->mt_parent) {
 		MDB_db *ip, *jp;
 		MDB_dbi i;
 		unsigned x, y;
 		MDB_ID2L dst, src;
+
+		/* Merge (and close) our cursors with parent's */
+		mdb_cursor_merge(txn);
 
 		/* Update parent's DB table */
 		ip = &txn->mt_parent->mt_dbs[2];
@@ -2140,7 +2140,7 @@ again:
 	while (env->me_pgfree) {
 		MDB_oldpages *mop = env->me_pgfree;
 		env->me_pgfree = mop->mo_next;
-		free(mop);;
+		free(mop);
 	}
 
 	/* Check for growth of freelist again */
@@ -4000,7 +4000,7 @@ mdb_cursor_sibling(MDB_cursor *mc, int move_right)
 
 	indx = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
 	if ((rc = mdb_page_get(mc->mc_txn, NODEPGNO(indx), &mp)))
-		return rc;;
+		return rc;
 
 	mdb_cursor_push(mc, mp);
 
