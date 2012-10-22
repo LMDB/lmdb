@@ -3982,8 +3982,12 @@ mdb_cursor_sibling(MDB_cursor *mc, int move_right)
 		       : (mc->mc_ki[mc->mc_top] == 0)) {
 		DPRINTF("no more keys left, moving to %s sibling",
 		    move_right ? "right" : "left");
-		if ((rc = mdb_cursor_sibling(mc, move_right)) != MDB_SUCCESS)
+		if ((rc = mdb_cursor_sibling(mc, move_right)) != MDB_SUCCESS) {
+			/* undo cursor_pop before returning */
+			mc->mc_top++;
+			mc->mc_snum++;
 			return rc;
+		}
 	} else {
 		if (move_right)
 			mc->mc_ki[mc->mc_top]++;
@@ -4393,8 +4397,8 @@ mdb_cursor_last(MDB_cursor *mc, MDB_val *key, MDB_val *data)
 	}
 	assert(IS_LEAF(mc->mc_pg[mc->mc_top]));
 
-	mc->mc_ki[mc->mc_top] = NUMKEYS(mc->mc_pg[mc->mc_top]) - 1;
 	mc->mc_flags |= C_INITIALIZED|C_EOF;
+	mc->mc_ki[mc->mc_top] = NUMKEYS(mc->mc_pg[mc->mc_top]) - 1;
 	}
 	leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
 
@@ -4525,9 +4529,10 @@ fetchm:
 	case MDB_PREV_NODUP:
 		if (!(mc->mc_flags & C_INITIALIZED) || (mc->mc_flags & C_EOF)) {
 			rc = mdb_cursor_last(mc, key, data);
-			mc->mc_flags &= ~C_EOF;
-		} else
-			rc = mdb_cursor_prev(mc, key, data, op);
+			mc->mc_flags |= C_INITIALIZED;
+			mc->mc_ki[mc->mc_top]++;
+		}
+		rc = mdb_cursor_prev(mc, key, data, op);
 		break;
 	case MDB_FIRST:
 		rc = mdb_cursor_first(mc, key, data);
@@ -4575,7 +4580,9 @@ mdb_cursor_touch(MDB_cursor *mc)
 
 	if (mc->mc_dbi > MAIN_DBI && !(*mc->mc_dbflag & DB_DIRTY)) {
 		MDB_cursor mc2;
-		mdb_cursor_init(&mc2, mc->mc_txn, MAIN_DBI, NULL);
+		MDB_xcursor mcx;
+		mdb_cursor_init(&mc2, mc->mc_txn, MAIN_DBI,
+			mc->mc_txn->mt_dbs[MAIN_DBI].md_flags & MDB_DUPSORT ? &mcx : NULL);
 		rc = mdb_page_search(&mc2, &mc->mc_dbx->md_name, MDB_PS_MODIFY);
 		if (rc)
 			 return rc;
