@@ -826,6 +826,7 @@ struct MDB_txn {
  */
 #define MDB_TXN_RDONLY		0x01		/**< read-only transaction */
 #define MDB_TXN_ERROR		0x02		/**< an error has occurred */
+#define MDB_TXN_DIRTY		0x04		/**< must write, even if dirty list is empty */
 /** @} */
 	unsigned int	mt_flags;		/**< @ref mdb_txn */
 	/** Tracks which of the two meta pages was used at the start
@@ -2005,7 +2006,7 @@ mdb_txn_commit(MDB_txn *txn)
 		return EINVAL;
 	}
 
-	if (!txn->mt_u.dirty_list[0].mid)
+	if (!txn->mt_u.dirty_list[0].mid && !(txn->mt_flags & MDB_TXN_DIRTY))
 		goto done;
 
 	DPRINTF("committing txn %zu %p on mdbenv %p, root page %zu",
@@ -6715,8 +6716,13 @@ int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 	/* main DB? */
 	if (!name) {
 		*dbi = MAIN_DBI;
-		if (flags & (MDB_DUPSORT|MDB_REVERSEKEY|MDB_INTEGERKEY))
-			txn->mt_dbs[MAIN_DBI].md_flags |= (flags & (MDB_DUPSORT|MDB_REVERSEKEY|MDB_INTEGERKEY));
+		if (flags & (MDB_DUPSORT|MDB_REVERSEKEY|MDB_INTEGERKEY)) {
+			/* make sure flag changes get committed */
+			if ((txn->mt_dbs[MAIN_DBI].md_flags | flags) != txn->mt_dbs[MAIN_DBI].md_flags) {
+				txn->mt_dbs[MAIN_DBI].md_flags |= (flags & (MDB_DUPSORT|MDB_REVERSEKEY|MDB_INTEGERKEY));
+				txn->mt_flags |= MDB_TXN_DIRTY;
+			}
+		}
 		mdb_default_cmp(txn, MAIN_DBI);
 		return MDB_SUCCESS;
 	}
