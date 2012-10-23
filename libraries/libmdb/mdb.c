@@ -3431,10 +3431,17 @@ mdb_env_copy(MDB_env *env, const char *path)
 	ptr = env->me_map + wsize;
 	wsize = txn->mt_next_pgno * env->me_psize - wsize;
 #ifdef _WIN32
-	{
-		DWORD len;
-		rc = WriteFile(newfd, ptr, wsize, &len, NULL);
-		rc = (len == wsize) ? MDB_SUCCESS : ErrCode();
+#define MAX_UINT32	4294967295U
+	while (wsize > 0) {
+		DWORD len, w2;
+		if (wsize > MAX_UINT32)
+			w2 = MAX_UINT32 - env->me_psize + 1;	/* write in pagesize chunks */
+		else
+			w2 = wsize;
+		rc = WriteFile(newfd, ptr, w2, &len, NULL);
+		rc = (len == w2) ? MDB_SUCCESS : ErrCode();
+		if (rc) break;
+		wsize -= w2;
 	}
 #else
 	rc = write(newfd, ptr, wsize);
