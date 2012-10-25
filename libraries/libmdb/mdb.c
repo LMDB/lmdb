@@ -3683,16 +3683,15 @@ static void
 mdb_cursor_pop(MDB_cursor *mc)
 {
 	if (mc->mc_snum) {
+#if MDB_DEBUG
+		MDB_page	*top = mc->mc_pg[mc->mc_top];
+#endif
 		mc->mc_snum--;
 		if (mc->mc_snum)
 			mc->mc_top--;
-#if MDB_DEBUG
-		{
-		MDB_page	*top = mc->mc_pg[mc->mc_top];
+
 		DPRINTF("popped page %zu off db %u cursor %p", top->mp_pgno,
 			mc->mc_dbi, (void *) mc);
-		}
-#endif
 	}
 }
 
