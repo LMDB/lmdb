@@ -297,6 +297,7 @@ static txnid_t mdb_debug_start;
 	 fprintf(stderr, "%s:%d " fmt "\n", __func__, __LINE__, __VA_ARGS__)))
 #else
 # define DPRINTF(fmt, ...)	((void) 0)
+# define MDB_DEBUG_SKIP
 #endif
 	/**	Print a debug string.
 	 *	The string is printed literally, with no format processing.
@@ -3683,7 +3684,7 @@ static void
 mdb_cursor_pop(MDB_cursor *mc)
 {
 	if (mc->mc_snum) {
-#if MDB_DEBUG
+#ifndef MDB_DEBUG_SKIP
 		MDB_page	*top = mc->mc_pg[mc->mc_top];
 #endif
 		mc->mc_snum--;
