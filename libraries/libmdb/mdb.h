@@ -607,11 +607,11 @@ int  mdb_env_set_maxreaders(MDB_env *env, unsigned int readers);
 	 */
 int  mdb_env_get_maxreaders(MDB_env *env, unsigned int *readers);
 
-	/** @brief Set the maximum number of databases for the environment.
+	/** @brief Set the maximum number of named databases for the environment.
 	 *
 	 * This function is only needed if multiple databases will be used in the
-	 * environment. Simpler applications that only use a single database can ignore
-	 * this option.
+	 * environment. Simpler applications that use the environment as a single
+	 * unnamed database can ignore this option.
 	 * This function may only be called after #mdb_env_create() and before #mdb_env_open().
 	 * @param[in] env An environment handle returned by #mdb_env_create()
 	 * @param[in] dbs The maximum number of databases
@@ -718,6 +718,8 @@ int  mdb_txn_renew(MDB_txn *txn);
 	 * database handle resides in the shared environment, it is not owned
 	 * by the given transaction. Only one thread should call this function;
 	 * it is not mutex-protected in a read-only transaction.
+	 * To use named databases (with name != NULL), #mdb_env_set_maxdbs()
+	 * must be called before opening the enviorment.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] name The name of the database to open. If only a single
 	 * 	database is needed in the environment, this value may be NULL.

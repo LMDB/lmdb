@@ -2579,7 +2579,7 @@ mdb_env_set_maxdbs(MDB_env *env, MDB_dbi dbs)
 {
 	if (env->me_map)
 		return EINVAL;
-	env->me_maxdbs = dbs;
+	env->me_maxdbs = dbs + 2; /* Named databases + main and free DB */
 	return MDB_SUCCESS;
 }
 
