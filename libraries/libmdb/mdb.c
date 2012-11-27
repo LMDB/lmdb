@@ -5586,7 +5586,7 @@ mdb_cursor_txn(MDB_cursor *mc)
 MDB_dbi
 mdb_cursor_dbi(MDB_cursor *mc)
 {
-	if (!mc) return 0;
+	assert(mc != NULL);
 	return mc->mc_dbi;
 }
 
