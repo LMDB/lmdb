@@ -6904,7 +6904,7 @@ int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)
 	MDB_cursor *mc;
 	int rc;
 
-	if (!txn || !dbi || dbi >= txn->mt_numdbs)
+	if (!txn || !dbi || dbi >= txn->mt_numdbs || (unsigned)del > 1)
 		return EINVAL;
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY))

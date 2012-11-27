@@ -792,12 +792,12 @@ void mdb_close(MDB_env *env, MDB_dbi dbi);
 
 	/** @brief Delete a database and/or free all its pages.
 	 *
-	 * If the \b del parameter is non-zero the DB handle will be closed
+	 * If the \b del parameter is 1, the DB handle will be closed
 	 * and the DB will be deleted.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] dbi A database handle returned by #mdb_open()
-	 * @param[in] del non-zero to delete the DB from the environment,
-	 * otherwise just free its pages.
+	 * @param[in] del 1 to delete the DB from the environment,
+	 * 0 to just free its pages.
 	 * @return A non-zero error value on failure and 0 on success.
 	 */
 int  mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del);
