@@ -500,9 +500,9 @@ int  mdb_env_info(MDB_env *env, MDB_envinfo *stat);
 	 * the OS buffers upon commit as well, unless the environment was
 	 * opened with #MDB_NOSYNC.
 	 * @param[in] env An environment handle returned by #mdb_env_create()
-	 * @param[in] force If non-zero, force the flush to occur. Otherwise
+	 * @param[in] force If non-zero, force a synchronous flush.  Otherwise
 	 *  if the environment has the #MDB_NOSYNC flag set the flushes
-	 *	will be omitted.
+	 *	will be omitted, and with #MDB_MAPASYNC they will be asynchronous.
 	 * @return A non-zero error value on failure and 0 on success. Some possible
 	 * errors are:
 	 * <ul>

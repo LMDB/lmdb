@@ -1523,7 +1523,8 @@ mdb_env_sync(MDB_env *env, int force)
 	int rc = 0;
 	if (force || !F_ISSET(env->me_flags, MDB_NOSYNC)) {
 		if (env->me_flags & MDB_WRITEMAP) {
-			int flags = (env->me_flags & MDB_MAPASYNC) ? MS_ASYNC : MS_SYNC;
+			int flags = ((env->me_flags & MDB_MAPASYNC) && !force)
+				? MS_ASYNC : MS_SYNC;
 			if (MDB_MSYNC(env->me_map, env->me_mapsize, flags))
 				rc = ErrCode();
 #ifdef _WIN32
