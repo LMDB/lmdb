@@ -2423,6 +2423,7 @@ mdb_env_write_meta(MDB_txn *txn)
 	off_t off;
 	int rc, len, toggle;
 	char *ptr;
+	HANDLE mfd;
 #ifdef _WIN32
 	OVERLAPPED ov;
 #endif
@@ -2481,14 +2482,16 @@ mdb_env_write_meta(MDB_txn *txn)
 	off += PAGEHDRSZ;
 
 	/* Write to the SYNC fd */
+	mfd = env->me_flags & (MDB_NOSYNC|MDB_NOMETASYNC) ?
+		env->me_fd : env->me_mfd;
 #ifdef _WIN32
 	{
 		memset(&ov, 0, sizeof(ov));
 		ov.Offset = off;
-		WriteFile(env->me_mfd, ptr, len, (DWORD *)&rc, &ov);
+		WriteFile(mfd, ptr, len, (DWORD *)&rc, &ov);
 	}
 #else
-	rc = pwrite(env->me_mfd, ptr, len, off);
+	rc = pwrite(mfd, ptr, len, off);
 #endif
 	if (rc != len) {
 		int r2;
@@ -3221,10 +3224,12 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 	}
 
 	if ((rc = mdb_env_open2(env)) == MDB_SUCCESS) {
-		if (flags & (MDB_RDONLY|MDB_NOSYNC|MDB_NOMETASYNC|MDB_WRITEMAP)) {
+		if (flags & (MDB_RDONLY|MDB_WRITEMAP)) {
 			env->me_mfd = env->me_fd;
 		} else {
-			/* synchronous fd for meta writes */
+			/* Synchronous fd for meta writes. Needed even with
+			 * MDB_NOSYNC/MDB_NOMETASYNC, in case these get reset.
+			 */
 #ifdef _WIN32
 			env->me_mfd = CreateFile(dpath, oflags,
 				FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, len,
