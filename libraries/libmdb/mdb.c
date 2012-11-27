@@ -3146,6 +3146,12 @@ fail:
 #define DATANAME	"/data.mdb"
 	/** The suffix of the lock file when no subdir is used */
 #define LOCKSUFF	"-lock"
+	/** Only a subset of the @ref mdb_env flags can be changed
+	 *	at runtime. Changing other flags requires closing the
+	 *	environment and re-opening it with the new flags.
+	 */
+#define	CHANGEABLE	(MDB_NOSYNC|MDB_NOMETASYNC|MDB_MAPASYNC)
+#define	CHANGELESS	(MDB_FIXEDMAP|MDB_NOSUBDIR|MDB_RDONLY|MDB_WRITEMAP)
 
 int
 mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
@@ -3153,7 +3159,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
 	int		oflags, rc, len, excl;
 	char *lpath, *dpath;
 
-	if (env->me_fd != INVALID_HANDLE_VALUE)
+	if (env->me_fd!=INVALID_HANDLE_VALUE || (flags & ~(CHANGEABLE|CHANGELESS)))
 		return EINVAL;
 
 	len = strlen(path);
@@ -6599,11 +6605,6 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 	return mdb_cursor_put(&mc, key, data, flags);
 }
 
-/** Only a subset of the @ref mdb_env flags can be changed
- *	at runtime. Changing other flags requires closing the environment
- *	and re-opening it with the new flags.
- */
-#define	CHANGEABLE	(MDB_NOSYNC|MDB_NOMETASYNC|MDB_MAPASYNC)
 int
 mdb_env_set_flags(MDB_env *env, unsigned int flag, int onoff)
 {
