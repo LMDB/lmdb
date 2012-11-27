@@ -2651,8 +2651,6 @@ mdb_env_open2(MDB_env *env)
 	}
 #else
 	i = MAP_SHARED;
-	if (meta.mm_address && (flags & MDB_FIXEDMAP))
-		i |= MAP_FIXED;
 	prot = PROT_READ;
 	if (flags & MDB_WRITEMAP) {
 		prot |= PROT_WRITE;
@@ -2674,6 +2672,13 @@ mdb_env_open2(MDB_env *env)
 		if (i != MDB_SUCCESS) {
 			return i;
 		}
+	} else if (meta.mm_address && env->me_map != meta.mm_address) {
+		/* Can happen because the address argument to mmap() is just a
+		 * hint.  mmap() can pick another, e.g. if the range is in use.
+		 * The MAP_FIXED flag would prevent that, but then mmap could
+		 * instead unmap existing pages to make room for the new map.
+		 */
+		return EBUSY;	/* TODO: Make a new MDB_* error code? */
 	}
 	env->me_psize = meta.mm_psize;
 
