@@ -13,7 +13,6 @@
  */
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
 #include "mdb.h"
 
 int main(int argc,char * argv[])
