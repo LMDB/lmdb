@@ -2,6 +2,8 @@
  *	@brief memory-mapped database library
  *
  *	@mainpage	MDB Memory-Mapped Database Manager
+ *
+ *	@section intro_sec Introduction
  *	MDB is a Btree-based database management library modeled loosely on the
  *	BerkeleyDB API, but much simplified. The entire database is exposed
  *	in a memory map, and all data fetches return data directly
@@ -38,6 +40,7 @@
  *	corrupt the database. Of course if your application code is known to
  *	be bug-free (...) then this is not an issue.
  *
+ *	@section caveats_sec Caveats
  *	Troubleshooting the lock file, plus semaphores on BSD systems:
  *
  *	- A broken lockfile can cause sync issues.
@@ -107,7 +110,7 @@
  * top-level directory of the distribution or, alternatively, at
  * <http://www.OpenLDAP.org/license.html>.
  *
- * 	@par Derived From:
+ *	@par Derived From:
  * This code is derived from btree.c written by Martin Hedenfalk.
  *
  * Copyright (c) 2009, 2010 Martin Hedenfalk <martin@bzero.se>
@@ -133,8 +136,9 @@
 extern "C" {
 #endif
 
-/** @defgroup public Public API
+/** @defgroup mdb MDB API
  *	@{
+ *	@brief OpenLDAP Memory-Mapped Database Manager
  */
 /** @defgroup Version Version Macros
  *	@{
