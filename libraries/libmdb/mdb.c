@@ -1242,6 +1242,7 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 	MDB_page *np;
 	pgno_t pgno = P_INVALID;
 	MDB_ID2 mid;
+	txnid_t oldest = 0, last;
 	int rc;
 
 	*mp = NULL;
@@ -1254,12 +1255,11 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 		if (!txn->mt_env->me_pghead &&
 			txn->mt_dbs[FREE_DBI].md_root != P_INVALID) {
 			/* See if there's anything in the free DB */
-			int j;
 			MDB_reader *r;
 			MDB_cursor m2;
 			MDB_node *leaf;
 			MDB_val data;
-			txnid_t *kptr, last;
+			txnid_t *kptr;
 
 			mdb_cursor_init(&m2, txn, FREE_DBI, NULL);
 			if (!txn->mt_env->me_pgfirst) {
@@ -1282,15 +1282,21 @@ again:
 				last = *(txnid_t *)key.mv_data;
 			}
 
-			/* Unusable if referred by a meta page or reader... */
-			j = 1;
-			if (last < txn->mt_txnid-1) {
-				j = txn->mt_env->me_txns->mti_numreaders;
-				r = txn->mt_env->me_txns->mti_readers + j;
-				for (j = -j; j && (last<r[j].mr_txnid || !r[j].mr_pid); j++) ;
+			{
+				unsigned int i, nr;
+				txnid_t mr;
+				oldest = txn->mt_txnid - 1;
+				nr = txn->mt_env->me_txns->mti_numreaders;
+				r = txn->mt_env->me_txns->mti_readers;
+				for (i=0; i<nr; i++) {
+					if (!r[i].mr_pid) continue;
+					mr = r[i].mr_txnid;
+					if (mr < oldest)
+						oldest = mr;
+				}
 			}
 
-			if (!j) {
+			if (oldest > last) {
 				/* It's usable, grab it.
 				 */
 				MDB_oldpages *mop;
@@ -1331,29 +1337,108 @@ none:
 		if (txn->mt_env->me_pghead) {
 			MDB_oldpages *mop = txn->mt_env->me_pghead;
 			if (num > 1) {
-				/* FIXME: For now, always use fresh pages. We
-				 * really ought to search the free list for a
-				 * contiguous range.
-				 */
-				;
+				MDB_cursor m2;
+				int retry = 2, readit = 0, n2 = num-1;
+				unsigned int i, j, k;
+
+				/* If current list is too short, must fetch more and coalesce */
+				if (mop->mo_pages[0] < (unsigned)num)
+					readit = 1;
+
+				mdb_cursor_init(&m2, txn, FREE_DBI, NULL);
+				do {
+					if (readit) {
+						MDB_val key, data;
+						MDB_oldpages *mop2;
+						pgno_t *idl;
+						int exact;
+
+						last = mop->mo_txnid + 1;
+
+						/* We haven't hit the readers list yet? */
+						if (!oldest) {
+							MDB_reader *r;
+							unsigned int nr;
+							txnid_t mr;
+
+							oldest = txn->mt_txnid - 1;
+							nr = txn->mt_env->me_txns->mti_numreaders;
+							r = txn->mt_env->me_txns->mti_readers;
+							for (i=0; i<nr; i++) {
+								if (!r[i].mr_pid) continue;
+								mr = r[i].mr_txnid;
+								if (mr < oldest)
+									oldest = mr;
+							}
+						}
+
+						/* There's nothing we can use on the freelist */
+						if (oldest - last < 1)
+							break;
+
+						exact = 0;
+						key.mv_data = &last;
+						key.mv_size = sizeof(last);
+						rc = mdb_cursor_set(&m2, &key, &data, MDB_SET, &exact);
+						if (rc)
+							return rc;
+						idl = (MDB_ID *) data.mv_data;
+						mop2 = malloc(sizeof(MDB_oldpages) + MDB_IDL_SIZEOF(idl) - 2*sizeof(pgno_t) + MDB_IDL_SIZEOF(mop->mo_pages));
+						if (!mop2)
+							return ENOMEM;
+						/* merge in sorted order */
+						i = idl[0]; j = mop->mo_pages[0]; mop2->mo_pages[0] = k = i+j;
+						mop->mo_pages[0] = P_INVALID;
+						while (i>0  || j>0) {
+							if (i && idl[i] < mop->mo_pages[j])
+								mop2->mo_pages[k--] = idl[i--];
+							else
+								mop2->mo_pages[k--] = mop->mo_pages[j--];
+						}
+						txn->mt_env->me_pglast = last;
+						mop2->mo_txnid = last;
+						mop2->mo_next = mop->mo_next;
+						txn->mt_env->me_pghead = mop2;
+						free(mop);
+						mop = mop2;
+						/* Keep trying to read until we have enough */
+						if (mop->mo_pages[0] < (unsigned)num) {
+							continue;
+						}
+					}
+
+					/* current list has enough pages, but are they contiguous? */
+					for (i=mop->mo_pages[0]; i>=(unsigned)num; i--) {
+						if (mop->mo_pages[i-n2] == mop->mo_pages[i] + n2) {
+							pgno = mop->mo_pages[i];
+							i -= n2;
+							/* move any stragglers down */
+							for (j=i+num; j<=mop->mo_pages[0]; j++)
+								mop->mo_pages[i++] = mop->mo_pages[j];
+							mop->mo_pages[0] -= num;
+							break;
+						}
+					}
+
+					/* Stop if we succeeded, or no more retries */
+					if (!retry || pgno != P_INVALID)
+						break;
+					readit = 1;
+					retry--;
+
+				} while (1);
 			} else {
 				/* peel pages off tail, so we only have to truncate the list */
 				pgno = MDB_IDL_LAST(mop->mo_pages);
-				if (MDB_IDL_IS_RANGE(mop->mo_pages)) {
-					mop->mo_pages[2]++;
-					if (mop->mo_pages[2] > mop->mo_pages[1])
-						mop->mo_pages[0] = 0;
+				mop->mo_pages[0]--;
+			}
+			if (MDB_IDL_IS_ZERO(mop->mo_pages)) {
+				txn->mt_env->me_pghead = mop->mo_next;
+				if (mc->mc_dbi == FREE_DBI) {
+					mop->mo_next = txn->mt_env->me_pgfree;
+					txn->mt_env->me_pgfree = mop;
 				} else {
-					mop->mo_pages[0]--;
-				}
-				if (MDB_IDL_IS_ZERO(mop->mo_pages)) {
-					txn->mt_env->me_pghead = mop->mo_next;
-					if (mc->mc_dbi == FREE_DBI) {
-						mop->mo_next = txn->mt_env->me_pgfree;
-						txn->mt_env->me_pgfree = mop;
-					} else {
-						free(mop);
-					}
+					free(mop);
 				}
 			}
 		}
