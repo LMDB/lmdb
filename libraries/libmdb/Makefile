@@ -4,9 +4,18 @@ OPT = -O2 -g
 CFLAGS	= -pthread $(OPT) $(W) $(XCFLAGS)
 LDLIBS	=
 SOLIBS	=
+prefix	= /usr/local
 
-PROGS	= mdb_stat mdb_copy mtest mtest2 mtest3 mtest4 mtest5
-all:	liblmdb.a liblmdb.so $(PROGS)
+IHDRS	= lmdb.h
+ILIBS	= liblmdb.a liblmdb.so
+IPROGS	= mdb_stat mdb_copy
+PROGS	= $(IPROGS) mtest mtest2 mtest3 mtest4 mtest5
+all:	$(ILIBS) $(PROGS)
+
+install: $(ILIBS) $(IPROGS) $(IHDRS)
+	cp $(IPROGS) $(prefix)/bin
+	cp $(ILIBS) $(prefix)/lib
+	cp $(IHDRS) $(prefix)/include
 
 clean:
 	rm -rf $(PROGS) *.[ao] *.so *~ testdb
