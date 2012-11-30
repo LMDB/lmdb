@@ -117,7 +117,7 @@
 #define MISALIGNED_OK	1
 #endif
 
-#include "mdb.h"
+#include "lmdb.h"
 #include "midl.h"
 
 #if (BYTE_ORDER == LITTLE_ENDIAN) == (BYTE_ORDER == BIG_ENDIAN)

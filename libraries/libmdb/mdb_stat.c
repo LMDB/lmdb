@@ -15,7 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include "mdb.h"
+#include "lmdb.h"
 
 static void prstat(MDB_stat *ms)
 {

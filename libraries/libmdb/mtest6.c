@@ -18,7 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include "mdb.h"
+#include "lmdb.h"
 
 char dkbuf[1024];
 

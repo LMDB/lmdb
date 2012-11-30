@@ -6,7 +6,7 @@ LDLIBS	=
 SOLIBS	=
 
 PROGS	= mdb_stat mdb_copy mtest mtest2 mtest3 mtest4 mtest5
-all:	libmdb.a libmdb.so $(PROGS)
+all:	liblmdb.a liblmdb.so $(PROGS)
 
 clean:
 	rm -rf $(PROGS) *.[ao] *.so *~ testdb
@@ -15,23 +15,23 @@ test:	all
 	mkdir testdb
 	./mtest && ./mdb_stat testdb
 
-libmdb.a:	mdb.o midl.o
+liblmdb.a:	mdb.o midl.o
 	ar rs $@ mdb.o midl.o
 
-libmdb.so:	mdb.o midl.o
+liblmdb.so:	mdb.o midl.o
 	gcc -pthread -shared -o $@ mdb.o midl.o $(SOLIBS)
 
-mdb_stat: mdb_stat.o libmdb.a
-mdb_copy: mdb_copy.o libmdb.a
-mtest:    mtest.o    libmdb.a
-mtest2:	mtest2.o libmdb.a
-mtest3:	mtest3.o libmdb.a
-mtest4:	mtest4.o libmdb.a
-mtest5:	mtest5.o libmdb.a
-mtest6:	mtest6.o libmdb.a
-mfree:	mfree.o libmdb.a
+mdb_stat: mdb_stat.o liblmdb.a
+mdb_copy: mdb_copy.o liblmdb.a
+mtest:    mtest.o    liblmdb.a
+mtest2:	mtest2.o liblmdb.a
+mtest3:	mtest3.o liblmdb.a
+mtest4:	mtest4.o liblmdb.a
+mtest5:	mtest5.o liblmdb.a
+mtest6:	mtest6.o liblmdb.a
+mfree:	mfree.o liblmdb.a
 
-mdb.o: mdb.c mdb.h midl.h
+mdb.o: mdb.c lmdb.h midl.h
 	$(CC) $(CFLAGS) -fPIC $(CPPFLAGS) -c mdb.c
 
 midl.o: midl.c midl.h
@@ -40,5 +40,5 @@ midl.o: midl.c midl.h
 %:	%.o
 	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LDLIBS) -o $@
 
-%.o:	%.c mdb.h
+%.o:	%.c lmdb.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c $<

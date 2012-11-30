@@ -1,7 +1,7 @@
-/** @file mdb.h
- *	@brief memory-mapped database library
+/** @file lmdb.h
+ *	@brief Lightning memory-mapped database library
  *
- *	@mainpage	MDB Memory-Mapped Database Manager
+ *	@mainpage	MDB Lightning Memory-Mapped Database Manager
  *
  *	@section intro_sec Introduction
  *	MDB is a Btree-based database management library modeled loosely on the
@@ -127,8 +127,8 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-#ifndef _MDB_H_
-#define _MDB_H_
+#ifndef _LMDB_H_
+#define _LMDB_H_
 
 #include <sys/types.h>
 
@@ -138,7 +138,7 @@ extern "C" {
 
 /** @defgroup mdb MDB API
  *	@{
- *	@brief OpenLDAP Memory-Mapped Database Manager
+ *	@brief OpenLDAP Lightning Memory-Mapped Database Manager
  */
 /** @defgroup Version Version Macros
  *	@{
@@ -148,7 +148,7 @@ extern "C" {
 /** Library minor version */
 #define MDB_VERSION_MINOR	9
 /** Library patch version */
-#define MDB_VERSION_PATCH	4
+#define MDB_VERSION_PATCH	5
 
 /** Combine args a,b,c into a single integer for easy version comparisons */
 #define MDB_VERINT(a,b,c)	(((a) << 24) | ((b) << 16) | (c))
@@ -158,7 +158,7 @@ extern "C" {
 	MDB_VERINT(MDB_VERSION_MAJOR,MDB_VERSION_MINOR,MDB_VERSION_PATCH)
 
 /** The release date of this library version */
-#define MDB_VERSION_DATE	"September 14, 2012"
+#define MDB_VERSION_DATE	"November 30, 2012"
 
 /** A stringifier for the version info */
 #define MDB_VERSTR(a,b,c,d)	"MDB " #a "." #b "." #c ": (" d ")"
@@ -1160,4 +1160,4 @@ int  mdb_dcmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b);
 #ifdef __cplusplus
 }
 #endif
-#endif /* _MDB_H_ */
+#endif /* _LMDB_H_ */
