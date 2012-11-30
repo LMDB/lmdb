@@ -1338,7 +1338,7 @@ none:
 			MDB_oldpages *mop = txn->mt_env->me_pghead;
 			if (num > 1) {
 				MDB_cursor m2;
-				int retry = 2, readit = 0, n2 = num-1;
+				int retry = 20, readit = 0, n2 = num-1;
 				unsigned int i, j, k;
 
 				/* If current list is too short, must fetch more and coalesce */
