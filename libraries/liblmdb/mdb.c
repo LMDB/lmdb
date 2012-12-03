@@ -6971,9 +6971,9 @@ mdb_drop0(MDB_cursor *mc, int subs)
 			rc = mdb_cursor_sibling(mc, 1);
 			if (rc) {
 				/* no more siblings, go back to beginning
-				 * of previous level. (stack was already popped
-				 * by mdb_cursor_sibling)
+				 * of previous level.
 				 */
+				mdb_cursor_pop(mc);
 				for (i=1; i<mc->mc_top; i++)
 					mc->mc_pg[i] = mx.mc_pg[i];
 			}
