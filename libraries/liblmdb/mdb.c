@@ -723,7 +723,7 @@ typedef struct MDB_node {
 	/** Information about a single database in the environment. */
 typedef struct MDB_db {
 	uint32_t	md_pad;		/**< also ksize for LEAF2 pages */
-	uint16_t	md_flags;	/**< @ref mdb_open */
+	uint16_t	md_flags;	/**< @ref mdb_dbi_open */
 	uint16_t	md_depth;	/**< depth of this tree */
 	pgno_t		md_branch_pages;	/**< number of internal pages */
 	pgno_t		md_leaf_pages;		/**< number of leaf pages */
@@ -6787,7 +6787,7 @@ mdb_env_info(MDB_env *env, MDB_envinfo *arg)
  * The user can then override them with #mdb_set_compare() or
  * #mdb_set_dupsort().
  * @param[in] txn A transaction handle returned by #mdb_txn_begin()
- * @param[in] dbi A database handle returned by #mdb_open()
+ * @param[in] dbi A database handle returned by #mdb_dbi_open()
  */
 static void
 mdb_default_cmp(MDB_txn *txn, MDB_dbi dbi)
@@ -6808,7 +6808,7 @@ mdb_default_cmp(MDB_txn *txn, MDB_dbi dbi)
 #define PERSISTENT_FLAGS	0xffff
 #define VALID_FLAGS	(MDB_REVERSEKEY|MDB_DUPSORT|MDB_INTEGERKEY|MDB_DUPFIXED|\
 	MDB_INTEGERDUP|MDB_REVERSEDUP|MDB_CREATE)
-int mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
+int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 {
 	MDB_val key, data;
 	MDB_dbi i;
@@ -6914,7 +6914,7 @@ int mdb_stat(MDB_txn *txn, MDB_dbi dbi, MDB_stat *arg)
 	return mdb_stat0(txn->mt_env, &txn->mt_dbs[dbi], arg);
 }
 
-void mdb_close(MDB_env *env, MDB_dbi dbi)
+void mdb_dbi_close(MDB_env *env, MDB_dbi dbi)
 {
 	char *ptr;
 	if (dbi <= MAIN_DBI || dbi >= env->me_numdbs)
@@ -7008,7 +7008,7 @@ int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)
 	if (del && dbi > MAIN_DBI) {
 		rc = mdb_del(txn, MAIN_DBI, &mc->mc_dbx->md_name, NULL);
 		if (!rc)
-			mdb_close(txn->mt_env, dbi);
+			mdb_dbi_close(txn->mt_env, dbi);
 	} else {
 		/* reset the DB record, mark it dirty */
 		txn->mt_dbflags[dbi] |= DB_DIRTY;

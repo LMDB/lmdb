@@ -1,7 +1,7 @@
 /** @file lmdb.h
  *	@brief Lightning memory-mapped database library
  *
- *	@mainpage	MDB Lightning Memory-Mapped Database Manager
+ *	@mainpage	Lightning Memory-Mapped Database Manager (MDB)
  *
  *	@section intro_sec Introduction
  *	MDB is a Btree-based database management library modeled loosely on the
@@ -237,7 +237,7 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
 #define MDB_MAPASYNC		0x100000
 /** @} */
 
-/**	@defgroup	mdb_open	Database Flags
+/**	@defgroup	mdb_dbi_open	Database Flags
  *
  *	Values do not overlap Environment Flags.
  *	@{
@@ -716,9 +716,14 @@ void mdb_txn_reset(MDB_txn *txn);
 	 */
 int  mdb_txn_renew(MDB_txn *txn);
 
+/** Compat with version <= 0.9.4, avoid clash with libmdb from MDB Tools project */
+#define mdb_open(txn,name,flags,dbi)	mdb_dbi_open(txn,name,flags,dbi)
+/** Compat with version <= 0.9.4, avoid clash with libmdb from MDB Tools project */
+#define mdb_close(env,dbi)				mdb_dbi_close(env,dbi)
+
 	/** @brief Open a database in the environment.
 	 *
-	 * The database handle may be discarded by calling #mdb_close().  The
+	 * The database handle may be discarded by calling #mdb_dbi_close().  The
 	 * database handle resides in the shared environment, it is not owned
 	 * by the given transaction. Only one thread should call this function;
 	 * it is not mutex-protected in a read-only transaction.
@@ -768,12 +773,12 @@ int  mdb_txn_renew(MDB_txn *txn);
 	 *	<li>ENFILE - too many databases have been opened. See #mdb_env_set_maxdbs().
 	 * </ul>
 	 */
-int  mdb_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi);
+int  mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi);
 
 	/** @brief Retrieve statistics for a database.
 	 *
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
-	 * @param[in] dbi A database handle returned by #mdb_open()
+	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 * @param[out] stat The address of an #MDB_stat structure
 	 * 	where the statistics will be copied
 	 * @return A non-zero error value on failure and 0 on success. Some possible
@@ -790,16 +795,16 @@ int  mdb_stat(MDB_txn *txn, MDB_dbi dbi, MDB_stat *stat);
 	 * a single thread, and only if no other threads are going to reference
 	 * the database handle any further.
 	 * @param[in] env An environment handle returned by #mdb_env_create()
-	 * @param[in] dbi A database handle returned by #mdb_open()
+	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 */
-void mdb_close(MDB_env *env, MDB_dbi dbi);
+void mdb_dbi_close(MDB_env *env, MDB_dbi dbi);
 
 	/** @brief Delete a database and/or free all its pages.
 	 *
 	 * If the \b del parameter is 1, the DB handle will be closed
 	 * and the DB will be deleted.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
-	 * @param[in] dbi A database handle returned by #mdb_open()
+	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 * @param[in] del 1 to delete the DB from the environment,
 	 * 0 to just free its pages.
 	 * @return A non-zero error value on failure and 0 on success.
@@ -811,13 +816,13 @@ int  mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del);
 	 * The comparison function is called whenever it is necessary to compare a
 	 * key specified by the application with a key currently stored in the database.
 	 * If no comparison function is specified, and no special key flags were specified
-	 * with #mdb_open(), the keys are compared lexically, with shorter keys collating
+	 * with #mdb_dbi_open(), the keys are compared lexically, with shorter keys collating
 	 * before longer keys.
 	 * @warning This function must be called before any data access functions are used,
 	 * otherwise data corruption may occur. The same comparison function must be used by every
 	 * program accessing the database, every time the database is used.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
-	 * @param[in] dbi A database handle returned by #mdb_open()
+	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 * @param[in] cmp A #MDB_cmp_func function
 	 * @return A non-zero error value on failure and 0 on success. Some possible
 	 * errors are:
@@ -834,13 +839,13 @@ int  mdb_set_compare(MDB_txn *txn, MDB_dbi dbi, MDB_cmp_func *cmp);
 	 * This function only takes effect if the database was opened with the #MDB_DUPSORT
 	 * flag.
 	 * If no comparison function is specified, and no special key flags were specified
-	 * with #mdb_open(), the data items are compared lexically, with shorter items collating
+	 * with #mdb_dbi_open(), the data items are compared lexically, with shorter items collating
 	 * before longer items.
 	 * @warning This function must be called before any data access functions are used,
 	 * otherwise data corruption may occur. The same comparison function must be used by every
 	 * program accessing the database, every time the database is used.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
-	 * @param[in] dbi A database handle returned by #mdb_open()
+	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 * @param[in] cmp A #MDB_cmp_func function
 	 * @return A non-zero error value on failure and 0 on success. Some possible
 	 * errors are:
@@ -860,7 +865,7 @@ int  mdb_set_dupsort(MDB_txn *txn, MDB_dbi dbi, MDB_cmp_func *cmp);
 	 * Currently the relocation feature is unimplemented and setting
 	 * this function has no effect.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
-	 * @param[in] dbi A database handle returned by #mdb_open()
+	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 * @param[in] rel A #MDB_rel_func function
 	 * @return A non-zero error value on failure and 0 on success. Some possible
 	 * errors are:
@@ -874,7 +879,7 @@ int  mdb_set_relfunc(MDB_txn *txn, MDB_dbi dbi, MDB_rel_func *rel);
 	 *
 	 * See #mdb_set_relfunc and #MDB_rel_func for more details.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
-	 * @param[in] dbi A database handle returned by #mdb_open()
+	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 * @param[in] ctx An arbitrary pointer for whatever the application needs.
 	 * It will be passed to the callback function set by #mdb_set_relfunc
 	 * as its \b relctx parameter whenever the callback is invoked.
@@ -900,7 +905,7 @@ int  mdb_set_relctx(MDB_txn *txn, MDB_dbi dbi, void *ctx);
 	 * modify it in any way. For values returned in a read-only transaction
 	 * any modification attempts will cause a SIGSEGV.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
-	 * @param[in] dbi A database handle returned by #mdb_open()
+	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 * @param[in] key The key to search for in the database
 	 * @param[out] data The data corresponding to the key
 	 * @return A non-zero error value on failure and 0 on success. Some possible
@@ -919,7 +924,7 @@ int  mdb_get(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data);
 	 * if duplicates are disallowed, or adding a duplicate data item if
 	 * duplicates are allowed (#MDB_DUPSORT).
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
-	 * @param[in] dbi A database handle returned by #mdb_open()
+	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 * @param[in] key The key to store in the database
 	 * @param[in,out] data The data to store
 	 * @param[in] flags Special options for this operation. This parameter
@@ -970,7 +975,7 @@ int  mdb_put(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data,
 	 * This function will return #MDB_NOTFOUND if the specified key/data
 	 * pair is not in the database.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
-	 * @param[in] dbi A database handle returned by #mdb_open()
+	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 * @param[in] key The key to delete from the database
 	 * @param[in] data The data to delete
 	 * @return A non-zero error value on failure and 0 on success. Some possible
@@ -987,7 +992,7 @@ int  mdb_del(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data);
 	 * Cursors are associated with a specific transaction and database and
 	 * may not span threads.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
-	 * @param[in] dbi A database handle returned by #mdb_open()
+	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 * @param[out] cursor Address where the new #MDB_cursor handle will be stored
 	 * @return A non-zero error value on failure and 0 on success. Some possible
 	 * errors are:
@@ -1137,7 +1142,7 @@ int  mdb_cursor_count(MDB_cursor *cursor, size_t *countp);
 	 * This returns a comparison as if the two data items were keys in the
 	 * specified database.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
-	 * @param[in] dbi A database handle returned by #mdb_open()
+	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 * @param[in] a The first item to compare
 	 * @param[in] b The second item to compare
 	 * @return < 0 if a < b, 0 if a == b, > 0 if a > b
@@ -1149,7 +1154,7 @@ int  mdb_cmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b);
 	 * This returns a comparison as if the two items were data items of
 	 * a sorted duplicates #MDB_DUPSORT database.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
-	 * @param[in] dbi A database handle returned by #mdb_open()
+	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 * @param[in] a The first item to compare
 	 * @param[in] b The second item to compare
 	 * @return < 0 if a < b, 0 if a == b, > 0 if a > b
