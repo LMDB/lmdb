@@ -2156,15 +2156,15 @@ free2:
 		key.mv_data = NULL;
 		mdb_page_search(&mc, &key, MDB_PS_MODIFY);
 
-		mdb_midl_sort(txn->mt_free_pgs);
 #if MDB_DEBUG > 1
 		{
 			unsigned int i;
 			MDB_IDL idl = txn->mt_free_pgs;
+			mdb_midl_sort(txn->mt_free_pgs);
 			DPRINTF("IDL write txn %zu root %zu num %zu",
 				txn->mt_txnid, txn->mt_dbs[FREE_DBI].md_root, idl[0]);
-			for (i=0; i<idl[0]; i++) {
-				DPRINTF("IDL %zu", idl[i+1]);
+			for (i=1; i<=idl[0]; i++) {
+				DPRINTF("IDL %zu", idl[i]);
 			}
 		}
 #endif
@@ -2179,6 +2179,7 @@ free2:
 		do {
 			freecnt = txn->mt_free_pgs[0];
 			data.mv_size = MDB_IDL_SIZEOF(txn->mt_free_pgs);
+			mdb_midl_sort(txn->mt_free_pgs);
 			rc = mdb_cursor_put(&mc, &key, &data, 0);
 			if (rc) {
 				mdb_txn_abort(txn);
@@ -2213,8 +2214,6 @@ again:
 				id = mop->mo_txnid;
 				mdb_cursor_put(&mc, &key, &data, 0);
 			}
-			env->me_pghead = NULL;
-			free(mop);
 		} else {
 			/* was completely used up */
 			mdb_cursor_del(&mc, 0);
@@ -2225,15 +2224,20 @@ again:
 		env->me_pglast = 0;
 	}
 
+	/* Check for growth of freelist again */
+	if (freecnt != txn->mt_free_pgs[0])
+		goto free2;
+
+	if (env->me_pghead) {
+		free(env->me_pghead);
+		env->me_pghead = NULL;
+	}
+
 	while (env->me_pgfree) {
 		MDB_oldpages *mop = env->me_pgfree;
 		env->me_pgfree = mop->mo_next;
 		free(mop);
 	}
-
-	/* Check for growth of freelist again */
-	if (freecnt != txn->mt_free_pgs[0])
-		goto free2;
 
 	if (!MDB_IDL_IS_ZERO(txn->mt_free_pgs)) {
 		if (mdb_midl_shrink(&txn->mt_free_pgs))
