@@ -62,6 +62,8 @@ int main(int argc, char *argv[])
 	while ((i = getopt(argc, argv, "aefns:")) != EOF) {
 		switch(i) {
 		case 'a':
+			if (subname)
+				usage(prog);
 			alldbs++;
 			break;
 		case 'e':
@@ -74,6 +76,8 @@ int main(int argc, char *argv[])
 			envflags |= MDB_NOSUBDIR;
 			break;
 		case 's':
+			if (alldbs)
+				usage(prog);
 			subname = optarg;
 			break;
 		default:
