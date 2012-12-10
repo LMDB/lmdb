@@ -1347,6 +1347,11 @@ none:
 
 				mdb_cursor_init(&m2, txn, FREE_DBI, NULL);
 				do {
+					/* bail out if we're operating on the freelist.
+					 * TODO: get all of this working. Many circular dependencies...
+					 */
+					if (mc->mc_dbi == FREE_DBI)
+						break;
 					if (readit) {
 						MDB_val key, data;
 						MDB_oldpages *mop2;
