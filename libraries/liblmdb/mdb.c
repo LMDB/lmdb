@@ -2126,7 +2126,12 @@ mdb_txn_commit(MDB_txn *txn)
 	/* should only be one record now */
 	if (env->me_pghead) {
 		/* make sure first page of freeDB is touched and on freelist */
-		mdb_page_search(&mc, NULL, MDB_PS_MODIFY);
+		rc = mdb_page_search(&mc, NULL, MDB_PS_MODIFY);
+		if (rc) {
+fail:
+			mdb_txn_abort(txn);
+			return rc;
+		}
 	}
 
 	/* Delete IDLs we used from the free list */
@@ -2141,10 +2146,8 @@ mdb_txn_commit(MDB_txn *txn)
 
 			mdb_cursor_set(&mc, &key, NULL, MDB_SET, &exact);
 			rc = mdb_cursor_del(&mc, 0);
-			if (rc) {
-				mdb_txn_abort(txn);
-				return rc;
-			}
+			if (rc)
+				goto fail;
 		}
 		env->me_pgfirst = 0;
 		env->me_pglast = 0;
@@ -2159,7 +2162,9 @@ free2:
 		/* make sure last page of freeDB is touched and on freelist */
 		key.mv_size = MAXKEYSIZE+1;
 		key.mv_data = NULL;
-		mdb_page_search(&mc, &key, MDB_PS_MODIFY);
+		rc = mdb_page_search(&mc, &key, MDB_PS_MODIFY);
+		if (rc)
+			goto fail;
 
 #if MDB_DEBUG > 1
 		{
@@ -2186,10 +2191,8 @@ free2:
 			data.mv_size = MDB_IDL_SIZEOF(txn->mt_free_pgs);
 			mdb_midl_sort(txn->mt_free_pgs);
 			rc = mdb_cursor_put(&mc, &key, &data, 0);
-			if (rc) {
-				mdb_txn_abort(txn);
-				return rc;
-			}
+			if (rc)
+				goto fail;
 		} while (freecnt != txn->mt_free_pgs[0]);
 	}
 	/* should only be one record now */
@@ -2210,18 +2213,24 @@ again:
 		/* These steps may grow the freelist again
 		 * due to freed overflow pages...
 		 */
-		mdb_cursor_put(&mc, &key, &data, 0);
+		rc = mdb_cursor_put(&mc, &key, &data, 0);
+		if (rc)
+			goto fail;
 		if (mop == env->me_pghead && env->me_pghead->mo_txnid == id) {
 			/* could have been used again here */
 			if (mop->mo_pages[0] != orig) {
 				data.mv_size = MDB_IDL_SIZEOF(mop->mo_pages);
 				data.mv_data = mop->mo_pages;
 				id = mop->mo_txnid;
-				mdb_cursor_put(&mc, &key, &data, 0);
+				rc = mdb_cursor_put(&mc, &key, &data, 0);
+				if (rc)
+					goto fail;
 			}
 		} else {
 			/* was completely used up */
-			mdb_cursor_del(&mc, 0);
+			rc = mdb_cursor_del(&mc, 0);
+			if (rc)
+				goto fail;
 			if (env->me_pghead)
 				goto again;
 		}
