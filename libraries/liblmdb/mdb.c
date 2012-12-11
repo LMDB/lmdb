@@ -2416,47 +2416,61 @@ mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 	MDB_pagebuf	pbuf;
 	MDB_page	*p;
 	MDB_meta	*m;
-	int		 rc, err;
+	int		 i, rc, err;
 
 	/* We don't know the page size yet, so use a minimum value.
+	 * Read both meta pages so we can use the latest one.
 	 */
 
+	for (i=0; i<2; i++) {
 #ifdef _WIN32
-	if (!ReadFile(env->me_fd, &pbuf, MDB_PAGESIZE, (DWORD *)&rc, NULL) || rc == 0)
+		if (!ReadFile(env->me_fd, &pbuf, MDB_PAGESIZE, (DWORD *)&rc, NULL) || rc == 0)
 #else
-	if ((rc = read(env->me_fd, &pbuf, MDB_PAGESIZE)) == 0)
+		if ((rc = read(env->me_fd, &pbuf, MDB_PAGESIZE)) == 0)
 #endif
-	{
-		return ENOENT;
-	}
-	else if (rc != MDB_PAGESIZE) {
-		err = ErrCode();
-		if (rc > 0)
-			err = MDB_INVALID;
-		DPRINTF("read: %s", strerror(err));
-		return err;
-	}
+		{
+			return ENOENT;
+		}
+		else if (rc != MDB_PAGESIZE) {
+			err = ErrCode();
+			if (rc > 0)
+				err = MDB_INVALID;
+			DPRINTF("read: %s", strerror(err));
+			return err;
+		}
 
-	p = (MDB_page *)&pbuf;
+		p = (MDB_page *)&pbuf;
 
-	if (!F_ISSET(p->mp_flags, P_META)) {
-		DPRINTF("page %zu not a meta page", p->mp_pgno);
-		return MDB_INVALID;
+		if (!F_ISSET(p->mp_flags, P_META)) {
+			DPRINTF("page %zu not a meta page", p->mp_pgno);
+			return MDB_INVALID;
+		}
+
+		m = METADATA(p);
+		if (m->mm_magic != MDB_MAGIC) {
+			DPUTS("meta has invalid magic");
+			return MDB_INVALID;
+		}
+
+		if (m->mm_version != MDB_VERSION) {
+			DPRINTF("database is version %u, expected version %u",
+				m->mm_version, MDB_VERSION);
+			return MDB_VERSION_MISMATCH;
+		}
+
+		if (i) {
+			if (m->mm_txnid > meta->mm_txnid)
+				memcpy(meta, m, sizeof(*m));
+		} else {
+			memcpy(meta, m, sizeof(*m));
+#ifdef _WIN32
+			if (SetFilePointer(env->me_fd, meta->mm_psize, NULL, FILE_BEGIN) != meta->mm_psize)
+#else
+			if (lseek(env->me_fd, meta->mm_psize, SEEK_SET) != meta->mm_psize)
+#endif
+				return ErrCode();
+		}
 	}
-
-	m = METADATA(p);
-	if (m->mm_magic != MDB_MAGIC) {
-		DPUTS("meta has invalid magic");
-		return MDB_INVALID;
-	}
-
-	if (m->mm_version != MDB_VERSION) {
-		DPRINTF("database is version %u, expected version %u",
-		    m->mm_version, MDB_VERSION);
-		return MDB_VERSION_MISMATCH;
-	}
-
-	memcpy(meta, m, sizeof(*m));
 	return 0;
 }
 
