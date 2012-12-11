@@ -2127,7 +2127,7 @@ mdb_txn_commit(MDB_txn *txn)
 	if (env->me_pghead) {
 		/* make sure first page of freeDB is touched and on freelist */
 		rc = mdb_page_search(&mc, NULL, MDB_PS_MODIFY);
-		if (rc) {
+		if (rc && rc != MDB_NOTFOUND) {
 fail:
 			mdb_txn_abort(txn);
 			return rc;
@@ -2163,7 +2163,7 @@ free2:
 		key.mv_size = MAXKEYSIZE+1;
 		key.mv_data = NULL;
 		rc = mdb_page_search(&mc, &key, MDB_PS_MODIFY);
-		if (rc)
+		if (rc && rc != MDB_NOTFOUND)
 			goto fail;
 
 #if MDB_DEBUG > 1
