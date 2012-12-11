@@ -2518,10 +2518,12 @@ mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 #ifdef _WIN32
 	{
 		DWORD len;
+		SetFilePointer(env->me_fd, 0, NULL, FILE_BEGIN);
 		rc = WriteFile(env->me_fd, p, psize * 2, &len, NULL);
 		rc = (len == psize * 2) ? MDB_SUCCESS : ErrCode();
 	}
 #else
+	lseek(env->me_fd, 0, SEEK_SET);
 	rc = write(env->me_fd, p, psize * 2);
 	rc = (rc == (int)psize * 2) ? MDB_SUCCESS : ErrCode();
 #endif
