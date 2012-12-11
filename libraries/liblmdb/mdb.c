@@ -2722,11 +2722,22 @@ mdb_env_open2(MDB_env *env)
 			return i;
 		DPUTS("new mdbenv");
 		newenv = 1;
-		meta.mm_mapsize = env->me_mapsize > DEFAULT_MAPSIZE ? env->me_mapsize : DEFAULT_MAPSIZE;
 	}
 
-	if (env->me_mapsize < meta.mm_mapsize)
-		env->me_mapsize = meta.mm_mapsize;
+	/* Was a mapsize configured? */
+	if (!env->me_mapsize) {
+		/* If this is a new environment, take the default,
+		 * else use the size recorded in the existing env.
+		 */
+		env->me_mapsize = newenv ? DEFAULT_MAPSIZE : meta.mm_mapsize;
+	} else if (env->me_mapsize < meta.mm_mapsize) {
+		/* If the configured size is smaller, make sure it's
+		 * still big enough. Silently round up to minimum if not.
+		 */
+		size_t minsize = (meta.mm_last_pg + 1) * meta.mm_psize;
+		if (env->me_mapsize < minsize)
+			env->me_mapsize = minsize;
+	}
 
 #ifdef _WIN32
 	{
