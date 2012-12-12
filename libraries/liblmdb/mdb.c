@@ -2493,6 +2493,7 @@ mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 
 	meta->mm_magic = MDB_MAGIC;
 	meta->mm_version = MDB_VERSION;
+	meta->mm_mapsize = env->me_mapsize;
 	meta->mm_psize = psize;
 	meta->mm_last_pg = 1;
 	meta->mm_flags = env->me_flags & 0xffff;
