@@ -158,7 +158,7 @@ extern "C" {
 	MDB_VERINT(MDB_VERSION_MAJOR,MDB_VERSION_MINOR,MDB_VERSION_PATCH)
 
 /** The release date of this library version */
-#define MDB_VERSION_DATE	"November 30, 2012"
+#define MDB_VERSION_DATE	"December 12, 2012"
 
 /** A stringifier for the version info */
 #define MDB_VERSTR(a,b,c,d)	"MDB " #a "." #b "." #c ": (" d ")"
