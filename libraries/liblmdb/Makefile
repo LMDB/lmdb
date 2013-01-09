@@ -38,7 +38,6 @@ mtest3:	mtest3.o liblmdb.a
 mtest4:	mtest4.o liblmdb.a
 mtest5:	mtest5.o liblmdb.a
 mtest6:	mtest6.o liblmdb.a
-mfree:	mfree.o liblmdb.a
 
 mdb.o: mdb.c lmdb.h midl.h
 	$(CC) $(CFLAGS) -fPIC $(CPPFLAGS) -c mdb.c
