@@ -1338,7 +1338,7 @@ none:
 			MDB_oldpages *mop = txn->mt_env->me_pghead;
 			if (num > 1) {
 				MDB_cursor m2;
-				int retry = 60, readit = 0, n2 = num-1;
+				int retry = 500, readit = 0, n2 = num-1;
 				unsigned int i, j, k;
 
 				/* If current list is too short, must fetch more and coalesce */
@@ -1347,11 +1347,14 @@ none:
 
 				mdb_cursor_init(&m2, txn, FREE_DBI, NULL);
 				do {
-					/* bail out if we're operating on the freelist.
+					/* If on freelist, don't try to read more. If what we have
+					 * right now isn't enough just use new pages.
 					 * TODO: get all of this working. Many circular dependencies...
 					 */
-					if (mc->mc_dbi == FREE_DBI)
-						break;
+					if (mc->mc_dbi == FREE_DBI) {
+						retry = 0;
+						readit = 0;
+					}
 					if (readit) {
 						MDB_val key, data;
 						MDB_oldpages *mop2;
@@ -2124,7 +2127,7 @@ mdb_txn_commit(MDB_txn *txn)
 	mdb_cursor_init(&mc, txn, FREE_DBI, NULL);
 
 	/* should only be one record now */
-	if (env->me_pghead) {
+	if (env->me_pghead || env->me_pgfirst) {
 		/* make sure first page of freeDB is touched and on freelist */
 		rc = mdb_page_search(&mc, NULL, MDB_PS_MODIFY);
 		if (rc && rc != MDB_NOTFOUND) {
