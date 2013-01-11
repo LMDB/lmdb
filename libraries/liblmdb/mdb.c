@@ -1049,7 +1049,7 @@ static char *const mdb_errstr[] = {
 	"MDB_DBS_FULL: Environment maxdbs limit reached",
 	"MDB_READERS_FULL: Environment maxreaders limit reached",
 	"MDB_TLS_FULL: Thread-local storage keys full - too many environments open",
-	"MDB_TXN_FULL: Nested transaction has too many dirty pages - transaction too big",
+	"MDB_TXN_FULL: Transaction has too many dirty pages - transaction too big",
 	"MDB_CURSOR_FULL: Internal error - cursor stack limit reached",
 	"MDB_PAGE_FULL: Internal error - page has no more space"
 };
@@ -1225,6 +1225,14 @@ mdb_page_malloc(MDB_cursor *mc) {
 	return ret;
 }
 
+static void
+mdb_page_free(MDB_env *env, MDB_page *mp)
+{
+	mp->mp_next = env->me_dpages;
+	VGMEMP_FREE(env, mp);
+	env->me_dpages = mp;
+}
+
 /** Allocate pages for writing.
  * If there are free pages available from older transactions, they
  * will be re-used first. Otherwise a new page will be allocated.
@@ -1246,6 +1254,11 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 	int rc;
 
 	*mp = NULL;
+
+	/* If our dirty list is already full, we can't do anything */
+	if (txn->mt_u.dirty_list[0].mid >= MDB_IDL_UM_MAX)
+		return MDB_TXN_FULL;
+
 	/* The free list won't have any content at all until txn 2 has
 	 * committed. The pages freed by txn 2 will be unreferenced
 	 * after txn 3 commits, and so will be safe to re-use in txn 4.
@@ -1596,6 +1609,8 @@ finish:
 				return 0;
 			}
 		}
+		if (mc->mc_txn->mt_u.dirty_list[0].mid >= MDB_IDL_UM_MAX)
+			return MDB_TXN_FULL;
 		/* No - copy it */
 		np = mdb_page_malloc(mc);
 		if (!np)
@@ -1939,9 +1954,7 @@ mdb_txn_reset0(MDB_txn *txn)
 			for (i=1; i<=txn->mt_u.dirty_list[0].mid; i++) {
 				dp = txn->mt_u.dirty_list[i].mptr;
 				if (!IS_OVERFLOW(dp) || dp->mp_pages == 1) {
-					dp->mp_next = txn->mt_env->me_dpages;
-					VGMEMP_FREE(txn->mt_env, dp);
-					txn->mt_env->me_dpages = dp;
+					mdb_page_free(txn->mt_env, dp);
 				} else {
 					/* large pages just get freed directly */
 					VGMEMP_FREE(txn->mt_env, dp);
@@ -2373,9 +2386,7 @@ again:
 	for (i=1; i<=txn->mt_u.dirty_list[0].mid; i++) {
 		dp = txn->mt_u.dirty_list[i].mptr;
 		if (!IS_OVERFLOW(dp) || dp->mp_pages == 1) {
-			dp->mp_next = txn->mt_env->me_dpages;
-			VGMEMP_FREE(txn->mt_env, dp);
-			txn->mt_env->me_dpages = dp;
+			mdb_page_free(txn->mt_env, dp);
 		} else {
 			VGMEMP_FREE(txn->mt_env, dp);
 			free(dp);
@@ -6678,9 +6689,7 @@ newsep:
 	}
 
 	/* return tmp page to freelist */
-	copy->mp_next = mc->mc_txn->mt_env->me_dpages;
-	VGMEMP_FREE(mc->mc_txn->mt_env, copy);
-	mc->mc_txn->mt_env->me_dpages = copy;
+	mdb_page_free(mc->mc_txn->mt_env, copy);
 done:
 	{
 		/* Adjust other cursors pointing to mp */

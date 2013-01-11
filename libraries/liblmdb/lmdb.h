@@ -346,7 +346,7 @@ typedef enum MDB_cursor_op {
 #define MDB_READERS_FULL	(-30790)
 	/** Too many TLS keys in use - Windows only */
 #define MDB_TLS_FULL	(-30789)
-	/** Nested txn has too many dirty pages */
+	/** Txn has too many dirty pages */
 #define MDB_TXN_FULL	(-30788)
 	/** Cursor stack too deep - internal error */
 #define MDB_CURSOR_FULL	(-30787)
