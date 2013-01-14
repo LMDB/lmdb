@@ -4809,6 +4809,9 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	if (key->mv_size == 0 || key->mv_size > MDB_MAXKEYSIZE)
 		return EINVAL;
 
+	if (F_ISSET(mc->mc_db->md_flags, MDB_DUPSORT) && data->mv_size > MDB_MAXKEYSIZE)
+		return EINVAL;
+
 	DPRINTF("==> put db %u key [%s], size %zu, data size %zu",
 		mc->mc_dbi, DKEY(key), key ? key->mv_size:0, data->mv_size);
 
