@@ -344,9 +344,9 @@ static txnid_t mdb_debug_start;
 
 	/**	@brief The maximum size of a key in the database.
 	 *
-	 *	While data items have essentially unbounded size, we require that
-	 *	keys all fit onto a regular page. This limit could be raised a bit
-	 *	further if needed; to something just under #MDB_PAGESIZE / #MDB_MINKEYS.
+	 *	We require that keys all fit onto a regular page. This limit
+	 *	could be raised a bit further if needed; to something just
+	 *	under #MDB_PAGESIZE / #MDB_MINKEYS.
 	 *
 	 *	Note that data items in an #MDB_DUPSORT database are actually keys
 	 *	of a subDB, so they're also limited to this size.
@@ -354,6 +354,12 @@ static txnid_t mdb_debug_start;
 #ifndef MDB_MAXKEYSIZE
 #define MDB_MAXKEYSIZE	 511
 #endif
+
+	/**	@brief The maximum size of a data item.
+	 *
+	 *	We only store a 32 bit value for node sizes.
+	 */
+#define MAXDATASIZE	0xffffffffUL
 
 #if MDB_DEBUG
 	/**	A key buffer.
@@ -4811,6 +4817,11 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 
 	if (F_ISSET(mc->mc_db->md_flags, MDB_DUPSORT) && data->mv_size > MDB_MAXKEYSIZE)
 		return EINVAL;
+
+#if SIZE_MAX > MAXDATASIZE
+	if (data->mv_size > MAXDATASIZE)
+		return EINVAL;
+#endif
 
 	DPRINTF("==> put db %u key [%s], size %zu, data size %zu",
 		mc->mc_dbi, DKEY(key), key ? key->mv_size:0, data->mv_size);
