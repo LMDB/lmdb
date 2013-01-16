@@ -78,10 +78,11 @@
  *	  database can grow quickly.  Write transactions prevent
  *	  other write transactions, since writes are serialized.
  *
- *	...when several processes can use a database concurrently:
- *
  *	- Avoid suspending a process with active transactions.  These
- *	  would then be "long-lived" as above.
+ *	  would then be "long-lived" as above.  Also read transactions
+ *	  suspended when writers commit could sometimes see wrong data.
+ *
+ *	...when several processes can use a database concurrently:
  *
  *	- Avoid aborting a process with an active transaction.
  *	  The transaction becomes "long-lived" as above until the lockfile
@@ -221,7 +222,7 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
  *	Values do not overlap Database Flags.
  *	@{
  */
-	/** mmap at a fixed address */
+	/** mmap at a fixed address (experimental) */
 #define MDB_FIXEDMAP	0x01
 	/** no environment directory */
 #define MDB_NOSUBDIR	0x4000
@@ -233,7 +234,7 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
 #define MDB_NOMETASYNC		0x40000
 	/** use writable mmap */
 #define MDB_WRITEMAP		0x80000
-	/** use asynchronous msync */
+	/** use asynchronous msync when MDB_WRITEMAP is used */
 #define MDB_MAPASYNC		0x100000
 /** @} */
 
@@ -435,24 +436,43 @@ int  mdb_env_create(MDB_env **env);
 	 *		under that directory. With this option, \b path is used as-is for
 	 *		the database main data file. The database lock file is the \b path
 	 *		with "-lock" appended.
-	 *	<li>#MDB_NOSYNC
-	 *		Don't perform a synchronous flush after committing a transaction. This means
-	 *		transactions will exhibit the ACI (atomicity, consistency, and isolation)
-	 *		properties, but not D (durability); that is database integrity will be
-	 *		maintained but it is possible some number of the most recently committed
-	 *		transactions may be undone after a system crash. The number of transactions
-	 *		at risk is governed by how often the system flushes dirty buffers to disk
-	 *		and how often #mdb_env_sync() is called. This flag may be changed
-	 *		at any time using #mdb_env_set_flags().
-	 *	<li>#MDB_NOMETASYNC
-	 *		Don't perform a synchronous flush of the meta page after committing
-	 *		a transaction. This is similar to the #MDB_NOSYNC case, but safer
-	 *		because the transaction data is still flushed. The meta page for any
-	 *		transaction N will be flushed by the data flush of transaction N+1.
-	 *		In case of a system crash, the last committed transaction may be
-	 *		lost. This flag may be changed at any time using #mdb_env_set_flags().
 	 *	<li>#MDB_RDONLY
-	 *		Open the environment in read-only mode. No write operations will be allowed.
+	 *		Open the environment in read-only mode. No write operations will be
+	 *		allowed. MDB will still modify the lock file - except on read-only
+	 *		filesystems, where MDB does not use locks.
+	 *	<li>#MDB_WRITEMAP
+	 *		Use a writeable memory map unless MDB_RDONLY is set. This is faster
+	 *		and uses fewer mallocs, but loses protection from application bugs
+	 *		like wild pointer writes and other bad updates into the database.
+	 *		Incompatible with nested transactions.
+	 *	<li>#MDB_NOMETASYNC
+	 *		Flush system buffers to disk only once per transaction, omit the
+	 *		metadata flush. Defer that until the system flushes files to disk,
+	 *		or next non-MDB_RDONLY commit or #mdb_env_sync(). This optimization
+	 *		maintains database integrity, but a system crash may undo the last
+	 *		committed transaction. I.e. it preserves the ACI (atomicity,
+	 *		consistency, isolation) but not D (durability) database property.
+	 *		This flag may be changed at any time using #mdb_env_set_flags().
+	 *	<li>#MDB_NOSYNC
+	 *		Don't flush system buffers to disk when committing a transaction.
+	 *		This optimization means a system crash can corrupt the database or
+	 *		lose the last transactions if buffers are not yet flushed to disk.
+	 *		The risk is governed by how often the system flushes dirty buffers
+	 *		to disk and how often #mdb_env_sync() is called.  However, if the
+	 *		filesystem preserves write order and the #MDB_WRITEMAP flag is not
+	 *		used, transactions exhibit ACI (atomicity, consistency, isolation)
+	 *		properties and only lose D (durability).  I.e. database integrity
+	 *		is maintained, but a system crash may undo the final transactions.
+	 *		Note that (#MDB_NOSYNC | #MDB_WRITEMAP) leaves the system with no
+	 *		hint for when to write transactions to disk, unless #mdb_env_sync()
+	 *		is called. (#MDB_MAPASYNC | #MDB_WRITEMAP) may be preferable.
+	 *		This flag may be changed at any time using #mdb_env_set_flags().
+	 *	<li>#MDB_MAPASYNC
+	 *		When using #MDB_WRITEMAP, use asynchronous flushes to disk.
+	 *		As with #MDB_NOSYNC, a system crash can then corrupt the
+	 *		database or lose the last transactions. Calling #mdb_env_sync()
+	 *		ensures on-disk database integrity until next commit.
+	 *		This flag may be changed at any time using #mdb_env_set_flags().
 	 * </ul>
 	 * @param[in] mode The UNIX permissions to set on created files. This parameter
 	 * is ignored on Windows.
@@ -502,7 +522,7 @@ int  mdb_env_info(MDB_env *env, MDB_envinfo *stat);
 	 * Data is always written to disk when #mdb_txn_commit() is called,
 	 * but the operating system may keep it buffered. MDB always flushes
 	 * the OS buffers upon commit as well, unless the environment was
-	 * opened with #MDB_NOSYNC.
+	 * opened with #MDB_NOSYNC or in part #MDB_NOMETASYNC.
 	 * @param[in] env An environment handle returned by #mdb_env_create()
 	 * @param[in] force If non-zero, force a synchronous flush.  Otherwise
 	 *  if the environment has the #MDB_NOSYNC flag set the flushes
@@ -731,7 +751,7 @@ int  mdb_txn_renew(MDB_txn *txn);
 	 * by the given transaction. Only one thread should call this function;
 	 * it is not mutex-protected in a read-only transaction.
 	 * To use named databases (with name != NULL), #mdb_env_set_maxdbs()
-	 * must be called before opening the enviorment.
+	 * must be called before opening the environment.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] name The name of the database to open. If only a single
 	 * 	database is needed in the environment, this value may be NULL.
@@ -796,7 +816,7 @@ int  mdb_stat(MDB_txn *txn, MDB_dbi dbi, MDB_stat *stat);
 	 *
 	 * This call is not mutex protected. Handles should only be closed by
 	 * a single thread, and only if no other threads are going to reference
-	 * the database handle any further.
+	 * the database handle or one of its cursors any further.
 	 * @param[in] env An environment handle returned by #mdb_env_create()
 	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 */

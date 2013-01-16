@@ -382,7 +382,7 @@ static txnid_t mdb_debug_start;
 	 */
 #define P_INVALID	 (~(pgno_t)0)
 
-	/** Test if a flag \b f is set in a flag word \b w. */
+	/** Test if the flags \b f are set in a flag word \b w. */
 #define F_ISSET(w, f)	 (((w) & (f)) == (f))
 
 	/**	Used for offsets within a single page.
@@ -403,6 +403,8 @@ typedef uint16_t	 indx_t;
  *	mutex is needed just to find an empty slot in the reader table. The
  *	slot's address is saved in thread-specific data so that subsequent read
  *	transactions started by the same thread need no further locking to proceed.
+ *
+ *	No reader table is used if the database is on a read-only filesystem.
  *
  *	Since the database uses multi-version concurrency control, readers don't
  *	actually need any locking. This table is used to keep track of which
@@ -810,8 +812,8 @@ struct MDB_txn {
 	 */
 	MDB_IDL		mt_free_pgs;
 	union {
-		MDB_ID2L	dirty_list;	/**< modified pages */
-		MDB_reader	*reader;	/**< this thread's slot in the reader table */
+		MDB_ID2L	dirty_list;	/**< for write txns: modified pages */
+		MDB_reader	*reader;	/**< this thread's reader table slot or NULL */
 	} mt_u;
 	/** Array of records for each DB known in the environment. */
 	MDB_dbx		*mt_dbxs;
@@ -824,7 +826,7 @@ struct MDB_txn {
 #define DB_DIRTY	0x01		/**< DB was written in this txn */
 #define DB_STALE	0x02		/**< DB record is older than txnID */
 /** @} */
-	/** Array of cursors for each DB */
+	/** In write txns, array of cursors for each DB */
 	MDB_cursor	**mt_cursors;
 	/** Array of flags for each DB */
 	unsigned char	*mt_dbflags;
@@ -941,7 +943,7 @@ struct MDB_env {
 	pid_t		me_pid;		/**< process ID of this env */
 	char		*me_path;		/**< path to the DB files */
 	char		*me_map;		/**< the memory map of the data file */
-	MDB_txninfo	*me_txns;		/**< the memory map of the lock file */
+	MDB_txninfo	*me_txns;		/**< the memory map of the lock file or NULL */
 	MDB_meta	*me_metas[2];	/**< pointers to the two meta pages */
 	MDB_txn		*me_txn;		/**< current write transaction */
 	size_t		me_mapsize;		/**< size of the data memory map */
@@ -950,7 +952,7 @@ struct MDB_env {
 	txnid_t		me_pgfirst;		/**< ID of first old page record we used */
 	txnid_t		me_pglast;		/**< ID of last old page record we used */
 	MDB_dbx		*me_dbxs;		/**< array of static DB info */
-	uint16_t	*me_dbflags;	/**< array of DB flags */
+	uint16_t	*me_dbflags;	/**< array of flags from MDB_db.md_flags */
 	MDB_oldpages *me_pghead;	/**< list of old page records */
 	MDB_oldpages *me_pgfree;	/**< list of page records to free */
 	pthread_key_t	me_txkey;	/**< thread-key for readers */
