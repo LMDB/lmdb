@@ -5064,8 +5064,10 @@ current:
 			 */
 			if (F_ISSET(flags, MDB_RESERVE))
 				data->mv_data = NODEDATA(leaf);
-			else
+			else if (data->mv_size)
 				memcpy(NODEDATA(leaf), data->mv_data, data->mv_size);
+			else
+				memcpy(NODEKEY(leaf), key->mv_data, key->mv_size);
 			goto done;
 		}
 		mdb_node_del(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], 0);
