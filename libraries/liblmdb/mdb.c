@@ -4639,7 +4639,7 @@ mdb_cursor_get(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 
 	switch (op) {
 	case MDB_GET_CURRENT:
-		if (!mc->mc_flags & C_INITIALIZED) {
+		if (!(mc->mc_flags & C_INITIALIZED)) {
 			rc = EINVAL;
 		} else {
 			MDB_page *mp = mc->mc_pg[mc->mc_top];
@@ -5181,6 +5181,11 @@ put_sub:
 		}
 	}
 done:
+	/* If we succeeded and the key didn't exist before, make sure
+	 * the cursor is marked valid.
+	 */
+	if (!rc && insert)
+		mc->mc_flags |= C_INITIALIZED;
 	return rc;
 }
 
@@ -5193,7 +5198,7 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 	if (F_ISSET(mc->mc_txn->mt_flags, MDB_TXN_RDONLY))
 		return EACCES;
 
-	if (!mc->mc_flags & C_INITIALIZED)
+	if (!(mc->mc_flags & C_INITIALIZED))
 		return EINVAL;
 
 	rc = mdb_cursor_touch(mc);
