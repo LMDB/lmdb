@@ -6320,12 +6320,13 @@ mdb_rebalance(MDB_cursor *mc)
 	 * Otherwise we should try to merge them.
 	 */
 	if (PAGEFILL(mc->mc_txn->mt_env, mn.mc_pg[mn.mc_top]) >= FILL_THRESHOLD && NUMKEYS(mn.mc_pg[mn.mc_top]) >= 2)
-		rc = mdb_node_move(&mn, mc);
+		return mdb_node_move(&mn, mc);
 	else {
 		if (mc->mc_ki[ptop] == 0)
 			rc = mdb_page_merge(&mn, mc);
 		else
 			rc = mdb_page_merge(mc, &mn);
+		mc->mc_flags &= ~C_INITIALIZED;
 	}
 	return rc;
 }
@@ -6353,7 +6354,6 @@ mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
 	mdb_node_del(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], mc->mc_db->md_pad);
 	mc->mc_db->md_entries--;
 	rc = mdb_rebalance(mc);
-	mc->mc_flags &= ~C_INITIALIZED;
 	if (rc != MDB_SUCCESS)
 		mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
 
