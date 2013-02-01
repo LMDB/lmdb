@@ -1947,6 +1947,11 @@ static void
 mdb_txn_reset0(MDB_txn *txn)
 {
 	MDB_env	*env = txn->mt_env;
+	unsigned int i;
+
+	/* If there were uncommitted dbi_opens, undo them now */
+	for (i=env->me_numdbs; i<txn->mt_numdbs; i++)
+		mdb_dbi_close(env, i);
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
 		if (!(env->me_flags & MDB_ROFS))
@@ -1954,7 +1959,6 @@ mdb_txn_reset0(MDB_txn *txn)
 	} else {
 		MDB_oldpages *mop;
 		MDB_page *dp;
-		unsigned int i;
 
 		/* close(free) all cursors */
 		for (i=0; i<txn->mt_numdbs; i++) {
@@ -7047,7 +7051,6 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 		mdb_default_cmp(txn, slot);
 		if (!unused) {
 			txn->mt_numdbs++;
-			txn->mt_env->me_numdbs++;
 		}
 	}
 
@@ -7065,8 +7068,12 @@ int mdb_stat(MDB_txn *txn, MDB_dbi dbi, MDB_stat *arg)
 void mdb_dbi_close(MDB_env *env, MDB_dbi dbi)
 {
 	char *ptr;
-	if (dbi <= MAIN_DBI || dbi >= env->me_numdbs)
+	if (dbi <= MAIN_DBI || dbi >= env->me_maxdbs)
 		return;
+	/* If the dbi is greater than env->me_numdbs, no harm is done.
+	 * And it may happen if we're closing a DB that was just opened,
+	 * but the opening txn hadn't committed yet.
+	 */
 	ptr = env->me_dbxs[dbi].md_name.mv_data;
 	env->me_dbxs[dbi].md_name.mv_data = NULL;
 	env->me_dbxs[dbi].md_name.mv_size = 0;
