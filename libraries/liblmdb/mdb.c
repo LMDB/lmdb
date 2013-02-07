@@ -1341,19 +1341,24 @@ again:
 				if (!txn->mt_env->me_pgfirst) {
 					mdb_node_read(txn, leaf, &data);
 				}
-				txn->mt_env->me_pglast = last;
-				if (!txn->mt_env->me_pgfirst)
-					txn->mt_env->me_pgfirst = last;
 				idl = (MDB_ID *) data.mv_data;
 				/* We might have a zero-length IDL due to freelist growth
 				 * during a prior commit
 				 */
-				if (!idl[0]) goto again;
+				if (!idl[0]) {
+					txn->mt_env->me_pglast = last;
+					if (!txn->mt_env->me_pgfirst)
+						txn->mt_env->me_pgfirst = last;
+					goto again;
+				}
 				mop = malloc(sizeof(MDB_oldpages) + MDB_IDL_SIZEOF(idl) - sizeof(pgno_t));
 				if (!mop)
 					return ENOMEM;
 				mop->mo_next = txn->mt_env->me_pghead;
 				mop->mo_txnid = last;
+				txn->mt_env->me_pglast = last;
+				if (!txn->mt_env->me_pgfirst)
+					txn->mt_env->me_pgfirst = last;
 				txn->mt_env->me_pghead = mop;
 				memcpy(mop->mo_pages, idl, MDB_IDL_SIZEOF(idl));
 
