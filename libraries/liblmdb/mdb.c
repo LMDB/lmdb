@@ -2022,7 +2022,7 @@ mdb_txn_commit(MDB_txn *txn)
 	off_t		 size;
 	MDB_page	*dp;
 	MDB_env	*env;
-	pgno_t	next, freecnt;
+	pgno_t	next, freecnt, maxfree_1pg;
 	txnid_t	oldpg_txnid, id;
 	MDB_cursor mc;
 
@@ -2138,7 +2138,8 @@ mdb_txn_commit(MDB_txn *txn)
 	/* Save the freelist as of this transaction to the freeDB. This
 	 * can change the freelist, so keep trying until it stabilizes.
 	 *
-	 * env->me_pglast and the length of txn->mt_free_pgs cannot decrease.
+	 * env->me_pglast and the length of txn->mt_free_pgs cannot decrease,
+	 * except the code below can decrease env->me_pglast to split pghead.
 	 * Page numbers cannot disappear from txn->mt_free_pgs.  New pages
 	 * can only appear in env->me_pghead when env->me_pglast increases.
 	 * Until then, the me_pghead pointer won't move but can become NULL.
@@ -2147,6 +2148,12 @@ mdb_txn_commit(MDB_txn *txn)
 	mdb_cursor_init(&mc, txn, FREE_DBI, NULL);
 	oldpg_txnid = id = 0;
 	freecnt = 0;
+	/* Preferred max #items per freelist entry, to avoid overflow pages.
+	 * Leave room for headers, key (txnid), pagecount (pageno_t), and
+	 * FIXME: a bit more in case there is some delimiter I don't know about.
+	 */
+	maxfree_1pg = (env->me_psize - (PAGEHDRSZ + NODESIZE + 3*sizeof(MDB_ID)))
+		/ sizeof(pgno_t);
 
 	/* should only be one record now */
 	if (env->me_pghead || env->me_pglast) {
@@ -2225,6 +2232,7 @@ free2:
 
 	/* Put back page numbers we took from freeDB but did not use */
 	if (env->me_pghead) {
+	  for (;;) {
 		MDB_val key, data;
 		pgno_t orig, *mop;
 
@@ -2238,7 +2246,9 @@ free2:
 		i = 2;
 		do {
 			orig = mop[0];
-			data.mv_size = MDB_IDL_SIZEOF(mop);
+			if (orig > maxfree_1pg && id > 4)
+				orig = maxfree_1pg; /* Do not use an overflow page */
+			data.mv_size = (orig + 1) * sizeof(pgno_t);
 			rc = mdb_cursor_put(&mc, &key, &data, MDB_RESERVE);
 			if (rc)
 				goto fail;
@@ -2246,9 +2256,19 @@ free2:
 			/* mop could have been used again here */
 			if (id != env->me_pglast || env->me_pghead == NULL)
 				goto again;		/* was completely used up */
-			assert(mop == env->me_pghead && mop[0] <= orig);
-		} while (mop[0] != orig && --i);
+			assert(mop == env->me_pghead);
+		} while (mop[0] < orig && --i);
 		memcpy(data.mv_data, mop, data.mv_size);
+		if (mop[0] <= orig)
+			break;
+		*(pgno_t *)data.mv_data = orig;
+		mop[0] -= orig;
+		memmove(&mop[1], &mop[1 + orig],
+			mop[0] * sizeof(pgno_t));
+		/* Save more oldpages at the previous txnid. */
+		assert(env->me_pglast == id && id == oldpg_txnid);
+		env->me_pglast = --oldpg_txnid;
+	  }
 	}
 
 	/* Check for growth of freelist again */
