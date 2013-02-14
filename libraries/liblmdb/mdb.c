@@ -941,12 +941,15 @@ struct MDB_env {
 	MDB_dbx		*me_dbxs;		/**< array of static DB info */
 	uint16_t	*me_dbflags;	/**< array of flags from MDB_db.md_flags */
 	pgno_t		*me_pghead;	/**< old pages reclaimed from freelist */
+	pgno_t		*me_pgfree;	/**< memory to free when dropping me_pghead */
 	pthread_key_t	me_txkey;	/**< thread-key for readers */
 	MDB_page	*me_dpages;		/**< list of malloc'd blocks for re-use */
 	/** IDL of pages that became unused in a write txn */
 	MDB_IDL		me_free_pgs;
 	/** ID2L of pages that were written during a write txn */
 	MDB_ID2		me_dirty_list[MDB_IDL_UM_SIZE];
+	/** Max number of freelist items that can fit in a single overflow page */
+	unsigned int	me_maxfree_1pg;
 #ifdef _WIN32
 	HANDLE		me_rmutex;		/* Windows mutexes don't reside in shared mem */
 	HANDLE		me_wmutex;
@@ -1337,7 +1340,7 @@ again:
 				if (!mop)
 					return ENOMEM;
 				txn->mt_env->me_pglast = last;
-				txn->mt_env->me_pghead = mop;
+				txn->mt_env->me_pghead = txn->mt_env->me_pgfree = mop;
 				memcpy(mop, idl, MDB_IDL_SIZEOF(idl));
 
 #if MDB_DEBUG > 1
@@ -1422,8 +1425,8 @@ none:
 								mop2[k--] = mop[j--];
 						}
 						txn->mt_env->me_pglast = last;
-						txn->mt_env->me_pghead = mop2;
-						free(mop);
+						free(txn->mt_env->me_pgfree);
+						txn->mt_env->me_pghead = txn->mt_env->me_pgfree = mop2;
 						mop = mop2;
 						/* Keep trying to read until we have enough */
 						if (mop[0] < (unsigned)num) {
@@ -1457,8 +1460,8 @@ none:
 				mop[0]--;
 			}
 			if (MDB_IDL_IS_ZERO(mop)) {
-				txn->mt_env->me_pghead = NULL;
-				free(mop);
+				free(txn->mt_env->me_pgfree);
+				txn->mt_env->me_pghead = txn->mt_env->me_pgfree = NULL;
 			}
 		}
 	}
@@ -1931,7 +1934,6 @@ mdb_txn_reset0(MDB_txn *txn)
 		if (!(env->me_flags & MDB_ROFS))
 			txn->mt_u.reader->mr_txnid = (txnid_t)-1;
 	} else {
-		pgno_t *mop;
 		MDB_page *dp;
 		unsigned int i;
 
@@ -1971,10 +1973,8 @@ mdb_txn_reset0(MDB_txn *txn)
 				env->me_free_pgs = txn->mt_free_pgs;
 		}
 
-		if ((mop = txn->mt_env->me_pghead) != NULL) {
-			txn->mt_env->me_pghead = NULL;
-			free(mop);
-		}
+		free(txn->mt_env->me_pgfree);
+		txn->mt_env->me_pghead = txn->mt_env->me_pgfree = NULL;
 		txn->mt_env->me_pglast = 0;
 
 		env->me_txn = NULL;
@@ -2022,7 +2022,7 @@ mdb_txn_commit(MDB_txn *txn)
 	off_t		 size;
 	MDB_page	*dp;
 	MDB_env	*env;
-	pgno_t	next, freecnt, maxfree_1pg;
+	pgno_t	next, freecnt;
 	txnid_t	oldpg_txnid, id;
 	MDB_cursor mc;
 
@@ -2148,12 +2148,6 @@ mdb_txn_commit(MDB_txn *txn)
 	mdb_cursor_init(&mc, txn, FREE_DBI, NULL);
 	oldpg_txnid = id = 0;
 	freecnt = 0;
-	/* Preferred max #items per freelist entry, to avoid overflow pages.
-	 * Leave room for headers, key (txnid), pagecount (pageno_t), and
-	 * FIXME: a bit more in case there is some delimiter I don't know about.
-	 */
-	maxfree_1pg = (env->me_psize - (PAGEHDRSZ + NODESIZE + 3*sizeof(MDB_ID)))
-		/ sizeof(pgno_t);
 
 	/* should only be one record now */
 	if (env->me_pghead || env->me_pglast) {
@@ -2246,8 +2240,8 @@ free2:
 		i = 2;
 		do {
 			orig = mop[0];
-			if (orig > maxfree_1pg && id > 4)
-				orig = maxfree_1pg; /* Do not use an overflow page */
+			if (orig > env->me_maxfree_1pg && id > 4)
+				orig = env->me_maxfree_1pg; /* Do not use more than 1 page */
 			data.mv_size = (orig + 1) * sizeof(pgno_t);
 			rc = mdb_cursor_put(&mc, &key, &data, MDB_RESERVE);
 			if (rc)
@@ -2262,9 +2256,8 @@ free2:
 		if (mop[0] <= orig)
 			break;
 		*(pgno_t *)data.mv_data = orig;
-		mop[0] -= orig;
-		memmove(&mop[1], &mop[1 + orig],
-			mop[0] * sizeof(pgno_t));
+		mop[orig] = mop[0] - orig;
+		env->me_pghead = mop += orig;
 		/* Save more oldpages at the previous txnid. */
 		assert(env->me_pglast == id && id == oldpg_txnid);
 		env->me_pglast = --oldpg_txnid;
@@ -2275,10 +2268,8 @@ free2:
 	if (freecnt != txn->mt_free_pgs[0])
 		goto free2;
 
-	if (env->me_pghead) {
-		free(env->me_pghead);
-		env->me_pghead = NULL;
-	}
+	free(env->me_pgfree);
+	env->me_pghead = env->me_pgfree = NULL;
 
 	if (!MDB_IDL_IS_ZERO(txn->mt_free_pgs)) {
 		if (mdb_midl_shrink(&txn->mt_free_pgs))
@@ -2842,6 +2833,7 @@ mdb_env_open2(MDB_env *env)
 		return EBUSY;	/* TODO: Make a new MDB_* error code? */
 	}
 	env->me_psize = meta.mm_psize;
+	env->me_maxfree_1pg = (env->me_psize - PAGEHDRSZ) / sizeof(pgno_t) - 1;
 
 	env->me_maxpg = env->me_mapsize / env->me_psize;
 
