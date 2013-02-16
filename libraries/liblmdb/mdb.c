@@ -7146,8 +7146,10 @@ int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)
 	/* Can't delete the main DB */
 	if (del && dbi > MAIN_DBI) {
 		rc = mdb_del(txn, MAIN_DBI, &mc->mc_dbx->md_name, NULL);
-		if (!rc)
+		if (!rc) {
+			txn->mt_dbflags[dbi] = DB_STALE;
 			mdb_dbi_close(txn->mt_env, dbi);
+		}
 	} else {
 		/* reset the DB record, mark it dirty */
 		txn->mt_dbflags[dbi] |= DB_DIRTY;
