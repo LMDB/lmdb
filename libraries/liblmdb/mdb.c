@@ -2063,22 +2063,19 @@ mdb_txn_commit(MDB_txn *txn)
 	}
 
 	if (txn->mt_parent) {
-		MDB_db *ip, *jp;
-		MDB_dbi i;
+		MDB_txn *parent = txn->mt_parent;
 		unsigned x, y;
 		MDB_ID2L dst, src;
+
+		parent->mt_next_pgno = txn->mt_next_pgno;
+		parent->mt_flags = txn->mt_flags;
 
 		/* Merge (and close) our cursors with parent's */
 		mdb_cursor_merge(txn);
 
-		/* Update parent's DB table */
-		ip = &txn->mt_parent->mt_dbs[2];
-		jp = &txn->mt_dbs[2];
-		for (i = 2; i < txn->mt_numdbs; i++) {
-			if (ip->md_root != jp->md_root)
-				*ip = *jp;
-			ip++; jp++;
-		}
+		/* Update parent's DB table. */
+		memcpy(parent->mt_dbs, txn->mt_dbs, txn->mt_numdbs * sizeof(MDB_db));
+		memcpy(parent->mt_dbflags, txn->mt_dbflags, txn->mt_numdbs);
 		txn->mt_parent->mt_numdbs = txn->mt_numdbs;
 
 		/* Append our free list to parent's */
@@ -3910,28 +3907,31 @@ mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret)
 {
 	MDB_page *p = NULL;
 
-	if (txn->mt_env->me_flags & MDB_WRITEMAP) {
-		if (pgno < txn->mt_next_pgno)
-			p = (MDB_page *)(txn->mt_env->me_map + txn->mt_env->me_psize * pgno);
-		goto done;
+	if (!((txn->mt_flags & MDB_TXN_RDONLY) |
+		  (txn->mt_env->me_flags & MDB_WRITEMAP)))
+	{
+		MDB_txn *tx2 = txn;
+		do {
+			MDB_ID2L dl = tx2->mt_u.dirty_list;
+			if (dl[0].mid) {
+				unsigned x = mdb_mid2l_search(dl, pgno);
+				if (x <= dl[0].mid && dl[x].mid == pgno) {
+					p = dl[x].mptr;
+					goto done;
+				}
+			}
+		} while ((tx2 = tx2->mt_parent) != NULL);
 	}
-	if (!F_ISSET(txn->mt_flags, MDB_TXN_RDONLY) && txn->mt_u.dirty_list[0].mid) {
-		unsigned x;
-		x = mdb_mid2l_search(txn->mt_u.dirty_list, pgno);
-		if (x <= txn->mt_u.dirty_list[0].mid && txn->mt_u.dirty_list[x].mid == pgno) {
-			p = txn->mt_u.dirty_list[x].mptr;
-		}
-	}
-	if (!p) {
-		if (pgno < txn->mt_next_pgno)
-			p = (MDB_page *)(txn->mt_env->me_map + txn->mt_env->me_psize * pgno);
-	}
-done:
-	*ret = p;
-	if (!p) {
+
+	if (pgno < txn->mt_next_pgno) {
+		p = (MDB_page *)(txn->mt_env->me_map + txn->mt_env->me_psize * pgno);
+	} else {
 		DPRINTF("page %zu not found", pgno);
 		assert(p != NULL);
 	}
+
+done:
+	*ret = p;
 	return (p != NULL) ? MDB_SUCCESS : MDB_PAGE_NOTFOUND;
 }
 
