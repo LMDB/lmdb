@@ -1,6 +1,6 @@
 /* mdb_stat.c - memory-mapped database status tool */
 /*
- * Copyright 2011 Howard Chu, Symas Corp.
+ * Copyright 2011-2013 Howard Chu, Symas Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -31,7 +31,7 @@ static void prstat(MDB_stat *ms)
 
 static void usage(char *prog)
 {
-	fprintf(stderr, "usage: %s dbpath [-e] [-f[f]] [-n] [-a|-s subdb]\n", prog);
+	fprintf(stderr, "usage: %s dbpath [-e] [-f[f[f]]] [-n] [-a|-s subdb]\n", prog);
 	exit(EXIT_FAILURE);
 }
 
@@ -142,12 +142,28 @@ int main(int argc, char *argv[])
 			iptr = data.mv_data;
 			pages += *iptr;
 			if (freinfo > 1) {
-				size_t i, j;
+				char *bad = "";
+				size_t pg, prev;
+				ssize_t i, j, span = 0;
 				j = *iptr++;
-				printf("    Transaction %zu, %zu pages\n",
-					*(size_t *)key.mv_data, j);
-				for (i=0; i<j; i++)
-					printf("      %zu\n", iptr[i]);
+				for (i = j, prev = 1; --i >= 0; ) {
+					pg = iptr[i];
+					if (pg <= prev)
+						bad = " [bad sequence]";
+					prev = pg;
+					pg += span;
+					for (; i >= span && iptr[i-span] == pg; span++, pg++) ;
+				}
+				printf("    Transaction %zu, %zd pages, maxspan %zd%s\n",
+					*(size_t *)key.mv_data, j, span, bad);
+				if (freinfo > 2) {
+					for (--j; j >= 0; ) {
+						pg = iptr[j];
+						for (span=1; --j >= 0 && iptr[j] == pg+span; span++) ;
+						printf(span>1 ? "     %9zu[%zd]\n" : "     %9zu\n",
+							pg, span);
+					}
+				}
 			}
 		}
 		mdb_cursor_close(cursor);

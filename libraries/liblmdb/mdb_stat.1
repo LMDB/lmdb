@@ -9,7 +9,7 @@ mdb_stat \- LMDB environment status tool
 [\c
 .BR \-e ]
 [\c
-.BR \-f [ f ]]
+.BR \-f [ f [ f ]]]
 [\c
 .BR \-n ]
 [\c
@@ -25,8 +25,9 @@ utility displays the status of an LMDB environment.
 Display information about the database environment.
 .TP
 .BR \-f
-Display information about the environment freelist. If \fB\-ff\fP is given,
-display the full list of page IDs in the freelist.
+Display information about the environment freelist.
+If \fB\-ff\fP is given, summarize each freelist entry.
+If \fB\-fff\fP is given, display the full list of page IDs in the freelist.
 .TP
 .BR \-n
 Display the status of an LMDB database which does not use subdirectories.
