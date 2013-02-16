@@ -353,7 +353,9 @@ typedef enum MDB_cursor_op {
 #define MDB_CURSOR_FULL	(-30787)
 	/** Page has not enough space - internal error */
 #define MDB_PAGE_FULL	(-30786)
-#define MDB_LAST_ERRCODE	MDB_PAGE_FULL
+	/** Database contents grew beyond environment mapsize */
+#define MDB_MAP_RESIZED	(-30785)
+#define MDB_LAST_ERRCODE	MDB_MAP_RESIZED
 /** @} */
 
 /** @brief Statistics for a database in the environment */
@@ -675,7 +677,9 @@ int  mdb_env_set_maxdbs(MDB_env *env, MDB_dbi dbs);
 	 * errors are:
 	 * <ul>
 	 *	<li>#MDB_PANIC - a fatal error occurred earlier and the environment
-	 *		must be shut down.
+-	 *		must be shut down.
+	 *	<li>#MDB_MAP_RESIZED - another process wrote data beyond this MDB_env's
+	 *		mapsize and the environment must be shut down.
 	 *	<li>ENOMEM - out of memory, or a read-only transaction was requested and
 	 *		the reader lock table is full. See #mdb_env_set_maxreaders().
 	 * </ul>

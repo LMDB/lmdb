@@ -1054,7 +1054,8 @@ static char *const mdb_errstr[] = {
 	"MDB_TLS_FULL: Thread-local storage keys full - too many environments open",
 	"MDB_TXN_FULL: Transaction has too many dirty pages - transaction too big",
 	"MDB_CURSOR_FULL: Internal error - cursor stack limit reached",
-	"MDB_PAGE_FULL: Internal error - page has no more space"
+	"MDB_PAGE_FULL: Internal error - page has no more space",
+	"MDB_MAP_RESIZED: Database contents grew beyond environment mapsize",
 };
 
 char *
@@ -1817,6 +1818,11 @@ mdb_txn_renew0(MDB_txn *txn)
 	txn->mt_dbflags[0] = txn->mt_dbflags[1] = 0;
 	if (txn->mt_numdbs > 2)
 		memset(txn->mt_dbflags+2, DB_STALE, txn->mt_numdbs-2);
+
+	if (env->me_maxpg < txn->mt_next_pgno) {
+		mdb_txn_reset0(txn);
+		return MDB_MAP_RESIZED;
+	}
 
 	return MDB_SUCCESS;
 }
