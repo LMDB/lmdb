@@ -2104,7 +2104,6 @@ mdb_txn_commit(MDB_txn *txn)
 		dst[0].mid = x;
 		free(txn->mt_u.dirty_list);
 		txn->mt_parent->mt_child = NULL;
-		txn->mt_parent->mt_next_pgno = txn->mt_next_pgno;
 		free(txn);
 		return MDB_SUCCESS;
 	}
