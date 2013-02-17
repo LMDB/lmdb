@@ -1361,7 +1361,7 @@ none:
 			pgno_t *mop = txn->mt_env->me_pghead;
 			if (num > 1) {
 				MDB_cursor m2;
-				int retry = 500, readit = 0, n2 = num-1;
+				int retry = 1, readit = 0, n2 = num-1;
 				unsigned int i, j, k;
 
 				/* If current list is too short, must fetch more and coalesce */
@@ -1448,11 +1448,10 @@ none:
 						}
 					}
 
-					/* Stop if we succeeded, or no more retries */
+					/* Stop if we succeeded, or no retries */
 					if (!retry || pgno != P_INVALID)
 						break;
 					readit = 1;
-					retry--;
 
 				} while (1);
 			} else {
