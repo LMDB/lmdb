@@ -192,7 +192,14 @@ typedef unsigned int	MDB_dbi;
 /** @brief Opaque structure for navigating through a database */
 typedef struct MDB_cursor MDB_cursor;
 
-/** @brief Generic structure used for passing keys and data in and out of the database. */
+/** @brief Generic structure used for passing keys and data in and out
+ * of the database.
+ *
+ * Key sizes must be between 1 and the liblmdb build-time constant
+ * #MDB_MAXKEYSIZE inclusive. This currently defaults to 511. The
+ * same applies to data sizes in databases with the #MDB_DUPSORT flag.
+ * Other data items can in theory be from 0 to 0xffffffff bytes long.
+ */
 typedef struct MDB_val {
 	size_t		 mv_size;	/**< size of the data item */
 	void		*mv_data;	/**< address of the data item */
