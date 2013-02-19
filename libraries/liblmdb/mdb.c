@@ -1056,6 +1056,7 @@ static char *const mdb_errstr[] = {
 	"MDB_CURSOR_FULL: Internal error - cursor stack limit reached",
 	"MDB_PAGE_FULL: Internal error - page has no more space",
 	"MDB_MAP_RESIZED: Database contents grew beyond environment mapsize",
+	"MDB_INCOMPATIBLE: Operation is incompatible with database",
 };
 
 char *
@@ -4056,6 +4057,12 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int flags)
 					if (!exact)
 						return MDB_NOTFOUND;
 					mdb_node_read(mc->mc_txn, leaf, &data);
+					/* The txn may not know this DBI, or another process may
+					 * have dropped and recreated the DB with other flags.
+					 */
+					if (mc->mc_db->md_flags != *(uint16_t *)
+						((char *) data.mv_data + offsetof(MDB_db, md_flags)))
+						return MDB_INCOMPATIBLE;
 					memcpy(mc->mc_db, data.mv_data, sizeof(MDB_db));
 				}
 				if (flags & MDB_PS_MODIFY)

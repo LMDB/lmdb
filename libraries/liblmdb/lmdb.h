@@ -362,7 +362,9 @@ typedef enum MDB_cursor_op {
 #define MDB_PAGE_FULL	(-30786)
 	/** Database contents grew beyond environment mapsize */
 #define MDB_MAP_RESIZED	(-30785)
-#define MDB_LAST_ERRCODE	MDB_MAP_RESIZED
+	/** Operation is incompatible with database */
+#define MDB_INCOMPATIBLE	(-30784)
+#define MDB_LAST_ERRCODE	MDB_INCOMPATIBLE
 /** @} */
 
 /** @brief Statistics for a database in the environment */
