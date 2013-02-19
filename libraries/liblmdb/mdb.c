@@ -1294,14 +1294,12 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 				last = *kptr;
 			} else {
 				MDB_val key;
-				int exact;
 again:
-				exact = 0;
 				last = txn->mt_env->me_pglast + 1;
 				leaf = NULL;
 				key.mv_data = &last;
 				key.mv_size = sizeof(last);
-				rc = mdb_cursor_set(&m2, &key, &data, MDB_SET, &exact);
+				rc = mdb_cursor_set(&m2, &key, &data, MDB_SET_RANGE, NULL);
 				if (rc)
 					goto none;
 				last = *(txnid_t *)key.mv_data;
@@ -1381,7 +1379,6 @@ none:
 					if (readit) {
 						MDB_val key, data;
 						pgno_t *idl, *mop2;
-						int exact;
 
 						last = txn->mt_env->me_pglast + 1;
 
@@ -1406,12 +1403,17 @@ none:
 						if (oldest - last < 1)
 							break;
 
-						exact = 0;
 						key.mv_data = &last;
 						key.mv_size = sizeof(last);
-						rc = mdb_cursor_set(&m2, &key, &data, MDB_SET, &exact);
-						if (rc)
+						rc = mdb_cursor_set(&m2,&key,&data,MDB_SET_RANGE,NULL);
+						if (rc) {
+							if (rc == MDB_NOTFOUND)
+								break;
 							return rc;
+						}
+						last = *(txnid_t*)key.mv_data;
+						if (oldest <= last)
+							break;
 						idl = (MDB_ID *) data.mv_data;
 						mop2 = malloc(MDB_IDL_SIZEOF(idl) + MDB_IDL_SIZEOF(mop));
 						if (!mop2)
