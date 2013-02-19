@@ -4262,7 +4262,7 @@ mdb_cursor_next(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 		mdb_xcursor_init1(mc, leaf);
 	}
 	if (data) {
-		if ((rc = mdb_node_read(mc->mc_txn, leaf, data) != MDB_SUCCESS))
+		if ((rc = mdb_node_read(mc->mc_txn, leaf, data)) != MDB_SUCCESS)
 			return rc;
 
 		if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
@@ -4335,7 +4335,7 @@ mdb_cursor_prev(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 		mdb_xcursor_init1(mc, leaf);
 	}
 	if (data) {
-		if ((rc = mdb_node_read(mc->mc_txn, leaf, data) != MDB_SUCCESS))
+		if ((rc = mdb_node_read(mc->mc_txn, leaf, data)) != MDB_SUCCESS)
 			return rc;
 
 		if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
