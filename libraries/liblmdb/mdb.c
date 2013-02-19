@@ -911,6 +911,13 @@ typedef struct MDB_xcursor {
 	unsigned char mx_dbflag;
 } MDB_xcursor;
 
+	/** State of FreeDB old pages, stored in the MDB_env */
+typedef struct MDB_pgstate {
+	txnid_t		mf_pglast;	/**< ID of last old page record we used */
+	pgno_t		*mf_pghead;	/**< old pages reclaimed from freelist */
+	pgno_t		*mf_pgfree;	/**< memory to free when dropping me_pghead */
+} MDB_pgstate;
+
 	/** The database environment. */
 struct MDB_env {
 	HANDLE		me_fd;		/**< The main data file */
@@ -937,12 +944,13 @@ struct MDB_env {
 	size_t		me_mapsize;		/**< size of the data memory map */
 	off_t		me_size;		/**< current file size */
 	pgno_t		me_maxpg;		/**< me_mapsize / me_psize */
-	txnid_t		me_pglast;		/**< ID of last old page record we used */
 	MDB_dbx		*me_dbxs;		/**< array of static DB info */
 	uint16_t	*me_dbflags;	/**< array of flags from MDB_db.md_flags */
-	pgno_t		*me_pghead;	/**< old pages reclaimed from freelist */
-	pgno_t		*me_pgfree;	/**< memory to free when dropping me_pghead */
 	pthread_key_t	me_txkey;	/**< thread-key for readers */
+	MDB_pgstate	me_pgstate;		/**< state of old pages from freeDB */
+#	define		me_pglast	me_pgstate.mf_pglast
+#	define		me_pghead	me_pgstate.mf_pghead
+#	define		me_pgfree	me_pgstate.mf_pgfree
 	MDB_page	*me_dpages;		/**< list of malloc'd blocks for re-use */
 	/** IDL of pages that became unused in a write txn */
 	MDB_IDL		me_free_pgs;
@@ -958,6 +966,13 @@ struct MDB_env {
 	sem_t		*me_wmutex;
 #endif
 };
+
+	/** Nested transaction */
+typedef struct MDB_ntxn {
+	MDB_txn		mnt_txn;		/* the transaction */
+	MDB_pgstate	mnt_pgstate;	/* parent transaction's saved freestate */
+} MDB_ntxn;
+
 	/** max number of pages to commit in one writev() call */
 #define MDB_COMMIT_PAGES	 64
 #if defined(IOV_MAX) && IOV_MAX < MDB_COMMIT_PAGES
@@ -1855,7 +1870,8 @@ int
 mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 {
 	MDB_txn *txn;
-	int rc, size;
+	MDB_ntxn *ntxn;
+	int rc, size, tsize = sizeof(MDB_txn);
 
 	if (env->me_flags & MDB_FATAL_ERROR) {
 		DPUTS("environment had fatal error, must shutdown!");
@@ -1871,8 +1887,9 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 		{
 			return EINVAL;
 		}
+		tsize = sizeof(MDB_ntxn);
 	}
-	size = sizeof(MDB_txn) + env->me_maxdbs * (sizeof(MDB_db)+1);
+	size = tsize + env->me_maxdbs * (sizeof(MDB_db)+1);
 	if (!(flags & MDB_RDONLY))
 		size += env->me_maxdbs * sizeof(MDB_cursor *);
 
@@ -1880,7 +1897,7 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 		DPRINTF("calloc: %s", strerror(ErrCode()));
 		return ENOMEM;
 	}
-	txn->mt_dbs = (MDB_db *)(txn+1);
+	txn->mt_dbs = (MDB_db *) ((char *)txn + tsize);
 	if (flags & MDB_RDONLY) {
 		txn->mt_flags |= MDB_TXN_RDONLY;
 		txn->mt_dbflags = (unsigned char *)(txn->mt_dbs + env->me_maxdbs);
@@ -1913,8 +1930,22 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 		txn->mt_dbxs = parent->mt_dbxs;
 		memcpy(txn->mt_dbs, parent->mt_dbs, txn->mt_numdbs * sizeof(MDB_db));
 		memcpy(txn->mt_dbflags, parent->mt_dbflags, txn->mt_numdbs);
-		mdb_cursor_shadow(parent, txn);
 		rc = 0;
+		ntxn = (MDB_ntxn *)txn;
+		ntxn->mnt_pgstate = env->me_pgstate; /* save parent me_pghead & co */
+		if (env->me_pghead) {
+			size = MDB_IDL_SIZEOF(env->me_pghead);
+			env->me_pghead = malloc(size);
+			if (env->me_pghead)
+				memcpy(env->me_pghead, ntxn->mnt_pgstate.mf_pghead, size);
+			else
+				rc = ENOMEM;
+		}
+		env->me_pgfree = env->me_pghead;
+		if (!rc)
+			rc = mdb_cursor_shadow(parent, txn);
+		if (rc)
+			mdb_txn_reset0(txn);
 	} else {
 		rc = mdb_txn_renew0(txn);
 	}
@@ -1971,8 +2002,11 @@ mdb_txn_reset0(MDB_txn *txn)
 			}
 		}
 
+		free(env->me_pgfree);
+
 		if (txn->mt_parent) {
 			txn->mt_parent->mt_child = NULL;
+			env->me_pgstate = ((MDB_ntxn *)txn)->mnt_pgstate;
 			mdb_midl_free(txn->mt_free_pgs);
 			free(txn->mt_u.dirty_list);
 			return;
@@ -1981,7 +2015,6 @@ mdb_txn_reset0(MDB_txn *txn)
 				env->me_free_pgs = txn->mt_free_pgs;
 		}
 
-		free(txn->mt_env->me_pgfree);
 		txn->mt_env->me_pghead = txn->mt_env->me_pgfree = NULL;
 		txn->mt_env->me_pglast = 0;
 
@@ -2107,6 +2140,7 @@ mdb_txn_commit(MDB_txn *txn)
 		dst[0].mid = x;
 		free(txn->mt_u.dirty_list);
 		txn->mt_parent->mt_child = NULL;
+		free(((MDB_ntxn *)txn)->mnt_pgstate.mf_pgfree);
 		free(txn);
 		return MDB_SUCCESS;
 	}
