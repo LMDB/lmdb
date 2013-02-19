@@ -6953,6 +6953,7 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 	MDB_val key, data;
 	MDB_dbi i;
 	MDB_cursor mc;
+	uint16_t mdflags;
 	int rc, dbflag, exact;
 	unsigned int unused = 0;
 	size_t len;
@@ -7035,11 +7036,18 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 		txn->mt_dbflags[slot] = dbflag;
 		memcpy(&txn->mt_dbs[slot], data.mv_data, sizeof(MDB_db));
 		*dbi = slot;
-		txn->mt_env->me_dbflags[slot] = txn->mt_dbs[slot].md_flags;
+		txn->mt_env->me_dbflags[slot] = mdflags = txn->mt_dbs[slot].md_flags;
 		mdb_default_cmp(txn, slot);
 		if (!unused) {
 			txn->mt_numdbs++;
 			txn->mt_env->me_numdbs++;
+		}
+		/* Open the DB in parent txns as well */
+		while ((txn = txn->mt_parent) != NULL) {
+			txn->mt_dbflags[slot] = DB_STALE;
+			txn->mt_dbs[slot].md_flags = mdflags;
+			if (!unused)
+				txn->mt_numdbs++;
 		}
 	}
 

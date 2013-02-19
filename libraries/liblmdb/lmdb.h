@@ -757,10 +757,15 @@ int  mdb_txn_renew(MDB_txn *txn);
 
 	/** @brief Open a database in the environment.
 	 *
-	 * The database handle may be discarded by calling #mdb_dbi_close().  The
+	 * The database handle may be discarded by calling #mdb_dbi_close().
+	 * It denotes the name and parameters of a database, independently of
+	 * whether such a database exists. It will not exist if the transaction
+	 * which created it aborted, nor if another process deleted it. The
 	 * database handle resides in the shared environment, it is not owned
 	 * by the given transaction. Only one thread should call this function;
 	 * it is not mutex-protected in a read-only transaction.
+	 * Preexisting transactions, other than the current transaction and
+	 * any parents, must not use the new handle. Nor must their children.
 	 * To use named databases (with name != NULL), #mdb_env_set_maxdbs()
 	 * must be called before opening the environment.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
