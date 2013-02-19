@@ -827,7 +827,8 @@ int  mdb_stat(MDB_txn *txn, MDB_dbi dbi, MDB_stat *stat);
 	 *
 	 * This call is not mutex protected. Handles should only be closed by
 	 * a single thread, and only if no other threads are going to reference
-	 * the database handle or one of its cursors any further.
+	 * the database handle or one of its cursors any further. Do not close
+	 * a handle if an existing transaction has modified its database.
 	 * @param[in] env An environment handle returned by #mdb_env_create()
 	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 */
