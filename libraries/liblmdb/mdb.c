@@ -844,6 +844,8 @@ struct MDB_txn {
 #define MDB_TXN_DIRTY		0x04		/**< must write, even if dirty list is empty */
 /** @} */
 	unsigned int	mt_flags;		/**< @ref mdb_txn */
+	/** dirty_list maxsize - #allocated pages including in parent txns */
+	unsigned int	mt_dirty_room;
 	/** Tracks which of the two meta pages was used at the start
 	 * 	of this transaction.
 	 */
@@ -1285,7 +1287,7 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 	*mp = NULL;
 
 	/* If our dirty list is already full, we can't do anything */
-	if (txn->mt_u.dirty_list[0].mid >= MDB_IDL_UM_MAX)
+	if (txn->mt_dirty_room == 0)
 		return MDB_TXN_FULL;
 
 	/* The free list won't have any content at all until txn 2 has
@@ -1524,6 +1526,7 @@ none:
 	} else {
 		mdb_mid2l_insert(txn->mt_u.dirty_list, &mid);
 	}
+	txn->mt_dirty_room--;
 	*mp = np;
 
 	return MDB_SUCCESS;
@@ -1628,8 +1631,6 @@ finish:
 				return 0;
 			}
 		}
-		if (mc->mc_txn->mt_u.dirty_list[0].mid >= MDB_IDL_UM_MAX)
-			return MDB_TXN_FULL;
 		/* No - copy it */
 		np = mdb_page_malloc(mc);
 		if (!np)
@@ -1821,6 +1822,7 @@ mdb_txn_renew0(MDB_txn *txn)
 		if (txn->mt_txnid == mdb_debug_start)
 			mdb_debug = 1;
 #endif
+		txn->mt_dirty_room = MDB_IDL_UM_MAX;
 		txn->mt_u.dirty_list = env->me_dirty_list;
 		txn->mt_u.dirty_list[0].mid = 0;
 		txn->mt_free_pgs = env->me_free_pgs;
@@ -1921,6 +1923,7 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 		}
 		txn->mt_txnid = parent->mt_txnid;
 		txn->mt_toggle = parent->mt_toggle;
+		txn->mt_dirty_room = parent->mt_dirty_room;
 		txn->mt_u.dirty_list[0].mid = 0;
 		txn->mt_free_pgs[0] = 0;
 		txn->mt_next_pgno = parent->mt_next_pgno;
@@ -2099,8 +2102,15 @@ mdb_txn_commit(MDB_txn *txn)
 
 	if (txn->mt_parent) {
 		MDB_txn *parent = txn->mt_parent;
-		unsigned x, y;
+		unsigned x, y, len;
 		MDB_ID2L dst, src;
+
+		/* Append our free list to parent's */
+		if (mdb_midl_append_list(&parent->mt_free_pgs, txn->mt_free_pgs)) {
+			mdb_txn_abort(txn);
+			return ENOMEM;
+		}
+		mdb_midl_free(txn->mt_free_pgs);
 
 		parent->mt_next_pgno = txn->mt_next_pgno;
 		parent->mt_flags = txn->mt_flags;
@@ -2113,32 +2123,40 @@ mdb_txn_commit(MDB_txn *txn)
 		memcpy(parent->mt_dbflags, txn->mt_dbflags, txn->mt_numdbs);
 		txn->mt_parent->mt_numdbs = txn->mt_numdbs;
 
-		/* Append our free list to parent's */
-		mdb_midl_append_list(&txn->mt_parent->mt_free_pgs,
-			txn->mt_free_pgs);
-		mdb_midl_free(txn->mt_free_pgs);
-
-		/* Merge our dirty list with parent's */
 		dst = txn->mt_parent->mt_u.dirty_list;
 		src = txn->mt_u.dirty_list;
-		x = mdb_mid2l_search(dst, src[1].mid);
-		for (y=1; y<=src[0].mid; y++) {
-			while (x <= dst[0].mid && dst[x].mid != src[y].mid) x++;
-			if (x > dst[0].mid)
-				break;
-			free(dst[x].mptr);
-			dst[x].mptr = src[y].mptr;
-		}
+		/* Find len = length of merging our dirty list with parent's */
 		x = dst[0].mid;
-		for (; y<=src[0].mid; y++) {
-			if (++x >= MDB_IDL_UM_MAX) {
-				mdb_txn_abort(txn);
-				return MDB_TXN_FULL;
+		dst[0].mid = 0;		/* simplify loops */
+		if (parent->mt_parent) {
+			len = x + src[0].mid;
+			y = mdb_mid2l_search(src, dst[x].mid + 1) - 1;
+			for (i = x; y && i; y--) {
+				pgno_t yp = src[y].mid;
+				while (yp < dst[i].mid)
+					i--;
+				if (yp == dst[i].mid) {
+					i--;
+					len--;
+				}
 			}
-			dst[x] = src[y];
+		} else { /* Simplify the above for single-ancestor case */
+			len = MDB_IDL_UM_MAX - txn->mt_dirty_room;
 		}
-		dst[0].mid = x;
+		/* Merge our dirty list with parent's */
+		y = src[0].mid;
+		for (i = len; y; dst[i--] = src[y--]) {
+			pgno_t yp = src[y].mid;
+			while (yp < dst[x].mid)
+				dst[i--] = dst[x--];
+			if (yp == dst[x].mid)
+				free(dst[x--].mptr);
+		}
+		assert(i == x);
+		dst[0].mid = len;
 		free(txn->mt_u.dirty_list);
+		parent->mt_dirty_room = txn->mt_dirty_room;
+
 		txn->mt_parent->mt_child = NULL;
 		free(((MDB_ntxn *)txn)->mnt_pgstate.mf_pgfree);
 		free(txn);
