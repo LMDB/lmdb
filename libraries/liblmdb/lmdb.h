@@ -492,7 +492,7 @@ int  mdb_env_create(MDB_env **env);
 	 * <ul>
 	 *	<li>#MDB_VERSION_MISMATCH - the version of the MDB library doesn't match the
 	 *	version that created the database environment.
-	 *	<li>EINVAL - the environment file headers are corrupted.
+	 *	<li>#MDB_INVALID - the environment file headers are corrupted.
 	 *	<li>ENOENT - the directory specified by the path parameter doesn't exist.
 	 *	<li>EACCES - the user didn't have permission to access the environment files.
 	 *	<li>EAGAIN - the environment was locked by another process.
@@ -689,8 +689,9 @@ int  mdb_env_set_maxdbs(MDB_env *env, MDB_dbi dbs);
 -	 *		must be shut down.
 	 *	<li>#MDB_MAP_RESIZED - another process wrote data beyond this MDB_env's
 	 *		mapsize and the environment must be shut down.
-	 *	<li>ENOMEM - out of memory, or a read-only transaction was requested and
+	 *	<li>#MDB_READERS_FULL - a read-only transaction was requested and
 	 *		the reader lock table is full. See #mdb_env_set_maxreaders().
+	 *	<li>ENOMEM - out of memory.
 	 * </ul>
 	 */
 int  mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **txn);
@@ -706,7 +707,7 @@ int  mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **
 	 *	<li>EINVAL - an invalid parameter was specified.
 	 *	<li>ENOSPC - no more disk space.
 	 *	<li>EIO - a low-level I/O error occurred while writing.
-	 *	<li>ENOMEM - the transaction is nested and could not be merged into its parent.
+	 *	<li>ENOMEM - out of memory.
 	 * </ul>
 	 */
 int  mdb_txn_commit(MDB_txn *txn);
@@ -811,7 +812,7 @@ int  mdb_txn_renew(MDB_txn *txn);
 	 * <ul>
 	 *	<li>#MDB_NOTFOUND - the specified database doesn't exist in the environment
 	 *		and #MDB_CREATE was not specified.
-	 *	<li>ENFILE - too many databases have been opened. See #mdb_env_set_maxdbs().
+	 *	<li>#MDB_DBS_FULL - too many databases have been opened. See #mdb_env_set_maxdbs().
 	 * </ul>
 	 */
 int  mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi);
@@ -997,9 +998,10 @@ int  mdb_get(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data);
 	 * @return A non-zero error value on failure and 0 on success. Some possible
 	 * errors are:
 	 * <ul>
+	 *	<li>#MDB_MAP_FULL - the database is full, see #mdb_env_set_mapsize().
+	 *	<li>#MDB_TXN_FULL - the transaction has too many dirty pages.
 	 *	<li>EACCES - an attempt was made to write in a read-only transaction.
 	 *	<li>EINVAL - an invalid parameter was specified.
-	 *	<li>ENOMEM - the database is full, see #mdb_env_set_mapsize().
 	 * </ul>
 	 */
 int  mdb_put(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data,
@@ -1139,6 +1141,8 @@ int  mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	 * @return A non-zero error value on failure and 0 on success. Some possible
 	 * errors are:
 	 * <ul>
+	 *	<li>#MDB_MAP_FULL - the database is full, see #mdb_env_set_mapsize().
+	 *	<li>#MDB_TXN_FULL - the transaction has too many dirty pages.
 	 *	<li>EACCES - an attempt was made to modify a read-only database.
 	 *	<li>EINVAL - an invalid parameter was specified.
 	 * </ul>
