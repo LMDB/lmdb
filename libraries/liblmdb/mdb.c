@@ -1073,7 +1073,7 @@ static char *const mdb_errstr[] = {
 	"MDB_CURSOR_FULL: Internal error - cursor stack limit reached",
 	"MDB_PAGE_FULL: Internal error - page has no more space",
 	"MDB_MAP_RESIZED: Database contents grew beyond environment mapsize",
-	"MDB_INCOMPATIBLE: Operation is incompatible with database",
+	"MDB_INCOMPATIBLE: Database flags changed or would change",
 };
 
 char *
