@@ -1631,6 +1631,7 @@ finish:
 				return 0;
 			}
 		}
+		assert(mc->mc_txn->mt_u.dirty_list[0].mid < MDB_IDL_UM_MAX);
 		/* No - copy it */
 		np = mdb_page_malloc(mc);
 		if (!np)
