@@ -13,9 +13,9 @@ PROGS	= $(IPROGS) mtest mtest2 mtest3 mtest4 mtest5
 all:	$(ILIBS) $(PROGS)
 
 install: $(ILIBS) $(IPROGS) $(IHDRS)
-	cp $(IPROGS) $(prefix)/bin
-	cp $(ILIBS) $(prefix)/lib
-	cp $(IHDRS) $(prefix)/include
+	cp $(IPROGS) $(DESTDIR)$(prefix)/bin
+	cp $(ILIBS) $(DESTDIR)$(prefix)/lib
+	cp $(IHDRS) $(DESTDIR)$(prefix)/include
 
 clean:
 	rm -rf $(PROGS) *.[ao] *.so *~ testdb
