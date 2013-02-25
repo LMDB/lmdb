@@ -431,9 +431,6 @@ typedef uint16_t	 indx_t;
  *	the longer we delay reclaiming old pages, the more likely it is that a
  *	string of contiguous pages can be found after coalescing old pages from
  *	many old transactions together.
- *
- *	@todo We don't actually do such coalescing yet, we grab pages from one
- *	old transaction at a time.
  *	@{
  */
 	/**	Number of slots in the reader table.
