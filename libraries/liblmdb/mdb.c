@@ -2871,8 +2871,14 @@ mdb_env_open2(MDB_env *env)
 		return ErrCode();
 	}
 	/* Turn off readahead. It's harmful when the DB is larger than RAM. */
+#ifdef MADV_RANDOM
+	madvise(env->me_map, env->me_mapsize, MADV_RANDOM);
+#else
+#ifdef POSIX_MADV_RANDOM
 	posix_madvise(env->me_map, env->me_mapsize, POSIX_MADV_RANDOM);
-#endif
+#endif /* POSIX_MADV_RANDOM */
+#endif /* MADV_RANDOM */
+#endif /* _WIN32 */
 
 	if (newenv) {
 		if (flags & MDB_FIXEDMAP)
