@@ -1849,7 +1849,7 @@ mdb_txn_renew(MDB_txn *txn)
 {
 	int rc;
 
-	if (! (txn && txn->mt_flags & MDB_TXN_RDONLY))
+	if (! (txn && (txn->mt_flags & MDB_TXN_RDONLY)))
 		return EINVAL;
 
 	if (txn->mt_env->me_flags & MDB_FATAL_ERROR) {
