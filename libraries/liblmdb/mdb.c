@@ -4110,16 +4110,18 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int flags)
 				if (*mc->mc_dbflag & DB_STALE) {
 					MDB_val data;
 					int exact = 0;
+					uint16_t flags;
 					MDB_node *leaf = mdb_node_search(&mc2,
 						&mc->mc_dbx->md_name, &exact);
 					if (!exact)
 						return MDB_NOTFOUND;
 					mdb_node_read(mc->mc_txn, leaf, &data);
+					memcpy(&flags, ((char *) data.mv_data + offsetof(MDB_db, md_flags)),
+						sizeof(uint16_t));
 					/* The txn may not know this DBI, or another process may
 					 * have dropped and recreated the DB with other flags.
 					 */
-					if (mc->mc_db->md_flags != *(uint16_t *)
-						((char *) data.mv_data + offsetof(MDB_db, md_flags)))
+					if (mc->mc_db->md_flags != flags)
 						return MDB_INCOMPATIBLE;
 					memcpy(mc->mc_db, data.mv_data, sizeof(MDB_db));
 				}
