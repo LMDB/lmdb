@@ -5218,6 +5218,8 @@ put_sub:
 						}
 					}
 				}
+                                /* we've done our job */
+                                dkey.mv_size = 0;
 			}
 			if (flags & MDB_APPENDDUP)
 				xflags |= MDB_APPEND;
