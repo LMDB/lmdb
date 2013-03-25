@@ -118,7 +118,7 @@ int mdb_midl_insert( MDB_IDL ids, MDB_ID id );
 	 * Allocates memory for an IDL of a default size.
 	 * @return	IDL on success, NULL on failure.
 	 */
-MDB_IDL mdb_midl_alloc();
+MDB_IDL mdb_midl_alloc(void);
 
 	/** Free an IDL.
 	 * @param[in] ids	The IDL to free.

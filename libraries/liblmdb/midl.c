@@ -117,7 +117,7 @@ int mdb_midl_insert( MDB_IDL ids, MDB_ID id )
 }
 #endif
 
-MDB_IDL mdb_midl_alloc()
+MDB_IDL mdb_midl_alloc(void)
 {
 	MDB_IDL ids = malloc((MDB_IDL_UM_MAX+1) * sizeof(MDB_ID));
 	*ids++ = MDB_IDL_UM_MAX;
@@ -192,7 +192,7 @@ mdb_midl_sort( MDB_IDL ids )
 	int i,j,k,l,ir,jstack;
 	MDB_ID a, itmp;
 
-	ir = ids[0];
+	ir = (int)ids[0];
 	l = 1;
 	jstack = 0;
 	for(;;) {
@@ -255,7 +255,7 @@ unsigned mdb_mid2l_search( MDB_ID2L ids, MDB_ID id )
 	unsigned base = 0;
 	unsigned cursor = 1;
 	int val = 0;
-	unsigned n = ids[0].mid;
+	unsigned n = (unsigned)ids[0].mid;
 
 	while( 0 < n ) {
 		unsigned pivot = n >> 1;
@@ -304,7 +304,7 @@ int mdb_mid2l_insert( MDB_ID2L ids, MDB_ID2 *id )
 	} else {
 		/* insert id */
 		ids[0].mid++;
-		for (i=ids[0].mid; i>x; i--)
+		for (i=(unsigned)ids[0].mid; i>x; i--)
 			ids[i] = ids[i-1];
 		ids[x] = *id;
 	}
