@@ -6403,7 +6403,7 @@ mdb_rebalance(MDB_cursor *mc)
 static int
 mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
 {
-	int rc, eof;
+	int rc;
 
 	/* add overflow pages to free list */
 	if (!IS_LEAF2(mc->mc_pg[mc->mc_top]) && F_ISSET(leaf->mn_flags, F_BIGDATA)) {
@@ -6421,11 +6421,11 @@ mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
 	}
 	mdb_node_del(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], mc->mc_db->md_pad);
 	mc->mc_db->md_entries--;
-	eof = mc->mc_flags & C_EOF;
 	rc = mdb_rebalance(mc);
 	if (rc != MDB_SUCCESS)
 		mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
-	else if (eof)
+	/* if mc points past last node in page, invalidate */
+	else if (mc->mc_ki[mc->mc_top] >= NUMKEYS(mc->mc_pg[mc->mc_top]))
 		mc->mc_flags &= ~C_INITIALIZED;
 
 	return rc;
