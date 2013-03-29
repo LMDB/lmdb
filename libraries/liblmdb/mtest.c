@@ -25,7 +25,7 @@ int main(int argc,char * argv[])
 	MDB_val key, data;
 	MDB_txn *txn;
 	MDB_stat mst;
-	MDB_cursor *cursor;
+	MDB_cursor *cursor, *cur2;
 	int count;
 	int *values;
 	char sval[32];
@@ -54,7 +54,11 @@ int main(int argc,char * argv[])
 	    for (i=0;i<count;i++) {	
 			sprintf(sval, "%03x %d foo bar", values[i], values[i]);
 			rc = mdb_put(txn, dbi, &key, &data, MDB_NOOVERWRITE);
-			if (rc) j++;
+			if (rc) {
+				j++;
+				data.mv_size = sizeof(sval);
+				data.mv_data = sval;
+			}
 	    }
 		if (j) printf("%d duplicates skipped\n", j);
 		rc = mdb_txn_commit(txn);
@@ -103,19 +107,27 @@ int main(int argc,char * argv[])
 				(int) key.mv_size,  (char *) key.mv_data,
 				(int) data.mv_size, (char *) data.mv_data);
 		}
-#if 0
-		/* write ops aren't coordinated with cursors,
-		 * this stuff all breaks
-		 */
+		printf("Cursor last/prev\n");
+		rc = mdb_cursor_get(cursor, &key, &data, MDB_LAST);
+			printf("key: %.*s, data: %.*s\n",
+				(int) key.mv_size,  (char *) key.mv_data,
+				(int) data.mv_size, (char *) data.mv_data);
+		rc = mdb_cursor_get(cursor, &key, &data, MDB_PREV);
+			printf("key: %.*s, data: %.*s\n",
+				(int) key.mv_size,  (char *) key.mv_data,
+				(int) data.mv_size, (char *) data.mv_data);
+
+		mdb_txn_abort(txn);
+
 		printf("Deleting with cursor\n");
 		rc = mdb_txn_begin(env, NULL, 0, &txn);
-		rc = mdb_cursor_open(db, txn, &cur2);
+		rc = mdb_cursor_open(txn, dbi, &cur2);
 		for (i=0; i<50; i++) {
 			rc = mdb_cursor_get(cur2, &key, &data, MDB_NEXT);
 			printf("key: %p %.*s, data: %p %.*s\n",
 				key.mv_data,  (int) key.mv_size,  (char *) key.mv_data,
 				data.mv_data, (int) data.mv_size, (char *) data.mv_data);
-			rc = mdb_del(db, txn, &key, NULL);
+			rc = mdb_del(txn, dbi, &key, NULL);
 		}
 
 		printf("Restarting cursor in txn\n");
@@ -131,9 +143,10 @@ int main(int argc,char * argv[])
 		}
 		mdb_cursor_close(cur2);
 		rc = mdb_txn_commit(txn);
-		mdb_cursor_close(cursor);
+
 		printf("Restarting cursor outside txn\n");
-		rc = mdb_cursor_open(db, NULL, &cursor);
+		rc = mdb_txn_begin(env, NULL, 0, &txn);
+		rc = mdb_cursor_open(txn, dbi, &cursor);
 		rc = mdb_cursor_get(cursor, &key, &data, MDB_FIRST);
 		printf("key: %p %.*s, data: %p %.*s\n",
 			key.mv_data,  (int) key.mv_size,  (char *) key.mv_data,
@@ -144,7 +157,6 @@ int main(int argc,char * argv[])
 				key.mv_data,  (int) key.mv_size,  (char *) key.mv_data,
 				data.mv_data, (int) data.mv_size, (char *) data.mv_data);
 		}
-#endif
 		mdb_cursor_close(cursor);
 		mdb_close(env, dbi);
 
