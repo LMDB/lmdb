@@ -286,6 +286,8 @@ typedef MDB_ID	txnid_t;
 #endif
 
 #if !(__STDC_VERSION__ >= 199901L || defined(__GNUC__))
+# undef  MDB_DEBUG
+# define MDB_DEBUG	0
 # define DPRINTF	(void)	/* Vararg macros may be unsupported */
 #elif MDB_DEBUG
 static int mdb_debug;
