@@ -3378,7 +3378,7 @@ fail:
 #define	CHANGELESS	(MDB_FIXEDMAP|MDB_NOSUBDIR|MDB_RDONLY|MDB_WRITEMAP)
 
 int
-mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
+mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode)
 {
 	int		oflags, rc, len, excl;
 	char *lpath, *dpath;
