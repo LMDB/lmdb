@@ -3707,9 +3707,13 @@ void
 mdb_env_close(MDB_env *env)
 {
 	MDB_page *dp;
+	int i;
 
 	if (env == NULL)
 		return;
+
+	for (i = env->me_numdbs; --i > MAIN_DBI; )
+		free(env->me_dbxs[i].md_name.mv_data);
 
 	VGMEMP_DESTROY(env);
 	while ((dp = env->me_dpages) != NULL) {
