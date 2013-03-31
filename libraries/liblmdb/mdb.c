@@ -6254,8 +6254,8 @@ static int
 mdb_rebalance(MDB_cursor *mc)
 {
 	MDB_node	*node;
-	int rc, minkeys;
-	unsigned int ptop;
+	int rc;
+	unsigned int ptop, minkeys;
 	MDB_cursor	mn;
 
 #if MDB_DEBUG
