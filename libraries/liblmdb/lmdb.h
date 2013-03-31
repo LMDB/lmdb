@@ -137,6 +137,10 @@
 extern "C" {
 #endif
 
+#ifdef _MSC_VER
+#define	mode_t	int
+#endif
+
 /** @defgroup mdb MDB API
  *	@{
  *	@brief OpenLDAP Lightning Memory-Mapped Database Manager
