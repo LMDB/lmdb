@@ -4273,6 +4273,8 @@ mdb_cursor_sibling(MDB_cursor *mc, int move_right)
 		return rc;
 
 	mdb_cursor_push(mc, mp);
+	if (!move_right)
+		mc->mc_ki[mc->mc_top] = NUMKEYS(mp)-1;
 
 	return MDB_SUCCESS;
 }
