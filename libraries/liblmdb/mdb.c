@@ -6341,6 +6341,8 @@ mdb_rebalance(MDB_cursor *mc)
 					if (m3->mc_snum < mc->mc_snum) continue;
 					if (m3->mc_pg[0] == mp) {
 						m3->mc_pg[0] = mc->mc_pg[0];
+						m3->mc_snum = 1;
+						m3->mc_top = 0;
 					}
 				}
 			}
