@@ -745,6 +745,11 @@ typedef struct MDB_db {
 	pgno_t		md_root;		/**< the root page of this tree */
 } MDB_db;
 
+	/** mdb_dbi_open flags */
+#define PERSISTENT_FLAGS	0x7fff
+#define VALID_FLAGS	(MDB_REVERSEKEY|MDB_DUPSORT|MDB_INTEGERKEY|MDB_DUPFIXED|\
+	MDB_INTEGERDUP|MDB_REVERSEDUP|MDB_CREATE)
+
 	/** Handle for the DB used to track free pages. */
 #define	FREE_DBI	0
 	/** Handle for the default DB. */
@@ -824,6 +829,9 @@ struct MDB_txn {
  */
 #define DB_DIRTY	0x01		/**< DB was written in this txn */
 #define DB_STALE	0x02		/**< DB record is older than txnID */
+#define DB_NEW		0x04		/**< DB handle opened in this txn */
+#define DB_VALID	0x08		/**< DB handle is valid */
+#define MDB_VALID	0x8000		/**< DB handle is valid, for me_dbflags */
 /** @} */
 	/** In write txns, array of cursors for each DB */
 	MDB_cursor	**mt_cursors;
@@ -1770,6 +1778,7 @@ mdb_txn_renew0(MDB_txn *txn)
 {
 	MDB_env *env = txn->mt_env;
 	unsigned int i;
+	uint16_t x;
 	int rc;
 
 	/* Setup db info */
@@ -1834,11 +1843,11 @@ mdb_txn_renew0(MDB_txn *txn)
 
 	/* Copy the DB info and flags */
 	memcpy(txn->mt_dbs, env->me_metas[txn->mt_toggle]->mm_dbs, 2 * sizeof(MDB_db));
-	for (i=2; i<txn->mt_numdbs; i++)
-		txn->mt_dbs[i].md_flags = env->me_dbflags[i];
-	txn->mt_dbflags[0] = txn->mt_dbflags[1] = 0;
-	if (txn->mt_numdbs > 2)
-		memset(txn->mt_dbflags+2, DB_STALE, txn->mt_numdbs-2);
+	for (i=2; i<txn->mt_numdbs; i++) {
+		txn->mt_dbs[i].md_flags = x = env->me_dbflags[i];
+		txn->mt_dbflags[i] = (x & MDB_VALID) ? DB_VALID|DB_STALE : 0;
+	}
+	txn->mt_dbflags[0] = txn->mt_dbflags[1] = DB_VALID;
 
 	if (env->me_maxpg < txn->mt_next_pgno) {
 		mdb_txn_reset0(txn);
@@ -1912,6 +1921,7 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 	txn->mt_env = env;
 
 	if (parent) {
+		unsigned int i;
 		txn->mt_free_pgs = mdb_midl_alloc();
 		if (!txn->mt_free_pgs) {
 			free(txn);
@@ -1934,7 +1944,9 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 		txn->mt_numdbs = parent->mt_numdbs;
 		txn->mt_dbxs = parent->mt_dbxs;
 		memcpy(txn->mt_dbs, parent->mt_dbs, txn->mt_numdbs * sizeof(MDB_db));
-		memcpy(txn->mt_dbflags, parent->mt_dbflags, txn->mt_numdbs);
+		/* Copy parent's mt_dbflags, but clear DB_NEW */
+		for (i=0; i<txn->mt_numdbs; i++)
+			txn->mt_dbflags[i] = parent->mt_dbflags[i] & ~DB_NEW;
 		rc = 0;
 		ntxn = (MDB_ntxn *)txn;
 		ntxn->mnt_pgstate = env->me_pgstate; /* save parent me_pghead & co */
@@ -1973,13 +1985,23 @@ static void
 mdb_txn_reset0(MDB_txn *txn)
 {
 	MDB_env	*env = txn->mt_env;
+	unsigned int i;
+
+	/* Close any DBI handles opened in this txn */
+	for (i=2; i<txn->mt_numdbs; i++) {
+		if (txn->mt_dbflags[i] & DB_NEW) {
+			char *ptr = env->me_dbxs[i].md_name.mv_data;
+			env->me_dbxs[i].md_name.mv_data = NULL;
+			env->me_dbxs[i].md_name.mv_size = 0;
+			free(ptr);
+		}
+	}
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
 		if (!(env->me_flags & MDB_ROFS))
 			txn->mt_u.reader->mr_txnid = (txnid_t)-1;
 	} else {
 		MDB_page *dp;
-		unsigned int i;
 
 		/* close(free) all cursors */
 		for (i=0; i<txn->mt_numdbs; i++) {
@@ -2083,13 +2105,14 @@ mdb_txn_commit(MDB_txn *txn)
 	env = txn->mt_env;
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
-		if (txn->mt_numdbs > env->me_numdbs) {
-			/* update the DB flags */
-			MDB_dbi i;
-			for (i = env->me_numdbs; i<txn->mt_numdbs; i++)
-				env->me_dbflags[i] = txn->mt_dbs[i].md_flags;
-			env->me_numdbs = i;
+		/* update the DB flags */
+		for (i = 2; i<txn->mt_numdbs; i++) {
+			if (txn->mt_dbflags[i] & DB_NEW)
+				env->me_dbflags[i] = txn->mt_dbs[i].md_flags | MDB_VALID;
 		}
+		if (txn->mt_numdbs > env->me_numdbs)
+			env->me_numdbs = txn->mt_numdbs;
+		txn->mt_numdbs = 2; /* so txn_abort() doesn't close any new handles */
 		mdb_txn_abort(txn);
 		return MDB_SUCCESS;
 	}
@@ -2122,8 +2145,14 @@ mdb_txn_commit(MDB_txn *txn)
 
 		/* Update parent's DB table. */
 		memcpy(parent->mt_dbs, txn->mt_dbs, txn->mt_numdbs * sizeof(MDB_db));
-		memcpy(parent->mt_dbflags, txn->mt_dbflags, txn->mt_numdbs);
 		txn->mt_parent->mt_numdbs = txn->mt_numdbs;
+		txn->mt_parent->mt_dbflags[0] = txn->mt_dbflags[0];
+		txn->mt_parent->mt_dbflags[1] = txn->mt_dbflags[1];
+		for (i=2; i<txn->mt_numdbs; i++) {
+			/* preserve parent's DB_NEW status */
+			x = txn->mt_parent->mt_dbflags[i] & DB_NEW;
+			txn->mt_parent->mt_dbflags[i] = txn->mt_dbflags[i] | x;
+		}
 
 		dst = txn->mt_parent->mt_u.dirty_list;
 		src = txn->mt_u.dirty_list;
@@ -2466,13 +2495,13 @@ sync:
 done:
 	env->me_pglast = 0;
 	env->me_txn = NULL;
-	if (txn->mt_numdbs > env->me_numdbs) {
-		/* update the DB flags */
-		MDB_dbi i;
-		for (i = env->me_numdbs; i<txn->mt_numdbs; i++)
-			env->me_dbflags[i] = txn->mt_dbs[i].md_flags;
-		env->me_numdbs = i;
+	/* update the DB flags */
+	for (i = 2; i<txn->mt_numdbs; i++) {
+		if (txn->mt_dbflags[i] & DB_NEW)
+			env->me_dbflags[i] = txn->mt_dbs[i].md_flags | MDB_VALID;
 	}
+	if (txn->mt_numdbs > env->me_numdbs)
+		env->me_numdbs = txn->mt_numdbs;
 
 	UNLOCK_MUTEX_W(env);
 	free(txn);
@@ -4130,13 +4159,14 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int flags)
 					/* The txn may not know this DBI, or another process may
 					 * have dropped and recreated the DB with other flags.
 					 */
-					if (mc->mc_db->md_flags != flags)
+					if ((mc->mc_db->md_flags & PERSISTENT_FLAGS) != flags)
 						return MDB_INCOMPATIBLE;
 					memcpy(mc->mc_db, data.mv_data, sizeof(MDB_db));
 				}
 				if (flags & MDB_PS_MODIFY)
 					dbflag = DB_DIRTY;
-				*mc->mc_dbflag = dbflag;
+				*mc->mc_dbflag &= ~DB_STALE;
+				*mc->mc_dbflag |= dbflag;
 			}
 		}
 		root = mc->mc_db->md_root;
@@ -4214,7 +4244,7 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 	assert(data);
 	DPRINTF("===> get db %u key [%s]", dbi, DKEY(key));
 
-	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs)
+	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
 		return EINVAL;
 
 	if (key->mv_size == 0 || key->mv_size > MDB_MAXKEYSIZE) {
@@ -4858,7 +4888,7 @@ mdb_cursor_touch(MDB_cursor *mc)
 		rc = mdb_page_search(&mc2, &mc->mc_dbx->md_name, MDB_PS_MODIFY);
 		if (rc)
 			 return rc;
-		*mc->mc_dbflag = DB_DIRTY;
+		*mc->mc_dbflag |= DB_DIRTY;
 	}
 	for (mc->mc_top = 0; mc->mc_top < mc->mc_snum; mc->mc_top++) {
 		rc = mdb_page_touch(mc);
@@ -4920,7 +4950,7 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 		mdb_cursor_push(mc, np);
 		mc->mc_db->md_root = np->mp_pgno;
 		mc->mc_db->md_depth++;
-		*mc->mc_dbflag = DB_DIRTY;
+		*mc->mc_dbflag |= DB_DIRTY;
 		if ((mc->mc_db->md_flags & (MDB_DUPSORT|MDB_DUPFIXED))
 			== MDB_DUPFIXED)
 			np->mp_flags |= P_LEAF2;
@@ -5714,8 +5744,8 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
 	}
 	DPRINTF("Sub-db %u for db %u root page %zu", mx->mx_cursor.mc_dbi, mc->mc_dbi,
 		mx->mx_db.md_root);
-	mx->mx_dbflag = (F_ISSET(mc->mc_pg[mc->mc_top]->mp_flags, P_DIRTY)) ?
-		DB_DIRTY : 0;
+	mx->mx_dbflag = DB_VALID | (F_ISSET(mc->mc_pg[mc->mc_top]->mp_flags, P_DIRTY) ?
+		DB_DIRTY : 0);
 	mx->mx_dbx.md_name.mv_data = NODEKEY(node);
 	mx->mx_dbx.md_name.mv_size = node->mn_ksize;
 #if UINT_MAX < SIZE_MAX
@@ -5761,7 +5791,7 @@ mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **ret)
 	MDB_xcursor	*mx = NULL;
 	size_t size = sizeof(MDB_cursor);
 
-	if (txn == NULL || ret == NULL || dbi >= txn->mt_numdbs)
+	if (txn == NULL || ret == NULL || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
 		return EINVAL;
 
 	/* Allow read access to the freelist */
@@ -6457,7 +6487,7 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 
 	DPRINTF("====> delete db %u key [%s]", dbi, DKEY(key));
 
-	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs)
+	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
 		return EINVAL;
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
@@ -6908,7 +6938,7 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 	assert(key != NULL);
 	assert(data != NULL);
 
-	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs)
+	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
 		return EINVAL;
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
@@ -7030,15 +7060,11 @@ mdb_default_cmp(MDB_txn *txn, MDB_dbi dbi)
 		 : ((f & MDB_REVERSEDUP) ? mdb_cmp_memnr : mdb_cmp_memn));
 }
 
-#define PERSISTENT_FLAGS	0xffff
-#define VALID_FLAGS	(MDB_REVERSEKEY|MDB_DUPSORT|MDB_INTEGERKEY|MDB_DUPFIXED|\
-	MDB_INTEGERDUP|MDB_REVERSEDUP|MDB_CREATE)
 int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi)
 {
 	MDB_val key, data;
 	MDB_dbi i;
 	MDB_cursor mc;
-	uint16_t mdflags;
 	int rc, dbflag, exact;
 	unsigned int unused = 0;
 	size_t len;
@@ -7089,7 +7115,7 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 		return MDB_DBS_FULL;
 
 	/* Find the DB info */
-	dbflag = 0;
+	dbflag = DB_NEW|DB_VALID;
 	exact = 0;
 	key.mv_size = len;
 	key.mv_data = (void *)name;
@@ -7109,7 +7135,7 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 		dummy.md_root = P_INVALID;
 		dummy.md_flags = flags & PERSISTENT_FLAGS;
 		rc = mdb_cursor_put(&mc, &key, &data, F_SUBDATA);
-		dbflag = DB_DIRTY;
+		dbflag |= DB_DIRTY;
 	}
 
 	/* OK, got info, add to table */
@@ -7121,18 +7147,10 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 		txn->mt_dbflags[slot] = dbflag;
 		memcpy(&txn->mt_dbs[slot], data.mv_data, sizeof(MDB_db));
 		*dbi = slot;
-		txn->mt_env->me_dbflags[slot] = mdflags = txn->mt_dbs[slot].md_flags;
+		txn->mt_env->me_dbflags[slot] = txn->mt_dbs[slot].md_flags;
 		mdb_default_cmp(txn, slot);
 		if (!unused) {
 			txn->mt_numdbs++;
-			txn->mt_env->me_numdbs++;
-		}
-		/* Open the DB in parent txns as well */
-		while ((txn = txn->mt_parent) != NULL) {
-			txn->mt_dbflags[slot] = DB_STALE;
-			txn->mt_dbs[slot].md_flags = mdflags;
-			if (!unused)
-				txn->mt_numdbs++;
 		}
 	}
 
@@ -7235,7 +7253,7 @@ int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)
 	MDB_cursor *mc;
 	int rc;
 
-	if (!txn || !dbi || dbi >= txn->mt_numdbs || (unsigned)del > 1)
+	if (!txn || !dbi || dbi >= txn->mt_numdbs || (unsigned)del > 1 || !(txn->mt_dbflags[dbi] & DB_VALID))
 		return EINVAL;
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY))
@@ -7275,7 +7293,7 @@ leave:
 
 int mdb_set_compare(MDB_txn *txn, MDB_dbi dbi, MDB_cmp_func *cmp)
 {
-	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs)
+	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
 		return EINVAL;
 
 	txn->mt_dbxs[dbi].md_cmp = cmp;
@@ -7284,7 +7302,7 @@ int mdb_set_compare(MDB_txn *txn, MDB_dbi dbi, MDB_cmp_func *cmp)
 
 int mdb_set_dupsort(MDB_txn *txn, MDB_dbi dbi, MDB_cmp_func *cmp)
 {
-	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs)
+	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
 		return EINVAL;
 
 	txn->mt_dbxs[dbi].md_dcmp = cmp;
@@ -7293,7 +7311,7 @@ int mdb_set_dupsort(MDB_txn *txn, MDB_dbi dbi, MDB_cmp_func *cmp)
 
 int mdb_set_relfunc(MDB_txn *txn, MDB_dbi dbi, MDB_rel_func *rel)
 {
-	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs)
+	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
 		return EINVAL;
 
 	txn->mt_dbxs[dbi].md_rel = rel;
@@ -7302,7 +7320,7 @@ int mdb_set_relfunc(MDB_txn *txn, MDB_dbi dbi, MDB_rel_func *rel)
 
 int mdb_set_relctx(MDB_txn *txn, MDB_dbi dbi, void *ctx)
 {
-	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs)
+	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
 		return EINVAL;
 
 	txn->mt_dbxs[dbi].md_relctx = ctx;
