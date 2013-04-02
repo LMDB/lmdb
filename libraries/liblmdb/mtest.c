@@ -101,6 +101,11 @@ int main(int argc,char * argv[])
 				(int) key.mv_size,  (char *) key.mv_data,
 				(int) data.mv_size, (char *) data.mv_data);
 		}
+		printf("Cursor last\n");
+		rc = mdb_cursor_get(cursor, &key, &data, MDB_LAST);
+		printf("key: %.*s, data: %.*s\n",
+			(int) key.mv_size,  (char *) key.mv_data,
+			(int) data.mv_size, (char *) data.mv_data);
 		printf("Cursor prev\n");
 		while ((rc = mdb_cursor_get(cursor, &key, &data, MDB_PREV)) == 0) {
 			printf("key: %.*s, data: %.*s\n",

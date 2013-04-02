@@ -4669,9 +4669,9 @@ mdb_cursor_last(MDB_cursor *mc, MDB_val *key, MDB_val *data)
 	}
 	assert(IS_LEAF(mc->mc_pg[mc->mc_top]));
 
-	mc->mc_flags |= C_INITIALIZED|C_EOF;
 	mc->mc_ki[mc->mc_top] = NUMKEYS(mc->mc_pg[mc->mc_top]) - 1;
 	}
+	mc->mc_flags |= C_INITIALIZED|C_EOF;
 	leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
 
 	if (IS_LEAF2(mc->mc_pg[mc->mc_top])) {
