@@ -7175,7 +7175,7 @@ mdb_drop0(MDB_cursor *mc, int subs)
 		unsigned int i;
 
 		/* LEAF2 pages have no nodes, cannot have sub-DBs */
-		if (!subs || IS_LEAF2(mc->mc_pg[mc->mc_top]))
+		if (IS_LEAF2(mc->mc_pg[mc->mc_top]))
 			mdb_cursor_pop(mc);
 
 		mdb_cursor_copy(mc, &mx);
@@ -7183,7 +7183,15 @@ mdb_drop0(MDB_cursor *mc, int subs)
 			if (IS_LEAF(mc->mc_pg[mc->mc_top])) {
 				for (i=0; i<NUMKEYS(mc->mc_pg[mc->mc_top]); i++) {
 					ni = NODEPTR(mc->mc_pg[mc->mc_top], i);
-					if (ni->mn_flags & F_SUBDATA) {
+					if (ni->mn_flags & F_BIGDATA) {
+						int j, ovpages = OVPAGES(NODEDSZ(ni), mc->mc_txn->mt_env->me_psize);
+						pgno_t pg;
+						memcpy(&pg, NODEDATA(ni), sizeof(pg));
+						for (j=0; j<ovpages; j++) {
+							mdb_midl_append(&mc->mc_txn->mt_free_pgs, pg);
+							pg++;
+						}
+					} else if (subs && (ni->mn_flags & F_SUBDATA)) {
 						mdb_xcursor_init1(mc, ni);
 						rc = mdb_drop0(&mc->mc_xcursor->mx_cursor, 0);
 						if (rc)
@@ -7201,14 +7209,18 @@ mdb_drop0(MDB_cursor *mc, int subs)
 			}
 			if (!mc->mc_top)
 				break;
+			mc->mc_ki[mc->mc_top] = i;
 			rc = mdb_cursor_sibling(mc, 1);
 			if (rc) {
 				/* no more siblings, go back to beginning
 				 * of previous level.
 				 */
 				mdb_cursor_pop(mc);
-				for (i=1; i<mc->mc_top; i++)
+				mc->mc_ki[0] = 0;
+				for (i=1; i<mc->mc_snum; i++) {
+					mc->mc_ki[i] = 0;
 					mc->mc_pg[i] = mx.mc_pg[i];
+				}
 			}
 		}
 		/* free it */
@@ -7254,19 +7266,7 @@ int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)
 		txn->mt_dbs[dbi].md_entries = 0;
 		txn->mt_dbs[dbi].md_root = P_INVALID;
 
-		if (!txn->mt_u.dirty_list[0].mid) {
-			MDB_cursor m2;
-			MDB_val key, data;
-			/* make sure we have at least one dirty page in this txn
-			 * otherwise these changes will be ignored.
-			 */
-			key.mv_size = sizeof(txnid_t);
-			key.mv_data = &txn->mt_txnid;
-			data.mv_size = sizeof(MDB_ID);
-			data.mv_data = txn->mt_free_pgs;
-			mdb_cursor_init(&m2, txn, FREE_DBI, NULL);
-			rc = mdb_cursor_put(&m2, &key, &data, 0);
-		}
+		txn->mt_flags |= MDB_TXN_DIRTY;
 	}
 leave:
 	mdb_cursor_close(mc);
