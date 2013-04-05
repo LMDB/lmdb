@@ -4968,8 +4968,8 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 				if (rc > 0) {
 					rc = MDB_NOTFOUND;
 					mc->mc_ki[mc->mc_top]++;
-				} else if (rc < 0) {
-					/* new key is < last key */
+				} else {
+					/* new key is <= last key */
 					rc = MDB_KEYEXIST;
 				}
 			}
