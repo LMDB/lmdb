@@ -4377,8 +4377,6 @@ mdb_cursor_next(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 			rc = mdb_cursor_first(&mc->mc_xcursor->mx_cursor, data, NULL);
 			if (rc != MDB_SUCCESS)
 				return rc;
-		} else if (mc->mc_db->md_flags & MDB_DUPSORT) {
-			mc->mc_xcursor->mx_cursor.mc_flags &= ~C_INITIALIZED;
 		}
 	}
 
@@ -4792,9 +4790,8 @@ mdb_cursor_get(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 			break;
 		}
 		rc = MDB_SUCCESS;
-		if (!(mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED))
-			goto fetch;
-		if (mc->mc_xcursor->mx_cursor.mc_flags & C_EOF)
+		if (!(mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED) ||
+			(mc->mc_xcursor->mx_cursor.mc_flags & C_EOF))
 			break;
 		goto fetchm;
 	case MDB_NEXT_MULTIPLE:
@@ -4806,7 +4803,7 @@ mdb_cursor_get(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 		if (!(mc->mc_flags & C_INITIALIZED))
 			rc = mdb_cursor_first(mc, key, data);
 		else
-			rc = mdb_cursor_next(mc, key, data, MDB_NEXT_NODUP);
+			rc = mdb_cursor_next(mc, key, data, MDB_NEXT_DUP);
 		if (rc == MDB_SUCCESS) {
 			if (mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED) {
 				MDB_cursor *mx;
@@ -4817,11 +4814,7 @@ fetchm:
 				data->mv_data = METADATA(mx->mc_pg[mx->mc_top]);
 				mx->mc_ki[mx->mc_top] = NUMKEYS(mx->mc_pg[mx->mc_top])-1;
 			} else {
-				MDB_node *leaf;
-fetch:
-				leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
-				data->mv_size = NODEDSZ(leaf);
-				data->mv_data = NODEDATA(leaf);
+				rc = MDB_NOTFOUND;
 			}
 		}
 		break;
