@@ -6307,7 +6307,7 @@ mdb_rebalance(MDB_cursor *mc)
 #endif
 
 	if (PAGEFILL(mc->mc_txn->mt_env, mc->mc_pg[mc->mc_top]) >= FILL_THRESHOLD &&
-		NUMKEYS(mc->mc_pg[mc->mc_top] >= minkeys)) {
+		NUMKEYS(mc->mc_pg[mc->mc_top]) >= minkeys) {
 #if MDB_DEBUG
 		pgno_t pgno;
 		COPY_PGNO(pgno, mc->mc_pg[mc->mc_top]->mp_pgno);
