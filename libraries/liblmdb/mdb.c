@@ -6295,6 +6295,7 @@ mdb_rebalance(MDB_cursor *mc)
 	unsigned int ptop, minkeys;
 	MDB_cursor	mn;
 
+	minkeys = 1 + (IS_BRANCH(mc->mc_pg[mc->mc_top]));
 #if MDB_DEBUG
 	{
 	pgno_t pgno;
@@ -6305,7 +6306,8 @@ mdb_rebalance(MDB_cursor *mc)
 	}
 #endif
 
-	if (PAGEFILL(mc->mc_txn->mt_env, mc->mc_pg[mc->mc_top]) >= FILL_THRESHOLD) {
+	if (PAGEFILL(mc->mc_txn->mt_env, mc->mc_pg[mc->mc_top]) >= FILL_THRESHOLD &&
+		NUMKEYS(mc->mc_pg[mc->mc_top] >= minkeys)) {
 #if MDB_DEBUG
 		pgno_t pgno;
 		COPY_PGNO(pgno, mc->mc_pg[mc->mc_top]->mp_pgno);
