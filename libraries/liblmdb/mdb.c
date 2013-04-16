@@ -1844,7 +1844,8 @@ mdb_txn_renew0(MDB_txn *txn)
 	/* Copy the DB info and flags */
 	memcpy(txn->mt_dbs, env->me_metas[txn->mt_toggle]->mm_dbs, 2 * sizeof(MDB_db));
 	for (i=2; i<txn->mt_numdbs; i++) {
-		txn->mt_dbs[i].md_flags = x = env->me_dbflags[i];
+		x = env->me_dbflags[i];
+		txn->mt_dbs[i].md_flags = x & PERSISTENT_FLAGS;
 		txn->mt_dbflags[i] = (x & MDB_VALID) ? DB_VALID|DB_STALE : 0;
 	}
 	txn->mt_dbflags[0] = txn->mt_dbflags[1] = DB_VALID;
