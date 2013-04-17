@@ -6320,6 +6320,10 @@ mdb_rebalance(MDB_cursor *mc)
 
 	if (mc->mc_snum < 2) {
 		MDB_page *mp = mc->mc_pg[0];
+		if (IS_SUBP(mp)) {
+			DPUTS("Can't rebalance a subpage, ignoring");
+			return MDB_SUCCESS;
+		}
 		if (NUMKEYS(mp) == 0) {
 			DPUTS("tree is completely empty");
 			mc->mc_db->md_root = P_INVALID;
