@@ -934,10 +934,10 @@ struct MDB_env {
 	HANDLE		me_mfd;			/**< just for writing the meta pages */
 	/** Failed to update the meta page. Probably an I/O error. */
 #define	MDB_FATAL_ERROR	0x80000000U
-	/** Read-only Filesystem. Allow read access, no locking. */
-#define	MDB_ROFS	0x40000000U
 	/** Some fields are initialized. */
 #define	MDB_ENV_ACTIVE	0x20000000U
+	/** me_txkey is set */
+#define	MDB_ENV_TXKEY	0x10000000U
 	uint32_t 	me_flags;		/**< @ref mdb_env */
 	unsigned int	me_psize;	/**< size of a page, from #GET_PAGESIZE */
 	unsigned int	me_maxreaders;	/**< size of the reader table */
@@ -1786,7 +1786,7 @@ mdb_txn_renew0(MDB_txn *txn)
 	txn->mt_dbxs = env->me_dbxs;	/* mostly static anyway */
 
 	if (txn->mt_flags & MDB_TXN_RDONLY) {
-		if (env->me_flags & MDB_ROFS) {
+		if (!env->me_txns) {
 			i = mdb_env_pick_meta(env);
 			txn->mt_txnid = env->me_metas[i]->mm_txnid;
 			txn->mt_u.reader = NULL;
@@ -1999,8 +1999,9 @@ mdb_txn_reset0(MDB_txn *txn)
 	}
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
-		if (!(env->me_flags & MDB_ROFS))
+		if (txn->mt_u.reader) {
 			txn->mt_u.reader->mr_txnid = (txnid_t)-1;
+		}
 	} else {
 		MDB_page *dp;
 
@@ -2771,7 +2772,7 @@ mdb_env_create(MDB_env **env)
 		return ENOMEM;
 
 	e->me_maxreaders = DEFAULT_READERS;
-	e->me_maxdbs = 2;
+	e->me_maxdbs = e->me_numdbs = 2;
 	e->me_fd = INVALID_HANDLE_VALUE;
 	e->me_lfd = INVALID_HANDLE_VALUE;
 	e->me_mfd = INVALID_HANDLE_VALUE;
@@ -3218,7 +3219,6 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 	if (env->me_lfd == INVALID_HANDLE_VALUE) {
 		rc = ErrCode();
 		if (rc == MDB_ERRCODE_ROFS && (env->me_flags & MDB_RDONLY)) {
-			env->me_flags |= MDB_ROFS;
 			return MDB_SUCCESS;
 		}
 		goto fail_errno;
@@ -3228,6 +3228,21 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 	if ((fdflags = fcntl(env->me_lfd, F_GETFD) | FD_CLOEXEC) >= 0)
 			fcntl(env->me_lfd, F_SETFD, fdflags);
 #endif
+
+	{
+		rc = pthread_key_create(&env->me_txkey, mdb_env_reader_dest);
+		if (rc)
+			goto fail;
+		env->me_flags |= MDB_ENV_TXKEY;
+#ifdef _WIN32
+		/* Windows TLS callbacks need help finding their TLS info. */
+		if (mdb_tls_nkeys >= MAX_TLS_KEYS) {
+			rc = MDB_TLS_FULL;
+			goto fail;
+		}
+		mdb_tls_keys[mdb_tls_nkeys++] = env->me_txkey;
+#endif
+	}
 
 	/* Try to get exclusive lock. If we succeed, then
 	 * nobody is using the lock region and we should initialize it.
@@ -3492,19 +3507,6 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 			}
 		}
 		DPRINTF("opened dbenv %p", (void *) env);
-		rc = pthread_key_create(&env->me_txkey, mdb_env_reader_dest);
-		if (rc)
-			goto leave;
-		env->me_numdbs = 2;	/* this notes that me_txkey was set */
-#ifdef _WIN32
-		/* Windows TLS callbacks need help finding their TLS info. */
-		if (mdb_tls_nkeys < MAX_TLS_KEYS)
-			mdb_tls_keys[mdb_tls_nkeys++] = env->me_txkey;
-		else {
-			rc = MDB_TLS_FULL;
-			goto leave;
-		}
-#endif
 		if (excl > 0) {
 			rc = mdb_env_share_locks(env, &excl);
 		}
@@ -3534,7 +3536,7 @@ mdb_env_close0(MDB_env *env, int excl)
 	if (env->me_free_pgs)
 		mdb_midl_free(env->me_free_pgs);
 
-	if (env->me_numdbs) {
+	if (env->me_flags & MDB_ENV_TXKEY) {
 		pthread_key_delete(env->me_txkey);
 #ifdef _WIN32
 		/* Delete our key from the global list */
@@ -3600,7 +3602,7 @@ mdb_env_close0(MDB_env *env, int excl)
 		close(env->me_lfd);
 	}
 
-	env->me_flags &= ~MDB_ENV_ACTIVE;
+	env->me_flags &= ~(MDB_ENV_ACTIVE|MDB_ENV_TXKEY);
 }
 
 int
@@ -3659,7 +3661,7 @@ mdb_env_copy(MDB_env *env, const char *path)
 	if (rc)
 		goto leave;
 
-	if (!(env->me_flags & MDB_ROFS)) {
+	if (env->me_txns) {
 		/* We must start the actual read txn after blocking writers */
 		mdb_txn_reset0(txn);
 
@@ -3684,7 +3686,7 @@ mdb_env_copy(MDB_env *env, const char *path)
 	rc = write(newfd, env->me_map, wsize);
 	rc = (rc == (int)wsize) ? MDB_SUCCESS : ErrCode();
 #endif
-	if (! (env->me_flags & MDB_ROFS))
+	if (env->me_txns)
 		UNLOCK_MUTEX_W(env);
 
 	if (rc)
