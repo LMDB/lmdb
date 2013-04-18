@@ -748,7 +748,8 @@ typedef struct MDB_db {
 } MDB_db;
 
 	/** mdb_dbi_open flags */
-#define PERSISTENT_FLAGS	0x7fff
+#define MDB_VALID	0x8000		/**< DB handle is valid, for me_dbflags */
+#define PERSISTENT_FLAGS	(0xffff & ~(MDB_VALID))
 #define VALID_FLAGS	(MDB_REVERSEKEY|MDB_DUPSORT|MDB_INTEGERKEY|MDB_DUPFIXED|\
 	MDB_INTEGERDUP|MDB_REVERSEDUP|MDB_CREATE)
 
@@ -832,8 +833,7 @@ struct MDB_txn {
 #define DB_DIRTY	0x01		/**< DB was written in this txn */
 #define DB_STALE	0x02		/**< DB record is older than txnID */
 #define DB_NEW		0x04		/**< DB handle opened in this txn */
-#define DB_VALID	0x08		/**< DB handle is valid */
-#define MDB_VALID	0x8000		/**< DB handle is valid, for me_dbflags */
+#define DB_VALID	0x08		/**< DB handle is valid, see also #MDB_VALID */
 /** @} */
 	/** In write txns, array of cursors for each DB */
 	MDB_cursor	**mt_cursors;
@@ -1772,9 +1772,7 @@ mdb_txn_reset0(MDB_txn *txn);
 
 /** Common code for #mdb_txn_begin() and #mdb_txn_renew().
  * @param[in] txn the transaction handle to initialize
- * @return 0 on success, non-zero on failure. This can only
- * fail for read-only transactions, and then only if the
- * reader table is full.
+ * @return 0 on success, non-zero on failure.
  */
 static int
 mdb_txn_renew0(MDB_txn *txn)
