@@ -963,8 +963,8 @@ struct MDB_env {
 	MDB_page	*me_dpages;		/**< list of malloc'd blocks for re-use */
 	/** IDL of pages that became unused in a write txn */
 	MDB_IDL		me_free_pgs;
-	/** ID2L of pages that were written during a write txn */
-	MDB_ID2		me_dirty_list[MDB_IDL_UM_SIZE];
+	/** ID2L of pages written during a write txn. Length MDB_IDL_UM_SIZE. */
+	MDB_ID2L	me_dirty_list;
 	/** Max number of freelist items that can fit in a single overflow page */
 	unsigned int	me_maxfree_1pg;
 	/** Max size of a node on a page */
@@ -2770,11 +2770,6 @@ mdb_env_create(MDB_env **env)
 	if (!e)
 		return ENOMEM;
 
-	e->me_free_pgs = mdb_midl_alloc();
-	if (!e->me_free_pgs) {
-		free(e);
-		return ENOMEM;
-	}
 	e->me_maxreaders = DEFAULT_READERS;
 	e->me_maxdbs = 2;
 	e->me_fd = INVALID_HANDLE_VALUE;
@@ -3193,58 +3188,45 @@ mdb_hash_hex(MDB_val *val, char *hexbuf)
  * @param[in] lpath The pathname of the file used for the lock region.
  * @param[in] mode The Unix permissions for the file, if we create it.
  * @param[out] excl Resulting file lock type: -1 none, 0 shared, 1 exclusive
+ * @param[in,out] excl In -1, out lock type: -1 none, 0 shared, 1 exclusive
  * @return 0 on success, non-zero on failure.
  */
 static int
 mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 {
+#ifdef _WIN32
+#	define MDB_ERRCODE_ROFS	ERROR_WRITE_PROTECT
+#else
+#	define MDB_ERRCODE_ROFS	EROFS
+#ifdef O_CLOEXEC	/* Linux: Open file and set FD_CLOEXEC atomically */
+#	define MDB_CLOEXEC		O_CLOEXEC
+#else
+	int fdflags;
+#	define MDB_CLOEXEC		0
+#endif
+#endif
 	int rc;
 	off_t size, rsize;
 
-	*excl = -1;
-
 #ifdef _WIN32
-	if ((env->me_lfd = CreateFile(lpath, GENERIC_READ|GENERIC_WRITE,
+	env->me_lfd = CreateFile(lpath, GENERIC_READ|GENERIC_WRITE,
 		FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_ALWAYS,
-		FILE_ATTRIBUTE_NORMAL, NULL)) == INVALID_HANDLE_VALUE) {
-		rc = ErrCode();
-		if (rc == ERROR_WRITE_PROTECT && (env->me_flags & MDB_RDONLY)) {
-			env->me_flags |= MDB_ROFS;
-			return MDB_SUCCESS;
-		}
-		goto fail_errno;
-	}
-	/* Try to get exclusive lock. If we succeed, then
-	 * nobody is using the lock region and we should initialize it.
-	 */
-	if ((rc = mdb_env_excl_lock(env, excl))) goto fail;
-	size = GetFileSize(env->me_lfd, NULL);
-
+		FILE_ATTRIBUTE_NORMAL, NULL);
 #else
-#if !(O_CLOEXEC)
-	{
-		int fdflags;
-		if ((env->me_lfd = open(lpath, O_RDWR|O_CREAT, mode)) == -1) {
-			rc = ErrCode();
-			if (rc == EROFS && (env->me_flags & MDB_RDONLY)) {
-				env->me_flags |= MDB_ROFS;
-				return MDB_SUCCESS;
-			}
-			goto fail_errno;
-		}
-		/* Lose record locks when exec*() */
-		if ((fdflags = fcntl(env->me_lfd, F_GETFD) | FD_CLOEXEC) >= 0)
-			fcntl(env->me_lfd, F_SETFD, fdflags);
-	}
-#else /* O_CLOEXEC on Linux: Open file and set FD_CLOEXEC atomically */
-	if ((env->me_lfd = open(lpath, O_RDWR|O_CREAT|O_CLOEXEC, mode)) == -1) {
+	env->me_lfd = open(lpath, O_RDWR|O_CREAT|MDB_CLOEXEC, mode);
+#endif
+	if (env->me_lfd == INVALID_HANDLE_VALUE) {
 		rc = ErrCode();
-		if (rc == EROFS && (env->me_flags & MDB_RDONLY)) {
+		if (rc == MDB_ERRCODE_ROFS && (env->me_flags & MDB_RDONLY)) {
 			env->me_flags |= MDB_ROFS;
 			return MDB_SUCCESS;
 		}
 		goto fail_errno;
 	}
+#if ! ((MDB_CLOEXEC) || defined(_WIN32))
+	/* Lose record locks when exec*() */
+	if ((fdflags = fcntl(env->me_lfd, F_GETFD) | FD_CLOEXEC) >= 0)
+			fcntl(env->me_lfd, F_SETFD, fdflags);
 #endif
 
 	/* Try to get exclusive lock. If we succeed, then
@@ -3252,6 +3234,9 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 	 */
 	if ((rc = mdb_env_excl_lock(env, excl))) goto fail;
 
+#ifdef _WIN32
+	size = GetFileSize(env->me_lfd, NULL);
+#else
 	size = lseek(env->me_lfd, 0, SEEK_END);
 #endif
 	rsize = (env->me_maxreaders-1) * sizeof(MDB_reader) + sizeof(MDB_txninfo);
@@ -3412,7 +3397,7 @@ fail:
 int
 mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode)
 {
-	int		oflags, rc, len, excl;
+	int		oflags, rc, len, excl = -1;
 	char *lpath, *dpath;
 
 	if (env->me_fd!=INVALID_HANDLE_VALUE || (flags & ~(CHANGEABLE|CHANGELESS)))
@@ -3437,11 +3422,27 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 		sprintf(dpath, "%s" DATANAME, path);
 	}
 
+	rc = MDB_SUCCESS;
 	flags |= env->me_flags;
-	/* silently ignore WRITEMAP if we're only getting read access */
-	if (F_ISSET(flags, MDB_RDONLY|MDB_WRITEMAP))
-		flags ^= MDB_WRITEMAP;
+	if (flags & MDB_RDONLY) {
+		/* silently ignore WRITEMAP when we're only getting read access */
+		flags &= ~MDB_WRITEMAP;
+	} else {
+		if (!((env->me_free_pgs = mdb_midl_alloc()) &&
+			  (env->me_dirty_list = calloc(MDB_IDL_UM_SIZE, sizeof(MDB_ID2)))))
+			rc = ENOMEM;
+	}
 	env->me_flags = flags |= MDB_ENV_ACTIVE;
+	if (rc)
+		goto leave;
+
+	env->me_path = strdup(path);
+	env->me_dbxs = calloc(env->me_maxdbs, sizeof(MDB_dbx));
+	env->me_dbflags = calloc(env->me_maxdbs, sizeof(uint16_t));
+	if (!(env->me_dbxs && env->me_path && env->me_dbflags)) {
+		rc = ENOMEM;
+		goto leave;
+	}
 
 	rc = mdb_env_setup_locks(env, lpath, mode, &excl);
 	if (rc)
@@ -3506,14 +3507,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 #endif
 		if (excl > 0) {
 			rc = mdb_env_share_locks(env, &excl);
-			if (rc)
-				goto leave;
 		}
-		env->me_dbxs = calloc(env->me_maxdbs, sizeof(MDB_dbx));
-		env->me_dbflags = calloc(env->me_maxdbs, sizeof(uint16_t));
-		env->me_path = strdup(path);
-		if (!env->me_dbxs || !env->me_dbflags || !env->me_path)
-			rc = ENOMEM;
 	}
 
 leave:
@@ -3536,6 +3530,9 @@ mdb_env_close0(MDB_env *env, int excl)
 	free(env->me_dbflags);
 	free(env->me_dbxs);
 	free(env->me_path);
+	free(env->me_dirty_list);
+	if (env->me_free_pgs)
+		mdb_midl_free(env->me_free_pgs);
 
 	if (env->me_numdbs) {
 		pthread_key_delete(env->me_txkey);
@@ -3753,7 +3750,6 @@ mdb_env_close(MDB_env *env)
 	}
 
 	mdb_env_close0(env, 0);
-	mdb_midl_free(env->me_free_pgs);
 	free(env);
 }
 
