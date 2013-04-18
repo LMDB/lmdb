@@ -370,7 +370,9 @@ typedef enum MDB_cursor_op {
 #define MDB_MAP_RESIZED	(-30785)
 	/** Database flags changed or would change */
 #define MDB_INCOMPATIBLE	(-30784)
-#define MDB_LAST_ERRCODE	MDB_INCOMPATIBLE
+	/** Invalid reuse of reader locktable slot */
+#define MDB_BAD_RSLOT		(-30783)
+#define MDB_LAST_ERRCODE	MDB_BAD_RSLOT
 /** @} */
 
 /** @brief Statistics for a database in the environment */

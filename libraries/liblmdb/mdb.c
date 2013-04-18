@@ -1083,6 +1083,7 @@ static char *const mdb_errstr[] = {
 	"MDB_PAGE_FULL: Internal error - page has no more space",
 	"MDB_MAP_RESIZED: Database contents grew beyond environment mapsize",
 	"MDB_INCOMPATIBLE: Database flags changed or would change",
+	"MDB_BAD_RSLOT: Invalid reuse of reader locktable slot",
 };
 
 char *
@@ -1792,7 +1793,10 @@ mdb_txn_renew0(MDB_txn *txn)
 			txn->mt_u.reader = NULL;
 		} else {
 			MDB_reader *r = pthread_getspecific(env->me_txkey);
-			if (!r) {
+			if (r) {
+				if (r->mr_pid != env->me_pid || r->mr_txnid != (txnid_t)-1)
+					return MDB_BAD_RSLOT;
+			} else {
 				pid_t pid = env->me_pid;
 				pthread_t tid = pthread_self();
 
@@ -1863,7 +1867,7 @@ mdb_txn_renew(MDB_txn *txn)
 {
 	int rc;
 
-	if (! (txn && (txn->mt_flags & MDB_TXN_RDONLY)))
+	if (!txn || txn->mt_numdbs || !(txn->mt_flags & MDB_TXN_RDONLY))
 		return EINVAL;
 
 	if (txn->mt_env->me_flags & MDB_FATAL_ERROR) {
@@ -2065,6 +2069,10 @@ mdb_txn_reset(MDB_txn *txn)
 	DPRINTF("reset txn %zu%c %p on mdbenv %p, root page %zu",
 		txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w',
 		(void *) txn, (void *)txn->mt_env, txn->mt_dbs[MAIN_DBI].md_root);
+
+	/* This call is only valid for read-only txns */
+	if (!(txn->mt_flags & MDB_TXN_RDONLY))
+		return;
 
 	mdb_txn_reset0(txn);
 }
