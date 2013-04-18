@@ -66,6 +66,7 @@
  *
  *	- A thread can only use one transaction at a time, plus any child
  *	  transactions.  Each transaction belongs to one thread.  See below.
+ *	  The #MDB_NOTLS flag changes this for read-only transactions.
  *
  *	- Use an MDB_env* in the process which opened it, without fork()ing.
  *
@@ -249,6 +250,8 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
 #define MDB_WRITEMAP		0x80000
 	/** use asynchronous msync when MDB_WRITEMAP is used */
 #define MDB_MAPASYNC		0x100000
+	/** tie reader locktable slots to #MDB_txn objects instead of to threads */
+#define MDB_NOTLS		0x200000
 /** @} */
 
 /**	@defgroup	mdb_dbi_open	Database Flags
@@ -392,8 +395,8 @@ typedef struct MDB_envinfo {
 	size_t	me_mapsize;				/**< Size of the data memory map */
 	size_t	me_last_pgno;			/**< ID of the last used page */
 	size_t	me_last_txnid;			/**< ID of the last committed transaction */
-	unsigned int me_maxreaders;		/**< maximum number of threads for the environment */
-	unsigned int me_numreaders;		/**< maximum number of threads used in the environment */
+	unsigned int me_maxreaders;		/**< max reader slots in the environment */
+	unsigned int me_numreaders;		/**< max reader slots used in the environment */
 } MDB_envinfo;
 
 	/** @brief Return the mdb library version information.
@@ -492,6 +495,15 @@ int  mdb_env_create(MDB_env **env);
 	 *		database or lose the last transactions. Calling #mdb_env_sync()
 	 *		ensures on-disk database integrity until next commit.
 	 *		This flag may be changed at any time using #mdb_env_set_flags().
+	 *	<li>#MDB_NOTLS
+	 *		Don't use Thread-Local Storage. Tie reader locktable slots to
+	 *		#MDB_txn objects instead of to threads. I.e. #mdb_txn_reset() keeps
+	 *		the slot reseved for the #MDB_txn object. A thread may use parallel
+	 *		read-only transactions. A read-only transaction may span threads if
+	 *		the user synchronizes its use. Applications that multiplex many
+	 *		user threads over individual OS threads need this option. Such an
+	 *		application must also serialize the write transactions in an OS
+	 *		thread, since MDB's write locking is unaware of the user threads.
 	 * </ul>
 	 * @param[in] mode The UNIX permissions to set on created files. This parameter
 	 * is ignored on Windows.
@@ -626,13 +638,17 @@ int  mdb_env_get_path(MDB_env *env, const char **path);
 	 */
 int  mdb_env_set_mapsize(MDB_env *env, size_t size);
 
-	/** @brief Set the maximum number of threads for the environment.
+	/** @brief Set the maximum number of threads/reader slots for the environment.
 	 *
 	 * This defines the number of slots in the lock table that is used to track readers in the
 	 * the environment. The default is 126.
+	 * Starting a read-only transaction normally ties a lock table slot to the
+	 * current thread until the environment closes or the thread exits. If
+	 * MDB_NOTLS is in use, #mdb_txn_begin() instead ties the slot to the
+	 * MDB_txn object until it or the #MDB_env object is destroyed.
 	 * This function may only be called after #mdb_env_create() and before #mdb_env_open().
 	 * @param[in] env An environment handle returned by #mdb_env_create()
-	 * @param[in] readers The maximum number of threads
+	 * @param[in] readers The maximum number of reader lock table slots
 	 * @return A non-zero error value on failure and 0 on success. Some possible
 	 * errors are:
 	 * <ul>
@@ -641,7 +657,7 @@ int  mdb_env_set_mapsize(MDB_env *env, size_t size);
 	 */
 int  mdb_env_set_maxreaders(MDB_env *env, unsigned int readers);
 
-	/** @brief Get the maximum number of threads for the environment.
+	/** @brief Get the maximum number of threads/reader slots for the environment.
 	 *
 	 * @param[in] env An environment handle returned by #mdb_env_create()
 	 * @param[out] readers Address of an integer to store the number of readers
@@ -672,8 +688,9 @@ int  mdb_env_set_maxdbs(MDB_env *env, MDB_dbi dbs);
 	/** @brief Create a transaction for use with the environment.
 	 *
 	 * The transaction handle may be discarded using #mdb_txn_abort() or #mdb_txn_commit().
-	 * @note Transactions may not span threads; a transaction must only be used by a
-	 * single thread. Also, a thread may only have a single transaction.
+	 * @note A transaction and its cursors must only be used by a single
+	 * thread, and a thread may only have a single transaction at a time.
+	 * If #MDB_NOTLS is in use, this does not apply to read-only transactions.
 	 * @note Cursors may not span transactions; each cursor must be opened and closed
 	 * within a single transaction.
 	 * @param[in] env An environment handle returned by #mdb_env_create()
@@ -730,11 +747,13 @@ void mdb_txn_abort(MDB_txn *txn);
 
 	/** @brief Reset a read-only transaction.
 	 *
-	 * This releases the current reader lock but doesn't free the
-	 * transaction handle, allowing it to be used again later by #mdb_txn_renew().
-	 * It otherwise has the same effect as #mdb_txn_abort() but saves some memory
-	 * allocation/deallocation overhead if a thread is going to start a new
-	 * read-only transaction again soon.
+	 * Abort the transaction like #mdb_txn_abort(), but keep the transaction
+	 * handle. #mdb_txn_renew() may reuse the handle. This saves allocation
+	 * overhead if the process will start a new read-only transaction soon,
+	 * and also locking overhead if #MDB_NOTLS is in use. The reader table
+	 * lock is released, but the table slot stays tied to its thread or
+	 * #MDB_txn. Use mdb_txn_abort() to discard a reset handle, and to free
+	 * its lock table slot if MDB_NOTLS is in use.
 	 * All cursors opened within the transaction must be closed before the transaction
 	 * is reset.
 	 * Reader locks generally don't interfere with writers, but they keep old
@@ -1045,8 +1064,8 @@ int  mdb_del(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data);
 
 	/** @brief Create a cursor handle.
 	 *
-	 * Cursors are associated with a specific transaction and database and
-	 * may not span threads.
+	 * A cursor is associated with a specific transaction and database.
+	 * It must be closed before its transaction ends.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 * @param[out] cursor Address where the new #MDB_cursor handle will be stored
@@ -1067,8 +1086,9 @@ void mdb_cursor_close(MDB_cursor *cursor);
 
 	/** @brief Renew a cursor handle.
 	 *
-	 * Cursors are associated with a specific transaction and database and
-	 * may not span threads. Cursors that are only used in read-only
+	 * A cursor is associated with a specific transaction and database.
+	 * It must be closed before its transaction ends.
+	 * Cursors that are only used in read-only
 	 * transactions may be re-used, to avoid unnecessary malloc/free overhead.
 	 * The cursor may be associated with a new read-only transaction, and
 	 * referencing the same database handle as it was created with.

@@ -406,6 +406,8 @@ typedef uint16_t	 indx_t;
  *	slot's address is saved in thread-specific data so that subsequent read
  *	transactions started by the same thread need no further locking to proceed.
  *
+ *	If #MDB_NOTLS is set, the slot address is not saved in thread-specific data.
+ *
  *	No reader table is used if the database is on a read-only filesystem.
  *
  *	Since the database uses multi-version concurrency control, readers don't
@@ -1792,7 +1794,8 @@ mdb_txn_renew0(MDB_txn *txn)
 			txn->mt_txnid = env->me_metas[i]->mm_txnid;
 			txn->mt_u.reader = NULL;
 		} else {
-			MDB_reader *r = pthread_getspecific(env->me_txkey);
+			MDB_reader *r = (env->me_flags & MDB_NOTLS) ? txn->mt_u.reader :
+				pthread_getspecific(env->me_txkey);
 			if (r) {
 				if (r->mr_pid != env->me_pid || r->mr_txnid != (txnid_t)-1)
 					return MDB_BAD_RSLOT;
@@ -1816,7 +1819,8 @@ mdb_txn_renew0(MDB_txn *txn)
 				env->me_numreaders = env->me_txns->mti_numreaders;
 				UNLOCK_MUTEX_R(env);
 				r = &env->me_txns->mti_readers[i];
-				if ((rc = pthread_setspecific(env->me_txkey, r)) != 0) {
+				if (!(env->me_flags & MDB_NOTLS) &&
+					(rc = pthread_setspecific(env->me_txkey, r)) != 0) {
 					env->me_txns->mti_readers[i].mr_pid = 0;
 					return rc;
 				}
@@ -2006,7 +2010,8 @@ mdb_txn_reset0(MDB_txn *txn)
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
 		if (txn->mt_u.reader) {
 			txn->mt_u.reader->mr_txnid = (txnid_t)-1;
-			txn->mt_u.reader = NULL; /* do not touch mr_txnid again */
+			if (!(env->me_flags & MDB_NOTLS))
+				txn->mt_u.reader = NULL; /* txn does not own reader */
 		}
 		txn->mt_numdbs = 0;	/* mark txn as reset, do not close DBs again */
 	} else {
@@ -2091,6 +2096,10 @@ mdb_txn_abort(MDB_txn *txn)
 		mdb_txn_abort(txn->mt_child);
 
 	mdb_txn_reset0(txn);
+	/* Free reader slot tied to this txn (if MDB_NOTLS && writable FS) */
+	if ((txn->mt_flags & MDB_TXN_RDONLY) && txn->mt_u.reader)
+		txn->mt_u.reader->mr_pid = 0;
+
 	free(txn);
 }
 
@@ -3240,7 +3249,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 			fcntl(env->me_lfd, F_SETFD, fdflags);
 #endif
 
-	{
+	if (!(env->me_flags & MDB_NOTLS)) {
 		rc = pthread_key_create(&env->me_txkey, mdb_env_reader_dest);
 		if (rc)
 			goto fail;
@@ -3418,7 +3427,7 @@ fail:
 	 *	environment and re-opening it with the new flags.
 	 */
 #define	CHANGEABLE	(MDB_NOSYNC|MDB_NOMETASYNC|MDB_MAPASYNC)
-#define	CHANGELESS	(MDB_FIXEDMAP|MDB_NOSUBDIR|MDB_RDONLY|MDB_WRITEMAP)
+#define	CHANGELESS	(MDB_FIXEDMAP|MDB_NOSUBDIR|MDB_RDONLY|MDB_WRITEMAP|MDB_NOTLS)
 
 int
 mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode)
