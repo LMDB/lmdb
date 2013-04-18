@@ -1980,6 +1980,7 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 }
 
 /** Common code for #mdb_txn_reset() and #mdb_txn_abort().
+ * May be called twice for readonly txns: First reset it, then abort.
  * @param[in] txn the transaction handle to reset
  */
 static void
@@ -2001,7 +2002,9 @@ mdb_txn_reset0(MDB_txn *txn)
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
 		if (txn->mt_u.reader) {
 			txn->mt_u.reader->mr_txnid = (txnid_t)-1;
+			txn->mt_u.reader = NULL; /* do not touch mr_txnid again */
 		}
+		txn->mt_numdbs = 0;	/* mark txn as reset, do not close DBs again */
 	} else {
 		MDB_page *dp;
 
