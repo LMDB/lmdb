@@ -711,7 +711,7 @@ int  mdb_env_set_maxdbs(MDB_env *env, MDB_dbi dbs);
 	 * errors are:
 	 * <ul>
 	 *	<li>#MDB_PANIC - a fatal error occurred earlier and the environment
--	 *		must be shut down.
+	 *		must be shut down.
 	 *	<li>#MDB_MAP_RESIZED - another process wrote data beyond this MDB_env's
 	 *		mapsize and the environment must be shut down.
 	 *	<li>#MDB_READERS_FULL - a read-only transaction was requested and
