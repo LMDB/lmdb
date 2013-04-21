@@ -4705,19 +4705,19 @@ mdb_cursor_last(MDB_cursor *mc, MDB_val *key, MDB_val *data)
 
 	if (!(mc->mc_flags & C_EOF)) {
 
-	if (!(mc->mc_flags & C_INITIALIZED) || mc->mc_top) {
-		MDB_val	lkey;
+		if (!(mc->mc_flags & C_INITIALIZED) || mc->mc_top) {
+			MDB_val	lkey;
 
-		lkey.mv_size = MDB_MAXKEYSIZE+1;
-		lkey.mv_data = NULL;
-		rc = mdb_page_search(mc, &lkey, 0);
-		if (rc != MDB_SUCCESS)
-			return rc;
+			lkey.mv_size = MDB_MAXKEYSIZE+1;
+			lkey.mv_data = NULL;
+			rc = mdb_page_search(mc, &lkey, 0);
+			if (rc != MDB_SUCCESS)
+				return rc;
+		}
+		assert(IS_LEAF(mc->mc_pg[mc->mc_top]));
+
 	}
-	assert(IS_LEAF(mc->mc_pg[mc->mc_top]));
-
 	mc->mc_ki[mc->mc_top] = NUMKEYS(mc->mc_pg[mc->mc_top]) - 1;
-	}
 	mc->mc_flags |= C_INITIALIZED|C_EOF;
 	leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
 
