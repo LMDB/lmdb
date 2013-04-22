@@ -5840,13 +5840,19 @@ mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **ret)
 int
 mdb_cursor_renew(MDB_txn *txn, MDB_cursor *mc)
 {
+	unsigned flags;
+
 	if (txn == NULL || mc == NULL || mc->mc_dbi >= txn->mt_numdbs)
 		return EINVAL;
 
 	if (txn->mt_cursors)
 		return EINVAL;
 
+	flags = mc->mc_flags;
+
 	mdb_cursor_init(mc, txn, mc->mc_dbi, mc->mc_xcursor);
+
+	mc->mc_flags |= (flags & C_ALLOCD);
 	return MDB_SUCCESS;
 }
 
