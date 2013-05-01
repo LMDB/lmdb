@@ -4128,6 +4128,28 @@ mdb_page_search_root(MDB_cursor *mc, MDB_val *key, int modify)
 	return MDB_SUCCESS;
 }
 
+/** Search for the lowest key under the current branch page.
+ * This just bypasses a NUMKEYS check in the current page
+ * before calling mdb_page_search_root(), because the callers
+ * are all in situations where the current page is known to
+ * be underfilled.
+ */
+static int
+mdb_page_search_lowest(MDB_cursor *mc)
+{
+	MDB_page	*mp = mc->mc_pg[mc->mc_top];
+	MDB_node	*node = NODEPTR(mp, 0);
+	int rc;
+
+	if ((rc = mdb_page_get(mc->mc_txn, NODEPGNO(node), &mp)))
+		return rc;
+
+	mc->mc_ki[mc->mc_top] = 0;
+	if ((rc = mdb_cursor_push(mc, mp)))
+		return rc;
+	return mdb_page_search_root(mc, NULL, 0);
+}
+
 /** Search for the page a given key should be in.
  * Pushes parent pages on the cursor stack. This function just sets up
  * the search; it finds the root page for \b mc's database and sets this
@@ -6024,7 +6046,7 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 			unsigned int snum = csrc->mc_snum;
 			MDB_node *s2;
 			/* must find the lowest key below src */
-			mdb_page_search_root(csrc, NULL, 0);
+			mdb_page_search_lowest(csrc);
 			if (IS_LEAF2(csrc->mc_pg[csrc->mc_top])) {
 				key.mv_size = csrc->mc_db->md_pad;
 				key.mv_data = LEAF2KEY(csrc->mc_pg[csrc->mc_top], 0, key.mv_size);
@@ -6047,7 +6069,7 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 		MDB_node *s2;
 		MDB_val bkey;
 		/* must find the lowest key below dst */
-		mdb_page_search_root(cdst, NULL, 0);
+		mdb_page_search_lowest(cdst);
 		if (IS_LEAF2(cdst->mc_pg[cdst->mc_top])) {
 			bkey.mv_size = cdst->mc_db->md_pad;
 			bkey.mv_data = LEAF2KEY(cdst->mc_pg[cdst->mc_top], 0, bkey.mv_size);
@@ -6211,7 +6233,7 @@ mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst)
 				unsigned int snum = csrc->mc_snum;
 				MDB_node *s2;
 				/* must find the lowest key below src */
-				mdb_page_search_root(csrc, NULL, 0);
+				mdb_page_search_lowest(csrc);
 				if (IS_LEAF2(csrc->mc_pg[csrc->mc_top])) {
 					key.mv_size = csrc->mc_db->md_pad;
 					key.mv_data = LEAF2KEY(csrc->mc_pg[csrc->mc_top], 0, key.mv_size);
