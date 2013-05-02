@@ -1398,6 +1398,7 @@ none:
 
 				mdb_cursor_init(&m2, txn, FREE_DBI, NULL);
 				do {
+#ifdef MDB_PARANOID	/* Seems like we can ignore this now */
 					/* If on freelist, don't try to read more. If what we have
 					 * right now isn't enough just use new pages.
 					 * TODO: get all of this working. Many circular dependencies...
@@ -1406,6 +1407,7 @@ none:
 						retry = 0;
 						readit = 0;
 					}
+#endif
 					if (readit) {
 						MDB_val key, data;
 						pgno_t *idl, *mop2;
