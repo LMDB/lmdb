@@ -1782,7 +1782,7 @@ mdb_txn_renew0(MDB_txn *txn)
 	MDB_env *env = txn->mt_env;
 	unsigned int i;
 	uint16_t x;
-	int rc;
+	int rc, new_notls = 0;
 
 	/* Setup db info */
 	txn->mt_numdbs = env->me_numdbs;
@@ -1819,9 +1819,9 @@ mdb_txn_renew0(MDB_txn *txn)
 				env->me_numreaders = env->me_txns->mti_numreaders;
 				UNLOCK_MUTEX_R(env);
 				r = &env->me_txns->mti_readers[i];
-				if (!(env->me_flags & MDB_NOTLS) &&
-					(rc = pthread_setspecific(env->me_txkey, r)) != 0) {
-					env->me_txns->mti_readers[i].mr_pid = 0;
+				new_notls = (env->me_flags & MDB_NOTLS);
+				if (!new_notls && (rc=pthread_setspecific(env->me_txkey, r))) {
+					r->mr_pid = 0;
 					return rc;
 				}
 			}
@@ -1860,6 +1860,10 @@ mdb_txn_renew0(MDB_txn *txn)
 
 	if (env->me_maxpg < txn->mt_next_pgno) {
 		mdb_txn_reset0(txn);
+		if (new_notls) {
+			txn->mt_u.reader->mr_pid = 0;
+			txn->mt_u.reader = NULL;
+		}
 		return MDB_MAP_RESIZED;
 	}
 
@@ -3745,9 +3749,9 @@ mdb_env_copy(MDB_env *env, const char *path)
 		ptr += wres;
 	}
 #endif
-	mdb_txn_abort(txn);
 
 leave:
+	mdb_txn_abort(txn);
 	if (newfd != INVALID_HANDLE_VALUE)
 		close(newfd);
 
