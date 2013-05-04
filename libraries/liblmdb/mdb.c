@@ -1206,9 +1206,8 @@ static void mdb_audit(MDB_txn *txn)
 
 	count = 0;
 	for (i = 0; i<txn->mt_numdbs; i++) {
-		MDB_xcursor mx, *mxp;
-		mxp = (txn->mt_dbs[i].md_flags & MDB_DUPSORT) ? &mx : NULL;
-		mdb_cursor_init(&mc, txn, i, mxp);
+		MDB_xcursor mx;
+		mdb_cursor_init(&mc, txn, i, &mx);
 		if (txn->mt_dbs[i].md_root == P_INVALID)
 			continue;
 		count += txn->mt_dbs[i].md_branch_pages +
@@ -1707,7 +1706,7 @@ mdb_cursor_shadow(MDB_txn *src, MDB_txn *dst)
 				mc->mc_dbflag = &dst->mt_dbflags[i];
 				mc->mc_snum = m2->mc_snum;
 				mc->mc_top = m2->mc_top;
-				mc->mc_flags = m2->mc_flags | C_SHADOW;
+				mc->mc_flags = m2->mc_flags | (C_SHADOW|C_ALLOCD);
 				for (j=0; j<mc->mc_snum; j++) {
 					mc->mc_pg[j] = m2->mc_pg[j];
 					mc->mc_ki[j] = m2->mc_ki[j];
@@ -4933,8 +4932,7 @@ mdb_cursor_touch(MDB_cursor *mc)
 	if (mc->mc_dbi > MAIN_DBI && !(*mc->mc_dbflag & DB_DIRTY)) {
 		MDB_cursor mc2;
 		MDB_xcursor mcx;
-		mdb_cursor_init(&mc2, mc->mc_txn, MAIN_DBI,
-			mc->mc_txn->mt_dbs[MAIN_DBI].md_flags & MDB_DUPSORT ? &mcx : NULL);
+		mdb_cursor_init(&mc2, mc->mc_txn, MAIN_DBI, &mcx);
 		rc = mdb_page_search(&mc2, &mc->mc_dbx->md_name, MDB_PS_MODIFY);
 		if (rc)
 			 return rc;
@@ -5838,7 +5836,6 @@ int
 mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **ret)
 {
 	MDB_cursor	*mc;
-	MDB_xcursor	*mx = NULL;
 	size_t size = sizeof(MDB_cursor);
 
 	if (txn == NULL || ret == NULL || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
@@ -5852,10 +5849,7 @@ mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **ret)
 		size += sizeof(MDB_xcursor);
 
 	if ((mc = malloc(size)) != NULL) {
-		if (txn->mt_dbs[dbi].md_flags & MDB_DUPSORT) {
-			mx = (MDB_xcursor *)(mc + 1);
-		}
-		mdb_cursor_init(mc, txn, dbi, mx);
+		mdb_cursor_init(mc, txn, dbi, (MDB_xcursor *)(mc + 1));
 		if (txn->mt_cursors) {
 			mc->mc_next = txn->mt_cursors[dbi];
 			txn->mt_cursors[dbi] = mc;
