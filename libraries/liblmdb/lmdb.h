@@ -206,6 +206,9 @@ typedef struct MDB_cursor MDB_cursor;
  * #MDB_MAXKEYSIZE inclusive. This currently defaults to 511. The
  * same applies to data sizes in databases with the #MDB_DUPSORT flag.
  * Other data items can in theory be from 0 to 0xffffffff bytes long.
+ *
+ * Values returned from the database are valid only until a subsequent
+ * update operation, or the end of the transaction.
  */
 typedef struct MDB_val {
 	size_t		 mv_size;	/**< size of the data item */
@@ -691,8 +694,7 @@ int  mdb_env_set_maxdbs(MDB_env *env, MDB_dbi dbs);
 	 * @note A transaction and its cursors must only be used by a single
 	 * thread, and a thread may only have a single transaction at a time.
 	 * If #MDB_NOTLS is in use, this does not apply to read-only transactions.
-	 * @note Cursors may not span transactions; each cursor must be opened and closed
-	 * within a single transaction.
+	 * @note Cursors may not span transactions.
 	 * @param[in] env An environment handle returned by #mdb_env_create()
 	 * @param[in] parent If this parameter is non-NULL, the new transaction
 	 * will be a nested transaction, with the transaction indicated by \b parent
@@ -723,8 +725,10 @@ int  mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **
 
 	/** @brief Commit all the operations of a transaction into the database.
 	 *
-	 * All cursors opened within the transaction will be closed by this call. The cursors
-	 * and transaction handle will be freed and must not be used again after this call.
+	 * The transaction handle is freed. It and its cursors must not be used
+	 * again after this call, except with #mdb_cursor_renew().
+	 * @note Earlier documentation incorrectly said all cursors would be freed.
+	 * Only write-transactions free cursors.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @return A non-zero error value on failure and 0 on success. Some possible
 	 * errors are:
@@ -739,8 +743,10 @@ int  mdb_txn_commit(MDB_txn *txn);
 
 	/** @brief Abandon all the operations of the transaction instead of saving them.
 	 *
-	 * All cursors opened within the transaction will be closed by this call. The cursors
-	 * and transaction handle will be freed and must not be used again after this call.
+	 * The transaction handle is freed. It and its cursors must not be used
+	 * again after this call, except with #mdb_cursor_renew().
+	 * @note Earlier documentation incorrectly said all cursors would be freed.
+	 * Only write-transactions free cursors.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 */
 void mdb_txn_abort(MDB_txn *txn);
@@ -754,8 +760,8 @@ void mdb_txn_abort(MDB_txn *txn);
 	 * lock is released, but the table slot stays tied to its thread or
 	 * #MDB_txn. Use mdb_txn_abort() to discard a reset handle, and to free
 	 * its lock table slot if MDB_NOTLS is in use.
-	 * All cursors opened within the transaction must be closed before the transaction
-	 * is reset.
+	 * Cursors opened within the transaction must not be used
+	 * again after this call, except with #mdb_cursor_renew().
 	 * Reader locks generally don't interfere with writers, but they keep old
 	 * versions of database pages allocated. Thus they prevent the old pages
 	 * from being reused when writers commit new data, and so under heavy load
@@ -787,6 +793,8 @@ int  mdb_txn_renew(MDB_txn *txn);
 
 	/** @brief Open a database in the environment.
 	 *
+	 * A database handle denotes the name and parameters of a database,
+	 * independently of whether such a database exists.
 	 * The database handle may be discarded by calling #mdb_dbi_close().
 	 * The old database handle is returned if the database was already open.
 	 * The handle must only be closed once.
@@ -978,6 +986,8 @@ int  mdb_set_relctx(MDB_txn *txn, MDB_dbi dbi, void *ctx);
 	 * database. The caller need not dispose of the memory, and may not
 	 * modify it in any way. For values returned in a read-only transaction
 	 * any modification attempts will cause a SIGSEGV.
+	 * @note Values returned from the database are valid only until a
+	 * subsequent update operation, or the end of the transaction.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 * @param[in] key The key to search for in the database
@@ -1017,7 +1027,8 @@ int  mdb_get(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data);
 	 *		parameter will be set to point to the existing item.
 	 *	<li>#MDB_RESERVE - reserve space for data of the given size, but
 	 *		don't copy the given data. Instead, return a pointer to the
-	 *		reserved space, which the caller can fill in later. This saves
+	 *		reserved space, which the caller can fill in later - before
+	 *		the next update operation or the transaction ends. This saves
 	 *		an extra memcpy if the data is being generated later.
 	 *	<li>#MDB_APPEND - append the given key/data pair to the end of the
 	 *		database. No key comparisons are performed. This option allows
@@ -1065,7 +1076,16 @@ int  mdb_del(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data);
 	/** @brief Create a cursor handle.
 	 *
 	 * A cursor is associated with a specific transaction and database.
-	 * It must be closed before its transaction ends.
+	 * A cursor cannot be used when its database handle is closed.  Nor
+	 * when its transaction has ended, except with #mdb_cursor_renew().
+	 * It can be discarded with #mdb_cursor_close().
+	 * A cursor in a write-transaction can be closed before its transaction
+	 * ends, and will otherwise be closed when its transaction ends.
+	 * A cursor in a read-only transaction must be closed explicitly, before
+	 * or after its transaction ends. It can be reused with
+	 * #mdb_cursor_renew() before finally closing it.
+	 * @note Earlier documentation said that cursors in every transaction
+	 * were closed when the transaction committed or aborted.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 * @param[out] cursor Address where the new #MDB_cursor handle will be stored
@@ -1080,6 +1100,7 @@ int  mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **cursor);
 	/** @brief Close a cursor handle.
 	 *
 	 * The cursor handle will be freed and must not be used again after this call.
+	 * Its transaction must still be live if it is a write-transaction.
 	 * @param[in] cursor A cursor handle returned by #mdb_cursor_open()
 	 */
 void mdb_cursor_close(MDB_cursor *cursor);
@@ -1087,11 +1108,11 @@ void mdb_cursor_close(MDB_cursor *cursor);
 	/** @brief Renew a cursor handle.
 	 *
 	 * A cursor is associated with a specific transaction and database.
-	 * It must be closed before its transaction ends.
 	 * Cursors that are only used in read-only
 	 * transactions may be re-used, to avoid unnecessary malloc/free overhead.
 	 * The cursor may be associated with a new read-only transaction, and
 	 * referencing the same database handle as it was created with.
+	 * This may be done whether the previous transaction is live or dead.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] cursor A cursor handle returned by #mdb_cursor_open()
 	 * @return A non-zero error value on failure and 0 on success. Some possible
@@ -1121,6 +1142,7 @@ MDB_dbi mdb_cursor_dbi(MDB_cursor *cursor);
 	 * case of the #MDB_SET option, in which the \b key object is unchanged), and
 	 * the address and length of the data are returned in the object to which \b data
 	 * refers.
+	 * See #mdb_get() for restrictions on using the output values.
 	 * @param[in] cursor A cursor handle returned by #mdb_cursor_open()
 	 * @param[in,out] key The key for a retrieved item
 	 * @param[in,out] data The data of a retrieved item
