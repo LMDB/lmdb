@@ -1871,7 +1871,7 @@ mdb_txn_renew(MDB_txn *txn)
 {
 	int rc;
 
-	if (!txn || txn->mt_numdbs || !(txn->mt_flags & MDB_TXN_RDONLY))
+	if (!txn || txn->mt_dbxs)	/* A reset txn has mt_dbxs==NULL */
 		return EINVAL;
 
 	if (txn->mt_env->me_flags & MDB_FATAL_ERROR) {
@@ -2014,7 +2014,8 @@ mdb_txn_reset0(MDB_txn *txn)
 			if (!(env->me_flags & MDB_NOTLS))
 				txn->mt_u.reader = NULL; /* txn does not own reader */
 		}
-		txn->mt_numdbs = 0;	/* mark txn as reset, do not close DBs again */
+		txn->mt_numdbs = 0;		/* close nothing if called again */
+		txn->mt_dbxs = NULL;	/* mark txn as reset */
 	} else {
 		MDB_page *dp;
 
