@@ -2003,6 +2003,7 @@ mdb_txn_reset0(MDB_txn *txn)
 			char *ptr = env->me_dbxs[i].md_name.mv_data;
 			env->me_dbxs[i].md_name.mv_data = NULL;
 			env->me_dbxs[i].md_name.mv_size = 0;
+			env->me_dbflags[i] = 0;
 			free(ptr);
 		}
 	}
@@ -3761,7 +3762,7 @@ mdb_env_close(MDB_env *env)
 	if (env == NULL)
 		return;
 
-	for (i = env->me_numdbs; --i > MAIN_DBI; )
+	for (i = env->me_maxdbs; --i > MAIN_DBI; )
 		free(env->me_dbxs[i].md_name.mv_data);
 
 	VGMEMP_DESTROY(env);
@@ -7226,6 +7227,7 @@ void mdb_dbi_close(MDB_env *env, MDB_dbi dbi)
 	ptr = env->me_dbxs[dbi].md_name.mv_data;
 	env->me_dbxs[dbi].md_name.mv_data = NULL;
 	env->me_dbxs[dbi].md_name.mv_size = 0;
+	env->me_dbflags[dbi] = 0;
 	free(ptr);
 }
 
