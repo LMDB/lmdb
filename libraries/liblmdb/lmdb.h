@@ -1252,7 +1252,7 @@ int  mdb_cmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b);
 	/** @brief Compare two data items according to a particular database.
 	 *
 	 * This returns a comparison as if the two items were data items of
-	 * a sorted duplicates #MDB_DUPSORT database.
+	 * the specified database. The database must have the #MDB_DUPSORT flag.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 * @param[in] a The first item to compare
