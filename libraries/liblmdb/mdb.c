@@ -1014,6 +1014,9 @@ static int	mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata,
 static int  mdb_env_read_header(MDB_env *env, MDB_meta *meta);
 static int  mdb_env_pick_meta(const MDB_env *env);
 static int  mdb_env_write_meta(MDB_txn *txn);
+#if !(defined(_WIN32) || defined(MDB_USE_POSIX_SEM)) /* Drop unused excl arg */
+# define mdb_env_close0(env, excl) mdb_env_close1(env)
+#endif
 static void mdb_env_close0(MDB_env *env, int excl);
 
 static MDB_node *mdb_node_search(MDB_cursor *mc, MDB_val *key, int *exactp);
@@ -1136,7 +1139,7 @@ mdb_dkey(MDB_val *key, char *buf)
 }
 
 /** Display all the keys in the page. */
-static void
+void
 mdb_page_list(MDB_page *mp)
 {
 	MDB_node *node;
