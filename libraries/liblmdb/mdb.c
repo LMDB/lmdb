@@ -1404,7 +1404,7 @@ again:
 					txn->mt_env->me_pglast = last;
 					goto again;
 				}
-				mop = malloc(MDB_IDL_SIZEOF(idl));
+				mop = mdb_midl_alloc(idl[0]);
 				if (!mop)
 					return ENOMEM;
 				txn->mt_env->me_pglast = last;
@@ -1474,7 +1474,7 @@ none:
 						if (oldest <= last)
 							break;
 						idl = (MDB_ID *) data.mv_data;
-						mop2 = malloc(MDB_IDL_SIZEOF(idl) + MDB_IDL_SIZEOF(mop));
+						mop2 = mdb_midl_alloc(idl[0] + mop[0]);
 						if (!mop2)
 							return ENOMEM;
 						/* merge in sorted order */
@@ -1487,7 +1487,7 @@ none:
 								mop2[k--] = mop[j--];
 						}
 						txn->mt_env->me_pglast = last;
-						free(txn->mt_env->me_pgfree);
+						mdb_midl_free(txn->mt_env->me_pgfree);
 						txn->mt_env->me_pghead = txn->mt_env->me_pgfree = mop2;
 						mop = mop2;
 						/* Keep trying to read until we have enough */
@@ -1521,7 +1521,7 @@ none:
 				mop[0]--;
 			}
 			if (MDB_IDL_IS_ZERO(mop)) {
-				free(txn->mt_env->me_pgfree);
+				mdb_midl_free(txn->mt_env->me_pgfree);
 				txn->mt_env->me_pghead = txn->mt_env->me_pgfree = NULL;
 			}
 		}
@@ -1990,7 +1990,7 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 		ntxn->mnt_pgstate = env->me_pgstate; /* save parent me_pghead & co */
 		if (env->me_pghead) {
 			size = MDB_IDL_SIZEOF(env->me_pghead);
-			env->me_pghead = malloc(size);
+			env->me_pghead = mdb_midl_alloc(env->me_pghead[0]);
 			if (env->me_pghead)
 				memcpy(env->me_pghead, ntxn->mnt_pgstate.mf_pghead, size);
 			else
@@ -2068,7 +2068,7 @@ mdb_txn_reset0(MDB_txn *txn)
 		if (!(env->me_flags & MDB_WRITEMAP)) {
 			mdb_dlist_free(txn);
 		}
-		free(env->me_pgfree);
+		mdb_midl_free(env->me_pgfree);
 
 		if (txn->mt_parent) {
 			txn->mt_parent->mt_child = NULL;
@@ -2403,7 +2403,7 @@ free2:
 	if (freecnt != txn->mt_free_pgs[0])
 		goto free2;
 
-	free(env->me_pgfree);
+	mdb_midl_free(env->me_pgfree);
 	env->me_pghead = env->me_pgfree = NULL;
 
 	if (!MDB_IDL_IS_ZERO(txn->mt_free_pgs)) {
@@ -4266,6 +4266,53 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int flags)
 	return mdb_page_search_root(mc, key, flags);
 }
 
+static int
+mdb_ovpage_free(MDB_cursor *mc, MDB_page *mp)
+{
+	pgno_t pg = mp->mp_pgno;
+	unsigned i, ovpages = mp->mp_pages;
+	int rc;
+
+	DPRINTF("free ov page %zu (%d)", pg, ovpages);
+	mc->mc_db->md_overflow_pages -= ovpages;
+	/* If the page is dirty we just acquired it, so we should
+	 * give it back to our current free list, if any.
+	 * Otherwise put it onto the list of pages we freed in this txn.
+	 */
+	if ((mp->mp_flags & P_DIRTY) && mc->mc_txn->mt_env->me_pghead) {
+		unsigned j, x;
+		pgno_t *mop = mc->mc_txn->mt_env->me_pghead;
+		/* Remove from dirty list */
+		x = mdb_mid2l_search(mc->mc_txn->mt_u.dirty_list, pg);
+		for (; x < mc->mc_txn->mt_u.dirty_list[0].mid; x++)
+			mc->mc_txn->mt_u.dirty_list[x] = mc->mc_txn->mt_u.dirty_list[x+1];
+		mc->mc_txn->mt_u.dirty_list[0].mid--;
+		/* Make room to insert pg */
+		j = mop[0] + ovpages;
+		if (j > mop[-1]) {
+			rc = mdb_midl_grow(&mop, ovpages);
+			if (rc)
+				return rc;
+			mc->mc_txn->mt_env->me_pghead = mc->mc_txn->mt_env->me_pgfree = mop;
+		}
+		for (i = mop[0]; i>0; i--) {
+			if (mop[i] < pg)
+				mop[j--] = mop[i];
+			else
+				break;
+		}
+		while (j>i)
+			mop[j--] = pg++;
+		mop[0] += ovpages;
+	} else {
+		for (i=0; i<ovpages; i++) {
+			mdb_midl_append(&mc->mc_txn->mt_free_pgs, pg);
+			pg++;
+		}
+	}
+	return 0;
+}
+
 /** Return the data associated with a given node.
  * @param[in] txn The transaction for this operation.
  * @param[in] leaf The node being read.
@@ -5244,14 +5291,7 @@ current:
 					memcpy(METADATA(omp), data->mv_data, data->mv_size);
 				goto done;
 			} else {
-				/* no, free ovpages */
-				int i;
-				mc->mc_db->md_overflow_pages -= ovpages;
-				for (i=0; i<ovpages; i++) {
-					DPRINTF("freed ov page %zu", pg);
-					mdb_midl_append(&mc->mc_txn->mt_free_pgs, pg);
-					pg++;
-				}
+				mdb_ovpage_free(mc, omp);
 			}
 		} else if (NODEDSZ(leaf) == data->mv_size) {
 			/* same size, just replace it. Note that we could
@@ -6559,7 +6599,6 @@ mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
 
 	/* add overflow pages to free list */
 	if (!IS_LEAF2(mc->mc_pg[mc->mc_top]) && F_ISSET(leaf->mn_flags, F_BIGDATA)) {
-		int i, ovpages;
 		MDB_page *omp;
 		pgno_t pg;
 
@@ -6567,13 +6606,7 @@ mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
 		if ((rc = mdb_page_get(mc->mc_txn, pg, &omp, NULL)) != 0)
 			return rc;
 		assert(IS_OVERFLOW(omp));
-		ovpages = omp->mp_pages;
-		mc->mc_db->md_overflow_pages -= ovpages;
-		for (i=0; i<ovpages; i++) {
-			DPRINTF("freed ov page %zu", pg);
-			mdb_midl_append(&mc->mc_txn->mt_free_pgs, pg);
-			pg++;
-		}
+		mdb_ovpage_free(mc, omp);
 	}
 	mdb_node_del(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], mc->mc_db->md_pad);
 	mc->mc_db->md_entries--;
