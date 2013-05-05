@@ -1939,14 +1939,11 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 
 	if (parent) {
 		unsigned int i;
-		txn->mt_free_pgs = mdb_midl_alloc();
-		if (!txn->mt_free_pgs) {
-			free(txn);
-			return ENOMEM;
-		}
 		txn->mt_u.dirty_list = malloc(sizeof(MDB_ID2)*MDB_IDL_UM_SIZE);
-		if (!txn->mt_u.dirty_list) {
-			free(txn->mt_free_pgs);
+		if (!txn->mt_u.dirty_list ||
+			!(txn->mt_free_pgs = mdb_midl_alloc()))
+		{
+			free(txn->mt_u.dirty_list);
 			free(txn);
 			return ENOMEM;
 		}
@@ -2138,8 +2135,12 @@ mdb_txn_commit(MDB_txn *txn)
 	assert(txn->mt_env != NULL);
 
 	if (txn->mt_child) {
-		mdb_txn_commit(txn->mt_child);
+		rc = mdb_txn_commit(txn->mt_child);
 		txn->mt_child = NULL;
+		if (rc) {
+			mdb_txn_abort(txn);
+			return rc;
+		}
 	}
 
 	env = txn->mt_env;
