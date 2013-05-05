@@ -3548,7 +3548,7 @@ leave:
 	return rc;
 }
 
-/** Destroy resources from mdb_env_open() and clear our readers */
+/** Destroy resources from mdb_env_open(), clear our readers & DBIs */
 static void
 mdb_env_close0(MDB_env *env, int excl)
 {
@@ -3556,6 +3556,10 @@ mdb_env_close0(MDB_env *env, int excl)
 
 	if (!(env->me_flags & MDB_ENV_ACTIVE))
 		return;
+
+	/* Doing this here since me_dbxs may not exist during mdb_env_close */
+	for (i = env->me_maxdbs; --i > MAIN_DBI; )
+		free(env->me_dbxs[i].md_name.mv_data);
 
 	free(env->me_dbflags);
 	free(env->me_dbxs);
@@ -3764,13 +3768,9 @@ void
 mdb_env_close(MDB_env *env)
 {
 	MDB_page *dp;
-	int i;
 
 	if (env == NULL)
 		return;
-
-	for (i = env->me_maxdbs; --i > MAIN_DBI; )
-		free(env->me_dbxs[i].md_name.mv_data);
 
 	VGMEMP_DESTROY(env);
 	while ((dp = env->me_dpages) != NULL) {
