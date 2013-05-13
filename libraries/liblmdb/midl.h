@@ -135,7 +135,7 @@ int mdb_midl_shrink(MDB_IDL *idp);
 	/** Grow an IDL.
 	 * Add room for num additional elements.
 	 * @param[in,out] idp	Address of the IDL to grow.
-	 * @param[i] num	Number of elements to add.
+	 * @param[in] num	Number of elements to add.
 	 * @return	0 on success, -1 on failure.
 	 */
 int mdb_midl_grow(MDB_IDL *idp, int num);

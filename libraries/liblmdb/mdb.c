@@ -853,7 +853,7 @@ struct MDB_txn {
 #define MDB_TXN_DIRTY		0x04		/**< must write, even if dirty list is empty */
 /** @} */
 	unsigned int	mt_flags;		/**< @ref mdb_txn */
-	/** dirty_list maxsize - #allocated pages including in parent txns */
+	/** dirty_list maxsize - # of allocated pages allowed, including in parent txns */
 	unsigned int	mt_dirty_room;
 	/** Tracks which of the two meta pages was used at the start
 	 * 	of this transaction.
@@ -1268,6 +1268,10 @@ mdb_page_malloc(MDB_cursor *mc) {
 	return ret;
 }
 
+/** Free a single page.
+ * Saves single pages to a list, for future reuse.
+ * (This is not used for multi-page overflow pages.)
+ */
 static void
 mdb_page_free(MDB_env *env, MDB_page *mp)
 {
@@ -1549,6 +1553,7 @@ none:
 /** Copy a page: avoid copying unused portions of the page.
  * @param[in] dst page to copy into
  * @param[in] src page to copy from
+ * @param[in] psize size of a page
  */
 static void
 mdb_page_copy(MDB_page *dst, MDB_page *src, unsigned int psize)
@@ -4068,8 +4073,7 @@ done:
  * @param[in,out] mc the cursor for this operation.
  * @param[in] key the key to search for. If NULL, search for the lowest
  * page. (This is used by #mdb_cursor_first().)
- * @param[in] flags If MDB_PS_MODIFY set, visited pages are updated with new page numbers.
- *   If MDB_PS_ROOTONLY set, just fetch root node, no further lookups.
+ * @param[in] modify If true, visited pages are updated with new page numbers.
  * @return 0 on success, non-zero on failure.
  */
 static int
@@ -4169,7 +4173,8 @@ mdb_page_search_lowest(MDB_cursor *mc)
  * @param[in,out] mc the cursor for this operation.
  * @param[in] key the key to search for. If NULL, search for the lowest
  * page. (This is used by #mdb_cursor_first().)
- * @param[in] modify If true, visited pages are updated with new page numbers.
+ * @param[in] flags If MDB_PS_MODIFY set, visited pages are updated with new page numbers.
+ *   If MDB_PS_ROOTONLY set, just fetch root node, no further lookups.
  * @return 0 on success, non-zero on failure.
  */
 static int
@@ -5940,8 +5945,7 @@ mdb_cursor_dbi(MDB_cursor *mc)
 }
 
 /** Replace the key for a node with a new key.
- * @param[in] mp The page containing the node to operate on.
- * @param[in] indx The index of the node to operate on.
+ * @param[in] mc Cursor pointing to the node to operate on.
  * @param[in] key The new key to use.
  * @return 0 on success, non-zero on failure.
  */
