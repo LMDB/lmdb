@@ -6933,6 +6933,17 @@ newsep:
 		}
 	} else {
 		mc->mc_ki[ptop]++;
+		/* Make sure mc_ki is still valid.
+		 */
+		if (mn.mc_pg[ptop] != mc->mc_pg[ptop] &&
+		    mc->mc_ki[ptop] >= NUMKEYS(mc->mc_pg[ptop])) {
+			for (i=0; i<ptop; i++) {
+				mc->mc_pg[i] = mn.mc_pg[i];
+				mc->mc_ki[i] = mn.mc_ki[i];
+			}
+			mc->mc_pg[ptop] = mn.mc_pg[ptop];
+			mc->mc_ki[ptop] = mn.mc_ki[ptop] - 1;
+		}
 	}
 
 	/* return tmp page to freelist */
