@@ -5199,9 +5199,10 @@ current:
 			/* Is the ov page writable and large enough? */
 			if ((omp->mp_flags & P_DIRTY) && ovpages >= dpages) {
 				/* yes, overwrite it. Note in this case we don't
-				 * bother to try shrinking the node if the new data
+				 * bother to try shrinking the page if the new data
 				 * is smaller than the overflow threshold.
 				 */
+				SETDSZ(leaf, data->mv_size);
 				if (F_ISSET(flags, MDB_RESERVE))
 					data->mv_data = METADATA(omp);
 				else
