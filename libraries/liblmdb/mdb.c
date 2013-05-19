@@ -5192,10 +5192,11 @@ current:
 			pgno_t pg;
 			int ovpages, dpages;
 
-			ovpages = OVPAGES(NODEDSZ(leaf), mc->mc_txn->mt_env->me_psize);
 			dpages = OVPAGES(data->mv_size, mc->mc_txn->mt_env->me_psize);
 			memcpy(&pg, NODEDATA(leaf), sizeof(pg));
 			mdb_page_get(mc->mc_txn, pg, &omp);
+			ovpages = omp->mp_pages;
+
 			/* Is the ov page writable and large enough? */
 			if ((omp->mp_flags & P_DIRTY) && ovpages >= dpages) {
 				/* yes, overwrite it. Note in this case we don't
