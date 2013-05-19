@@ -6514,10 +6514,14 @@ mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
 	/* add overflow pages to free list */
 	if (!IS_LEAF2(mc->mc_pg[mc->mc_top]) && F_ISSET(leaf->mn_flags, F_BIGDATA)) {
 		int i, ovpages;
+		MDB_page *omp;
 		pgno_t pg;
 
 		memcpy(&pg, NODEDATA(leaf), sizeof(pg));
-		ovpages = OVPAGES(NODEDSZ(leaf), mc->mc_txn->mt_env->me_psize);
+		if ((rc = mdb_page_get(mc->mc_txn, pg, &omp)) != 0)
+			return rc;
+		assert(IS_OVERFLOW(omp));
+		ovpages = omp->mp_pages;
 		mc->mc_db->md_overflow_pages -= ovpages;
 		for (i=0; i<ovpages; i++) {
 			DPRINTF("freed ov page %zu", pg);
@@ -7279,9 +7283,14 @@ mdb_drop0(MDB_cursor *mc, int subs)
 				for (i=0; i<NUMKEYS(mc->mc_pg[mc->mc_top]); i++) {
 					ni = NODEPTR(mc->mc_pg[mc->mc_top], i);
 					if (ni->mn_flags & F_BIGDATA) {
-						int j, ovpages = OVPAGES(NODEDSZ(ni), mc->mc_txn->mt_env->me_psize);
+						int j, ovpages;
+						MDB_page *omp;
 						pgno_t pg;
 						memcpy(&pg, NODEDATA(ni), sizeof(pg));
+						if ((rc = mdb_page_get(mc->mc_txn, pg, &omp)) != 0)
+							return rc;
+						assert(IS_OVERFLOW(omp));
+						ovpages = omp->mp_pages;
 						for (j=0; j<ovpages; j++) {
 							mdb_midl_append(&mc->mc_txn->mt_free_pgs, pg);
 							pg++;
