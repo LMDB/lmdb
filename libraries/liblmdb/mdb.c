@@ -1633,7 +1633,7 @@ finish:
 			SETPGNO(NODEPTR(mc->mc_pg[mc->mc_top-1], mc->mc_ki[mc->mc_top-1]), mp->mp_pgno);
 		else
 			mc->mc_db->md_root = mp->mp_pgno;
-	} else if (mc->mc_txn->mt_parent) {
+	} else if (mc->mc_txn->mt_parent && !(mp->mp_flags & P_SUBP)) {
 		MDB_page *np;
 		MDB_ID2 mid;
 		/* If txn has a parent, make sure the page is in our
@@ -5197,11 +5197,11 @@ current:
 		if (F_ISSET(leaf->mn_flags, F_BIGDATA)) {
 			MDB_page *omp;
 			pgno_t pg;
-			int ovpages, dpages;
+			unsigned psize = mc->mc_txn->mt_env->me_psize;
+			int level, ovpages, dpages = OVPAGES(data->mv_size, psize);
 
-			dpages = OVPAGES(data->mv_size, mc->mc_txn->mt_env->me_psize);
 			memcpy(&pg, NODEDATA(leaf), sizeof(pg));
-			if ((rc2 = mdb_page_get(mc->mc_txn, pg, &omp, NULL)) != 0)
+			if ((rc2 = mdb_page_get(mc->mc_txn, pg, &omp, &level)) != 0)
 				return rc2;
 			ovpages = omp->mp_pages;
 
@@ -5211,6 +5211,28 @@ current:
 				 * bother to try shrinking the page if the new data
 				 * is smaller than the overflow threshold.
 				 */
+				if (level > 1) {
+					/* It is writable only in a parent txn */
+					size_t sz = (size_t) psize * ovpages, off;
+					MDB_page *np = mdb_page_malloc(mc, ovpages);
+					MDB_ID2 id2;
+					if (!np)
+						return ENOMEM;
+					id2.mid = pg;
+					id2.mptr = np;
+					mdb_mid2l_insert(mc->mc_txn->mt_u.dirty_list, &id2);
+					if (!(flags & MDB_RESERVE)) {
+						/* Copy end of page, adjusting alignment so
+						 * compiler may copy words instead of bytes.
+						 */
+						off = (PAGEHDRSZ + data->mv_size) & -sizeof(size_t);
+						memcpy((size_t *)((char *)np + off),
+							(size_t *)((char *)omp + off), sz - off);
+						sz = PAGEHDRSZ;
+					}
+					memcpy(np, omp, sz); /* Copy beginning of page */
+					omp = np;
+				}
 				SETDSZ(leaf, data->mv_size);
 				if (F_ISSET(flags, MDB_RESERVE))
 					data->mv_data = METADATA(omp);
