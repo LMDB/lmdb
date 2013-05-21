@@ -71,17 +71,6 @@ int mdb_midl_insert( MDB_IDL ids, MDB_ID id )
 {
 	unsigned x, i;
 
-	if (MDB_IDL_IS_RANGE( ids )) {
-		/* if already in range, treat as a dup */
-		if (id >= MDB_IDL_RANGE_FIRST(ids) && id <= MDB_IDL_RANGE_LAST(ids))
-			return -1;
-		if (id < MDB_IDL_RANGE_FIRST(ids))
-			ids[1] = id;
-		else if (id > MDB_IDL_RANGE_LAST(ids))
-			ids[2] = id;
-		return 0;
-	}
-
 	x = mdb_midl_search( ids, id );
 	assert( x > 0 );
 
@@ -97,15 +86,9 @@ int mdb_midl_insert( MDB_IDL ids, MDB_ID id )
 	}
 
 	if ( ++ids[0] >= MDB_IDL_DB_MAX ) {
-		if( id < ids[1] ) {
-			ids[1] = id;
-			ids[2] = ids[ids[0]-1];
-		} else if ( ids[ids[0]-1] < id ) {
-			ids[2] = id;
-		} else {
-			ids[2] = ids[ids[0]-1];
-		}
-		ids[0] = MDB_NOID;
+		/* no room */
+		--ids[0];
+		return -2;
 	
 	} else {
 		/* insert id */
