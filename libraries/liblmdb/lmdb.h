@@ -325,13 +325,11 @@ typedef enum MDB_cursor_op {
 								Only for #MDB_DUPSORT */
 	MDB_NEXT_MULTIPLE,		/**< Return all duplicate data items at the next
 								cursor position. Only for #MDB_DUPFIXED */
-	MDB_NEXT_NODUP,			/**< Position at first data item of next key.
-								Only for #MDB_DUPSORT */
+	MDB_NEXT_NODUP,			/**< Position at first data item of next key */
 	MDB_PREV,				/**< Position at previous data item */
 	MDB_PREV_DUP,			/**< Position at previous data item of current key.
 								Only for #MDB_DUPSORT */
-	MDB_PREV_NODUP,			/**< Position at last data item of previous key.
-								Only for #MDB_DUPSORT */
+	MDB_PREV_NODUP,			/**< Position at last data item of previous key */
 	MDB_SET,				/**< Position at specified key */
 	MDB_SET_KEY,			/**< Position at specified key, return key + data */
 	MDB_SET_RANGE			/**< Position at first key greater than or equal to specified key. */
