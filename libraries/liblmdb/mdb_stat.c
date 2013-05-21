@@ -194,8 +194,11 @@ int main(int argc, char *argv[])
 			goto txn_abort;
 		}
 		while ((rc = mdb_cursor_get(cursor, &key, NULL, MDB_NEXT_NODUP)) == 0) {
-			char *str = malloc(key.mv_size+1);
+			char *str;
 			MDB_dbi db2;
+			if (memchr(key.mv_data, '\0', key.mv_size))
+				continue;
+			str = malloc(key.mv_size+1);
 			memcpy(str, key.mv_data, key.mv_size);
 			str[key.mv_size] = '\0';
 			rc = mdb_open(txn, str, 0, &db2);
@@ -213,6 +216,9 @@ int main(int argc, char *argv[])
 		}
 		mdb_cursor_close(cursor);
 	}
+
+	if (rc == MDB_NOTFOUND)
+		rc = MDB_SUCCESS;
 
 	mdb_close(env, dbi);
 txn_abort:
