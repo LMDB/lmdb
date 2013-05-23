@@ -1636,6 +1636,8 @@ finish:
 				if (m2 == mc || m2->mc_snum < mc->mc_snum) continue;
 				if (m2->mc_pg[mc->mc_top] == mc->mc_pg[mc->mc_top]) {
 					m2->mc_pg[mc->mc_top] = mp;
+					if (mc->mc_db->md_flags & MDB_DUPSORT)
+						m2->mc_xcursor->mx_cursor.mc_flags &= ~C_INITIALIZED;
 				}
 			}
 		}
