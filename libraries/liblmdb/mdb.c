@@ -114,7 +114,7 @@
 #define BIG_ENDIAN	__BIG_ENDIAN
 #endif
 
-#if defined(__i386) || defined(__x86_64)
+#if defined(__i386) || defined(__x86_64) || defined(_M_IX86)
 #define MISALIGNED_OK	1
 #endif
 
