@@ -18,11 +18,6 @@ is specified it must be the path of an empty directory
 for storing the backup. Otherwise, the backup will be
 written to stdout.
 
-Note: currently, if the copy is interrupted a stale lock
-will be left in the LMDB environment. This may be fixed
-in a future release, but until then you must not
-interrupt the copy process.
-
 .SH DIAGNOSTICS
 Exit status is zero if no errors occur.
 Errors result in a non-zero exit status and
