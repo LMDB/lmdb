@@ -199,6 +199,12 @@ mdb_sem_wait(sem_t *sem)
 	 */
 #define	ErrCode()	errno
 
+	/** An abstraction for a file handle.
+	 *	On POSIX systems file handles are small integers. On Windows
+	 *	they're opaque pointers.
+	 */
+#define	HANDLE	int
+
 	/**	A value for an invalid file handle.
 	 *	Mainly used to initialize file variables and signify that they are
 	 *	unused.
@@ -3625,7 +3631,7 @@ mdb_env_close0(MDB_env *env, int excl)
 }
 
 int
-mdb_env_copyfd(MDB_env *env, int fd)
+mdb_env_copyfd(MDB_env *env, HANDLE fd)
 {
 	MDB_txn *txn = NULL;
 	int rc;

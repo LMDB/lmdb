@@ -144,12 +144,14 @@ typedef	int	mdb_mode_t;
 typedef	mode_t	mdb_mode_t;
 #endif
 
-#ifndef _WIN32
-	/** An abstraction for a file handle.
-	 *	On POSIX systems file handles are small integers. On Windows
-	 *	they're opaque pointers.
-	 */
-#define	HANDLE	int
+/** An abstraction for a file handle.
+ *	On POSIX systems file handles are small integers. On Windows
+ *	they're opaque pointers.
+ */
+#ifdef _WIN32
+typedef	void *mdb_filehandle_t;
+#else
+typedef int mdb_filehandle_t;
 #endif
 
 /** @defgroup mdb MDB API
@@ -550,7 +552,7 @@ int  mdb_env_copy(MDB_env *env, const char *path);
 	 * have already been opened for Write access.
 	 * @return A non-zero error value on failure and 0 on success.
 	 */
-int  mdb_env_copyfd(MDB_env *env, HANDLE fd);
+int  mdb_env_copyfd(MDB_env *env, mdb_filehandle_t fd);
 
 	/** @brief Return statistics about the MDB environment.
 	 *
