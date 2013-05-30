@@ -3631,7 +3631,6 @@ mdb_env_copyfd(MDB_env *env, int fd)
 	int rc;
 	size_t wsize;
 	char *ptr;
-	HANDLE newfd = INVALID_HANDLE_VALUE;
 
 	/* Do the lock/unlock of the reader mutex before starting the
 	 * write txn.  Otherwise other read txns could block writers.
@@ -3658,11 +3657,11 @@ mdb_env_copyfd(MDB_env *env, int fd)
 #ifdef _WIN32
 	{
 		DWORD len;
-		rc = WriteFile(newfd, env->me_map, wsize, &len, NULL);
+		rc = WriteFile(fd, env->me_map, wsize, &len, NULL);
 		rc = (len == wsize) ? MDB_SUCCESS : ErrCode();
 	}
 #else
-	rc = write(newfd, env->me_map, wsize);
+	rc = write(fd, env->me_map, wsize);
 	rc = (rc == (int)wsize) ? MDB_SUCCESS : ErrCode();
 #endif
 	if (env->me_txns)
@@ -3681,7 +3680,7 @@ mdb_env_copyfd(MDB_env *env, int fd)
 			w2 = MAX_WRITE;
 		else
 			w2 = wsize;
-		rc = WriteFile(newfd, ptr, w2, &len, NULL);
+		rc = WriteFile(fd, ptr, w2, &len, NULL);
 		rc = (len == w2) ? MDB_SUCCESS : ErrCode();
 		if (rc) break;
 		wsize -= w2;
@@ -3695,7 +3694,7 @@ mdb_env_copyfd(MDB_env *env, int fd)
 			w2 = MAX_WRITE;
 		else
 			w2 = wsize;
-		wres = write(newfd, ptr, w2);
+		wres = write(fd, ptr, w2);
 		rc = (wres > 0) ? MDB_SUCCESS : ErrCode();
 		if (rc) break;
 		wsize -= wres;
