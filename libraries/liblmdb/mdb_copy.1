@@ -5,12 +5,18 @@
 mdb_copy \- LMDB environment copy tool
 .SH SYNOPSIS
 .B mdb_copy
-.I srcpath\ dstpath
+.I srcpath\ [dstpath]
 .SH DESCRIPTION
 The
 .B mdb_copy
 utility copies an LMDB environment. The environment can
 be copied regardless of whether it is currently in use.
+
+If
+.I dstpath
+is specified it must be the path of an empty directory
+for storing the backup. Otherwise, the backup will be
+written to stdout.
 .SH DIAGNOSTICS
 Exit status is zero if no errors occur.
 Errors result in a non-zero exit status and

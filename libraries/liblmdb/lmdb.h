@@ -144,6 +144,14 @@ typedef	int	mdb_mode_t;
 typedef	mode_t	mdb_mode_t;
 #endif
 
+#ifndef _WIN32
+	/** An abstraction for a file handle.
+	 *	On POSIX systems file handles are small integers. On Windows
+	 *	they're opaque pointers.
+	 */
+#define	HANDLE	int
+#endif
+
 /** @defgroup mdb MDB API
  *	@{
  *	@brief OpenLDAP Lightning Memory-Mapped Database Manager
@@ -532,6 +540,17 @@ int  mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t
 	 * @return A non-zero error value on failure and 0 on success.
 	 */
 int  mdb_env_copy(MDB_env *env, const char *path);
+
+	/** @brief Copy an MDB environment to the specified file descriptor.
+	 *
+	 * This function may be used to make a backup of an existing environment.
+	 * @param[in] env An environment handle returned by #mdb_env_create(). It
+	 * must have already been opened successfully.
+	 * @param[in] fd The filedescriptor to write the copy to. It must
+	 * have already been opened for Write access.
+	 * @return A non-zero error value on failure and 0 on success.
+	 */
+int  mdb_env_copyfd(MDB_env *env, HANDLE fd);
 
 	/** @brief Return statistics about the MDB environment.
 	 *

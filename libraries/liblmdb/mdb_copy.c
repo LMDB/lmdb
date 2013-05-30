@@ -21,8 +21,8 @@ int main(int argc,char * argv[])
 	MDB_env *env;
 	char *envname = argv[1];
 
-	if (argc != 3) {
-		fprintf(stderr, "usage: %s srcpath dstpath\n", argv[0]);
+	if (argc<2 || argc>3) {
+		fprintf(stderr, "usage: %s srcpath [dstpath]\n", argv[0]);
 		exit(EXIT_FAILURE);
 	}
 
@@ -32,7 +32,10 @@ int main(int argc,char * argv[])
 	if (rc) {
 		printf("mdb_env_open failed, error %d %s\n", rc, mdb_strerror(rc));
 	} else {
-		rc = mdb_env_copy(env, argv[2]);
+		if (argc == 2)
+			rc = mdb_env_copyfd(env, 1);
+		else
+			rc = mdb_env_copy(env, argv[2]);
 		if (rc)
 			printf("mdb_env_copy failed, error %d %s\n", rc, mdb_strerror(rc));
 	}

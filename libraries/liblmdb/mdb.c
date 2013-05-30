@@ -199,12 +199,6 @@ mdb_sem_wait(sem_t *sem)
 	 */
 #define	ErrCode()	errno
 
-	/** An abstraction for a file handle.
-	 *	On POSIX systems file handles are small integers. On Windows
-	 *	they're opaque pointers.
-	 */
-#define	HANDLE	int
-
 	/**	A value for an invalid file handle.
 	 *	Mainly used to initialize file variables and signify that they are
 	 *	unused.
@@ -3631,60 +3625,20 @@ mdb_env_close0(MDB_env *env, int excl)
 }
 
 int
-mdb_env_copy(MDB_env *env, const char *path)
+mdb_env_copyfd(MDB_env *env, int fd)
 {
 	MDB_txn *txn = NULL;
-	int rc, len;
+	int rc;
 	size_t wsize;
-	char *lpath, *ptr;
+	char *ptr;
 	HANDLE newfd = INVALID_HANDLE_VALUE;
-
-	if (env->me_flags & MDB_NOSUBDIR) {
-		lpath = (char *)path;
-	} else {
-		len = strlen(path);
-		len += sizeof(DATANAME);
-		lpath = malloc(len);
-		if (!lpath)
-			return ENOMEM;
-		sprintf(lpath, "%s" DATANAME, path);
-	}
-
-	/* The destination path must exist, but the destination file must not.
-	 * We don't want the OS to cache the writes, since the source data is
-	 * already in the OS cache.
-	 */
-#ifdef _WIN32
-	newfd = CreateFile(lpath, GENERIC_WRITE, 0, NULL, CREATE_NEW,
-				FILE_FLAG_NO_BUFFERING|FILE_FLAG_WRITE_THROUGH, NULL);
-#else
-	newfd = open(lpath, O_WRONLY|O_CREAT|O_EXCL
-#ifdef O_DIRECT
-		|O_DIRECT
-#endif
-		, 0666);
-#endif
-	if (!(env->me_flags & MDB_NOSUBDIR))
-		free(lpath);
-	if (newfd == INVALID_HANDLE_VALUE) {
-		rc = ErrCode();
-		goto leave;
-	}
-
-#ifdef F_NOCACHE	/* __APPLE__ */
-	rc = fcntl(newfd, F_NOCACHE, 1);
-	if (rc) {
-		rc = ErrCode();
-		goto leave;
-	}
-#endif
 
 	/* Do the lock/unlock of the reader mutex before starting the
 	 * write txn.  Otherwise other read txns could block writers.
 	 */
 	rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
 	if (rc)
-		goto leave;
+		return rc;
 
 	if (env->me_txns) {
 		/* We must start the actual read txn after blocking writers */
@@ -3751,6 +3705,59 @@ mdb_env_copy(MDB_env *env, const char *path)
 
 leave:
 	mdb_txn_abort(txn);
+	return rc;
+}
+
+int
+mdb_env_copy(MDB_env *env, const char *path)
+{
+	int rc, len;
+	char *lpath;
+	HANDLE newfd = INVALID_HANDLE_VALUE;
+
+	if (env->me_flags & MDB_NOSUBDIR) {
+		lpath = (char *)path;
+	} else {
+		len = strlen(path);
+		len += sizeof(DATANAME);
+		lpath = malloc(len);
+		if (!lpath)
+			return ENOMEM;
+		sprintf(lpath, "%s" DATANAME, path);
+	}
+
+	/* The destination path must exist, but the destination file must not.
+	 * We don't want the OS to cache the writes, since the source data is
+	 * already in the OS cache.
+	 */
+#ifdef _WIN32
+	newfd = CreateFile(lpath, GENERIC_WRITE, 0, NULL, CREATE_NEW,
+				FILE_FLAG_NO_BUFFERING|FILE_FLAG_WRITE_THROUGH, NULL);
+#else
+	newfd = open(lpath, O_WRONLY|O_CREAT|O_EXCL
+#ifdef O_DIRECT
+		|O_DIRECT
+#endif
+		, 0666);
+#endif
+	if (!(env->me_flags & MDB_NOSUBDIR))
+		free(lpath);
+	if (newfd == INVALID_HANDLE_VALUE) {
+		rc = ErrCode();
+		goto leave;
+	}
+
+#ifdef F_NOCACHE	/* __APPLE__ */
+	rc = fcntl(newfd, F_NOCACHE, 1);
+	if (rc) {
+		rc = ErrCode();
+		goto leave;
+	}
+#endif
+
+	rc = mdb_env_copyfd(env, newfd);
+
+leave:
 	if (newfd != INVALID_HANDLE_VALUE)
 		close(newfd);
 
