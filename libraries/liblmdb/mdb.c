@@ -1636,8 +1636,13 @@ finish:
 				if (m2 == mc || m2->mc_snum < mc->mc_snum) continue;
 				if (m2->mc_pg[mc->mc_top] == mc->mc_pg[mc->mc_top]) {
 					m2->mc_pg[mc->mc_top] = mp;
-					if (mc->mc_db->md_flags & MDB_DUPSORT)
-						m2->mc_xcursor->mx_cursor.mc_flags &= ~C_INITIALIZED;
+					if ((mc->mc_db->md_flags & MDB_DUPSORT) &&
+						m2->mc_ki[mc->mc_top] == mc->mc_ki[mc->mc_top]) {
+						MDB_node *leaf = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
+						if (!(leaf->mn_flags & F_SUBDATA)) {
+							m2->mc_xcursor->mx_cursor.mc_pg[0] = NODEDATA(leaf);
+						}
+					}
 				}
 			}
 		}
