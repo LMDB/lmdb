@@ -5413,8 +5413,18 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 					void *db = NODEDATA(leaf);
 					memcpy(db, &mc->mc_xcursor->mx_db, sizeof(MDB_db));
 				} else {
+					MDB_cursor *m2;
 					/* shrink fake page */
 					mdb_node_shrink(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
+					leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
+					mc->mc_xcursor->mx_cursor.mc_pg[0] = NODEDATA(leaf);
+					/* fix other sub-DB cursors pointed at this fake page */
+					for (m2 = mc->mc_txn->mt_cursors[mc->mc_dbi]; m2; m2=m2->mc_next) {
+						if (m2 == mc || m2->mc_snum < mc->mc_snum) continue;
+						if (m2->mc_pg[mc->mc_top] == mc->mc_pg[mc->mc_top] &&
+							m2->mc_ki[mc->mc_top] == mc->mc_ki[mc->mc_top])
+							m2->mc_xcursor->mx_cursor.mc_pg[0] = NODEDATA(leaf);
+					}
 				}
 				mc->mc_db->md_entries--;
 				return rc;
