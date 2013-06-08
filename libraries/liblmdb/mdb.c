@@ -7325,6 +7325,12 @@ int mdb_stat(MDB_txn *txn, MDB_dbi dbi, MDB_stat *arg)
 	if (txn == NULL || arg == NULL || dbi >= txn->mt_numdbs)
 		return EINVAL;
 
+	if (txn->mt_dbflags[dbi] & DB_STALE) {
+		MDB_cursor mc;
+		MDB_xcursor mx;
+		/* Stale, must read the DB's root. cursor_init does it for us. */
+		mdb_cursor_init(&mc, txn, dbi, &mx);
+	}
 	return mdb_stat0(txn->mt_env, &txn->mt_dbs[dbi], arg);
 }
 
