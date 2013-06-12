@@ -4947,11 +4947,9 @@ fetchm:
 	case MDB_NEXT:
 	case MDB_NEXT_DUP:
 	case MDB_NEXT_NODUP:
-		if (!(mc->mc_flags & C_INITIALIZED)) {
+		if (!(mc->mc_flags & C_INITIALIZED))
 			rc = mdb_cursor_first(mc, key, data);
-			if (rc)
-				break;
-		} else
+		else
 			rc = mdb_cursor_next(mc, key, data, op);
 		break;
 	case MDB_PREV:
