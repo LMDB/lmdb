@@ -1621,8 +1621,8 @@ finish:
 			MDB_dbi dbi = mc->mc_dbi-1;
 
 			for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
-				if (m2 == mc) continue;
 				m3 = &m2->mc_xcursor->mx_cursor;
+				if (m3 == mc) continue;
 				if (m3->mc_snum < mc->mc_snum) continue;
 				if (m3->mc_pg[mc->mc_top] == mc->mc_pg[mc->mc_top]) {
 					m3->mc_pg[mc->mc_top] = mp;
@@ -6236,11 +6236,11 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 			dbi--;
 
 		for (m2 = csrc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
-			if (m2 == csrc) continue;
 			if (csrc->mc_flags & C_SUB)
 				m3 = &m2->mc_xcursor->mx_cursor;
 			else
 				m3 = m2;
+			if (m3 == csrc) continue;
 			if (m3->mc_pg[csrc->mc_top] == mp && m3->mc_ki[csrc->mc_top] ==
 				csrc->mc_ki[csrc->mc_top]) {
 				m3->mc_pg[csrc->mc_top] = cdst->mc_pg[cdst->mc_top];
@@ -6496,10 +6496,10 @@ mdb_rebalance(MDB_cursor *mc)
 			mc->mc_db->md_depth = 0;
 			mc->mc_db->md_leaf_pages = 0;
 			mdb_midl_append(&mc->mc_txn->mt_free_pgs, mp->mp_pgno);
+			/* Adjust cursors pointing to mp */
 			mc->mc_snum = 0;
 			mc->mc_top = 0;
 			{
-				/* Adjust other cursors pointing to mp */
 				MDB_cursor *m2, *m3;
 				MDB_dbi dbi = mc->mc_dbi;
 
@@ -6507,7 +6507,6 @@ mdb_rebalance(MDB_cursor *mc)
 					dbi--;
 
 				for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
-					if (m2 == mc) continue;
 					if (mc->mc_flags & C_SUB)
 						m3 = &m2->mc_xcursor->mx_cursor;
 					else
@@ -6537,12 +6536,11 @@ mdb_rebalance(MDB_cursor *mc)
 					dbi--;
 
 				for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
-					if (m2 == mc) continue;
 					if (mc->mc_flags & C_SUB)
 						m3 = &m2->mc_xcursor->mx_cursor;
 					else
 						m3 = m2;
-					if (m3->mc_snum < mc->mc_snum) continue;
+					if (m3 == mc || m3->mc_snum < mc->mc_snum) continue;
 					if (m3->mc_pg[0] == mp) {
 						m3->mc_pg[0] = mc->mc_pg[0];
 						m3->mc_snum = 1;
@@ -7069,11 +7067,12 @@ done:
 			dbi--;
 
 		for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
-			if (m2 == mc) continue;
 			if (mc->mc_flags & C_SUB)
 				m3 = &m2->mc_xcursor->mx_cursor;
 			else
 				m3 = m2;
+			if (m3 == mc)
+				continue;
 			if (!(m3->mc_flags & C_INITIALIZED))
 				continue;
 			if (m3->mc_flags & C_SPLITTING)
