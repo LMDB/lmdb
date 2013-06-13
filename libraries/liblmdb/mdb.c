@@ -1563,7 +1563,7 @@ none:
 	return MDB_SUCCESS;
 }
 
-/** Copy a page: avoid copying unused portions of the page.
+/** Copy the used portions of a non-overflow page.
  * @param[in] dst page to copy into
  * @param[in] src page to copy from
  * @param[in] psize size of a page
@@ -1571,17 +1571,19 @@ none:
 static void
 mdb_page_copy(MDB_page *dst, MDB_page *src, unsigned int psize)
 {
-	dst->mp_flags = src->mp_flags | P_DIRTY;
-	dst->mp_pages = src->mp_pages;
+	enum { Align = sizeof(pgno_t) };
+	indx_t upper = src->mp_upper, lower = src->mp_lower, unused = upper-lower;
 
-	if (IS_LEAF2(src)) {
-		memcpy(dst->mp_ptrs, src->mp_ptrs, psize - PAGEHDRSZ - SIZELEFT(src));
+	/* If page isn't full, just copy the used portion. Adjust
+	 * alignment so memcpy may copy words instead of bytes.
+	 */
+	if ((unused &= -Align) && !IS_LEAF2(src)) {
+		upper &= -Align;
+		memcpy(dst, src, (lower + (Align-1)) & -Align);
+		memcpy((pgno_t *)((char *)dst+upper), (pgno_t *)((char *)src+upper),
+			psize - upper);
 	} else {
-		unsigned int i, nkeys = NUMKEYS(src);
-		for (i=0; i<nkeys; i++)
-			dst->mp_ptrs[i] = src->mp_ptrs[i];
-		memcpy((char *)dst+src->mp_upper, (char *)src+src->mp_upper,
-			psize - src->mp_upper);
+		memcpy(dst, src, psize - unused);
 	}
 }
 
@@ -1592,76 +1594,36 @@ mdb_page_copy(MDB_page *dst, MDB_page *src, unsigned int psize)
 static int
 mdb_page_touch(MDB_cursor *mc)
 {
-	MDB_page *mp = mc->mc_pg[mc->mc_top];
+	MDB_page *mp = mc->mc_pg[mc->mc_top], *np;
+	MDB_cursor *m2, *m3;
+	MDB_dbi dbi;
 	pgno_t	pgno;
 	int rc;
 
 	if (!F_ISSET(mp->mp_flags, P_DIRTY)) {
-		MDB_page *np;
 		if ((rc = mdb_page_alloc(mc, 1, &np)))
 			return rc;
-		DPRINTF("touched db %u page %zu -> %zu", mc->mc_dbi, mp->mp_pgno, np->mp_pgno);
-		assert(mp->mp_pgno != np->mp_pgno);
+		pgno = np->mp_pgno;
+		DPRINTF("touched db %u page %zu -> %zu", mc->mc_dbi,mp->mp_pgno,pgno);
+		assert(mp->mp_pgno != pgno);
 		mdb_midl_append(&mc->mc_txn->mt_free_pgs, mp->mp_pgno);
-		if (SIZELEFT(mp)) {
-			/* If page isn't full, just copy the used portion */
-			mdb_page_copy(np, mp, mc->mc_txn->mt_env->me_psize);
+		/* Update the parent page, if any, to point to the new page */
+		if (mc->mc_top) {
+			MDB_page *parent = mc->mc_pg[mc->mc_top-1];
+			MDB_node *node = NODEPTR(parent, mc->mc_ki[mc->mc_top-1]);
+			SETPGNO(node, pgno);
 		} else {
-			pgno = np->mp_pgno;
-			memcpy(np, mp, mc->mc_txn->mt_env->me_psize);
-			np->mp_pgno = pgno;
-			np->mp_flags |= P_DIRTY;
+			mc->mc_db->md_root = pgno;
 		}
-		mp = np;
-
-finish:
-		/* Adjust other cursors pointing to mp */
-		if (mc->mc_flags & C_SUB) {
-			MDB_cursor *m2, *m3;
-			MDB_dbi dbi = mc->mc_dbi-1;
-
-			for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
-				m3 = &m2->mc_xcursor->mx_cursor;
-				if (m3 == mc) continue;
-				if (m3->mc_snum < mc->mc_snum) continue;
-				if (m3->mc_pg[mc->mc_top] == mc->mc_pg[mc->mc_top]) {
-					m3->mc_pg[mc->mc_top] = mp;
-				}
-			}
-		} else {
-			MDB_cursor *m2;
-
-			for (m2 = mc->mc_txn->mt_cursors[mc->mc_dbi]; m2; m2=m2->mc_next) {
-				if (m2 == mc || m2->mc_snum < mc->mc_snum) continue;
-				if (m2->mc_pg[mc->mc_top] == mc->mc_pg[mc->mc_top]) {
-					m2->mc_pg[mc->mc_top] = mp;
-					if ((mc->mc_db->md_flags & MDB_DUPSORT) &&
-						m2->mc_ki[mc->mc_top] == mc->mc_ki[mc->mc_top]) {
-						MDB_node *leaf = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
-						if (!(leaf->mn_flags & F_SUBDATA)) {
-							m2->mc_xcursor->mx_cursor.mc_pg[0] = NODEDATA(leaf);
-						}
-					}
-				}
-			}
-		}
-		mc->mc_pg[mc->mc_top] = mp;
-		/** If this page has a parent, update the parent to point to
-		 * this new page.
-		 */
-		if (mc->mc_top)
-			SETPGNO(NODEPTR(mc->mc_pg[mc->mc_top-1], mc->mc_ki[mc->mc_top-1]), mp->mp_pgno);
-		else
-			mc->mc_db->md_root = mp->mp_pgno;
 	} else if (mc->mc_txn->mt_parent && !(mp->mp_flags & P_SUBP)) {
-		MDB_page *np;
 		MDB_ID2 mid, *dl = mc->mc_txn->mt_u.dirty_list;
+		pgno = mp->mp_pgno;
 		/* If txn has a parent, make sure the page is in our
 		 * dirty list.
 		 */
 		if (dl[0].mid) {
-			unsigned x = mdb_mid2l_search(dl, mp->mp_pgno);
-			if (x <= dl[0].mid && dl[x].mid == mp->mp_pgno) {
+			unsigned x = mdb_mid2l_search(dl, pgno);
+			if (x <= dl[0].mid && dl[x].mid == pgno) {
 				np = dl[x].mptr;
 				if (mp != np)
 					mc->mc_pg[mc->mc_top] = np;
@@ -1673,12 +1635,42 @@ finish:
 		np = mdb_page_malloc(mc, 1);
 		if (!np)
 			return ENOMEM;
-		memcpy(np, mp, mc->mc_txn->mt_env->me_psize);
-		mid.mid = np->mp_pgno;
+		mid.mid = pgno;
 		mid.mptr = np;
 		mdb_mid2l_insert(dl, &mid);
-		mp = np;
-		goto finish;
+	} else {
+		return 0;
+	}
+
+	mdb_page_copy(np, mp, mc->mc_txn->mt_env->me_psize);
+	np->mp_pgno = pgno;
+	np->mp_flags |= P_DIRTY;
+
+	/* Adjust cursors pointing to mp */
+	mc->mc_pg[mc->mc_top] = np;
+	dbi = mc->mc_dbi;
+	if (mc->mc_flags & C_SUB) {
+		dbi--;
+		for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
+			m3 = &m2->mc_xcursor->mx_cursor;
+			if (m3->mc_snum < mc->mc_snum) continue;
+			if (m3->mc_pg[mc->mc_top] == mp)
+				m3->mc_pg[mc->mc_top] = np;
+		}
+	} else {
+		for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
+			if (m2->mc_snum < mc->mc_snum) continue;
+			if (m2->mc_pg[mc->mc_top] == mp) {
+				m2->mc_pg[mc->mc_top] = np;
+				if ((mc->mc_db->md_flags & MDB_DUPSORT) &&
+					m2->mc_ki[mc->mc_top] == mc->mc_ki[mc->mc_top])
+				{
+					MDB_node *leaf = NODEPTR(np, mc->mc_ki[mc->mc_top]);
+					if (!(leaf->mn_flags & F_SUBDATA))
+						m2->mc_xcursor->mx_cursor.mc_pg[0] = NODEDATA(leaf);
+				}
+			}
+		}
 	}
 	return 0;
 }
