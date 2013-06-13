@@ -4281,47 +4281,55 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int flags)
 static int
 mdb_ovpage_free(MDB_cursor *mc, MDB_page *mp)
 {
+	MDB_txn *txn = mc->mc_txn;
 	pgno_t pg = mp->mp_pgno;
 	unsigned i, ovpages = mp->mp_pages;
 	int rc;
 
 	DPRINTF("free ov page %zu (%d)", pg, ovpages);
-	mc->mc_db->md_overflow_pages -= ovpages;
 	/* If the page is dirty we just acquired it, so we should
 	 * give it back to our current free list, if any.
+	 * Not currently supported in nested txns.
 	 * Otherwise put it onto the list of pages we freed in this txn.
 	 */
-	if ((mp->mp_flags & P_DIRTY) && mc->mc_txn->mt_env->me_pghead) {
+	if ((mp->mp_flags & P_DIRTY) && !txn->mt_parent && txn->mt_env->me_pghead) {
 		unsigned j, x;
-		pgno_t *mop = mc->mc_txn->mt_env->me_pghead;
-		/* Remove from dirty list */
-		x = mdb_mid2l_search(mc->mc_txn->mt_u.dirty_list, pg);
-		for (; x < mc->mc_txn->mt_u.dirty_list[0].mid; x++)
-			mc->mc_txn->mt_u.dirty_list[x] = mc->mc_txn->mt_u.dirty_list[x+1];
-		mc->mc_txn->mt_u.dirty_list[0].mid--;
-		/* Make room to insert pg */
+		pgno_t *mop = txn->mt_env->me_pghead;
+		MDB_ID2 *dl, ix, iy;
+		/* Prepare to insert pg */
 		j = mop[0] + ovpages;
 		if (j > mop[-1]) {
 			rc = mdb_midl_grow(&mop, ovpages);
 			if (rc)
 				return rc;
-			mc->mc_txn->mt_env->me_pghead = mop;
+			txn->mt_env->me_pghead = mop;
 		}
-		for (i = mop[0]; i>0; i--) {
-			if (mop[i] < pg)
-				mop[j--] = mop[i];
-			else
-				break;
+		/* Remove from dirty list */
+		dl = txn->mt_u.dirty_list;
+		x = dl[0].mid--;
+		for (ix = dl[x]; ix.mid != pg; ix = iy) {
+			if (x > 1) {
+				x--;
+				iy = dl[x];
+				dl[x] = ix;
+			} else {
+				assert(x > 1);
+				return MDB_CORRUPTED;
+			}
 		}
+		/* Insert in me_pghead */
+		for (i = mop[0]; i && mop[i] < pg; i--)
+			mop[j--] = mop[i];
 		while (j>i)
 			mop[j--] = pg++;
 		mop[0] += ovpages;
 	} else {
 		for (i=0; i<ovpages; i++) {
-			mdb_midl_append(&mc->mc_txn->mt_free_pgs, pg);
+			mdb_midl_append(&txn->mt_free_pgs, pg);
 			pg++;
 		}
 	}
+	mc->mc_db->md_overflow_pages -= ovpages;
 	return 0;
 }
 
