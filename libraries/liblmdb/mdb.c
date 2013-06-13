@@ -1971,6 +1971,7 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 		parent->mt_child = txn;
 		txn->mt_parent = parent;
 		txn->mt_numdbs = parent->mt_numdbs;
+		txn->mt_flags = parent->mt_flags;
 		txn->mt_dbxs = parent->mt_dbxs;
 		memcpy(txn->mt_dbs, parent->mt_dbs, txn->mt_numdbs * sizeof(MDB_db));
 		/* Copy parent's mt_dbflags, but clear DB_NEW */
