@@ -32,7 +32,9 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1
+#endif
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/param.h>
