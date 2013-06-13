@@ -7450,7 +7450,7 @@ mdb_drop0(MDB_cursor *mc, int subs)
 
 int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)
 {
-	MDB_cursor *mc;
+	MDB_cursor *mc, *m2;
 	int rc;
 
 	if (!txn || !dbi || dbi >= txn->mt_numdbs || (unsigned)del > 1 || !(txn->mt_dbflags[dbi] & DB_VALID))
@@ -7464,6 +7464,9 @@ int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)
 		return rc;
 
 	rc = mdb_drop0(mc, mc->mc_db->md_flags & MDB_DUPSORT);
+	/* Invalidate the dropped DB's cursors */
+	for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2 = m2->mc_next)
+		m2->mc_flags &= ~C_INITIALIZED;
 	if (rc)
 		goto leave;
 
