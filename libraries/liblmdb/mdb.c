@@ -5189,6 +5189,7 @@ more:
 				MDB_page *mp;
 				unsigned int offset;
 				unsigned int i;
+				uint16_t fp_flags;
 
 				fp = NODEDATA(leaf);
 				if (flags == MDB_CURRENT) {
@@ -5208,6 +5209,7 @@ reuse:
 					offset = NODESIZE + sizeof(indx_t) + data->mv_size;
 				}
 				offset += offset & 1;
+				fp_flags = fp->mp_flags;
 				if (NODESIZE + sizeof(indx_t) + NODEKSZ(leaf) + NODEDSZ(leaf) +
 					offset >= mc->mc_txn->mt_env->me_nodemax) {
 					/* yes, convert it */
@@ -5231,6 +5233,7 @@ reuse:
 					offset = mc->mc_txn->mt_env->me_psize - NODEDSZ(leaf);
 					flags |= F_DUPDATA|F_SUBDATA;
 					dummy.md_root = mp->mp_pgno;
+					fp_flags &= ~P_SUBP;
 				} else {
 					/* no, just grow it */
 					rdata = &xdata;
@@ -5240,7 +5243,7 @@ reuse:
 					mp->mp_pgno = mc->mc_pg[mc->mc_top]->mp_pgno;
 					flags |= F_DUPDATA;
 				}
-				mp->mp_flags = fp->mp_flags | P_DIRTY;
+				mp->mp_flags = fp_flags | P_DIRTY;
 				mp->mp_pad   = fp->mp_pad;
 				mp->mp_lower = fp->mp_lower;
 				mp->mp_upper = fp->mp_upper + offset;
