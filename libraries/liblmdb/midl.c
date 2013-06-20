@@ -104,8 +104,10 @@ int mdb_midl_insert( MDB_IDL ids, MDB_ID id )
 MDB_IDL mdb_midl_alloc(int num)
 {
 	MDB_IDL ids = malloc((num+2) * sizeof(MDB_ID));
-	if (ids)
+	if (ids) {
 		*ids++ = num;
+		*ids = 0;
+	}
 	return ids;
 }
 

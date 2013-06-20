@@ -928,8 +928,8 @@ typedef struct MDB_xcursor {
 
 	/** State of FreeDB old pages, stored in the MDB_env */
 typedef struct MDB_pgstate {
-	txnid_t		mf_pglast;	/**< ID of last old page record we used */
-	pgno_t		*mf_pghead;	/**< old pages reclaimed from freelist */
+	pgno_t		*mf_pghead;	/**< Reclaimed freeDB pages, or NULL before use */
+	txnid_t		mf_pglast;	/**< ID of last used record, or 0 if !mf_pghead */
 } MDB_pgstate;
 
 	/** The database environment. */
@@ -1341,8 +1341,10 @@ static int
 mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 {
 	MDB_txn *txn = mc->mc_txn;
+	MDB_env *env = txn->mt_env;
+	pgno_t pgno = P_INVALID, *mop = env->me_pghead;
+	unsigned mop_len = mop ? mop[0] : 0;
 	MDB_page *np;
-	pgno_t pgno = P_INVALID;
 	MDB_ID2 mid;
 	txnid_t oldest = 0, last;
 	int rc;
@@ -1353,13 +1355,11 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 	if (txn->mt_dirty_room == 0)
 		return MDB_TXN_FULL;
 
-	/* The free list won't have any content at all until txn 2 has
-	 * committed. The pages freed by txn 2 will be unreferenced
-	 * after txn 3 commits, and so will be safe to re-use in txn 4.
+	/* Pages freed by txn#1 (after allocating but discarding them)
+	 * are used when txn#1 is unreferenced, i.e. txn#3.
 	 */
-	if (txn->mt_txnid > 3) {
-		if (!txn->mt_env->me_pghead &&
-			txn->mt_dbs[FREE_DBI].md_root != P_INVALID) {
+	if (txn->mt_txnid >= 3) {
+		if (!mop_len && txn->mt_dbs[FREE_DBI].md_root != P_INVALID) {
 			/* See if there's anything in the free DB */
 			MDB_cursor m2;
 			MDB_node *leaf;
@@ -1391,24 +1391,22 @@ again:
 			if (oldest > last) {
 				/* It's usable, grab it.
 				 */
-				pgno_t *idl, *mop;
+				pgno_t *idl;
 
 				if (!txn->mt_env->me_pglast) {
 					mdb_node_read(txn, leaf, &data);
 				}
 				idl = (MDB_ID *) data.mv_data;
-				/* We might have a zero-length IDL due to freelist growth
-				 * during a prior commit
-				 */
-				if (!idl[0]) {
-					txn->mt_env->me_pglast = last;
-					goto again;
+				mop_len = idl[0];
+				if (!mop) {
+					if (!(env->me_pghead = mop = mdb_midl_alloc(mop_len)))
+						return ENOMEM;
+				} else if (mop_len > mop[-1]) {
+					if ((rc = mdb_midl_grow(&env->me_pghead, mop_len)) != 0)
+						return rc;
+					mop = env->me_pghead;
 				}
-				mop = mdb_midl_alloc(idl[0]);
-				if (!mop)
-					return ENOMEM;
 				txn->mt_env->me_pglast = last;
-				txn->mt_env->me_pghead = mop;
 				memcpy(mop, idl, MDB_IDL_SIZEOF(idl));
 
 #if MDB_DEBUG > 1
@@ -1420,11 +1418,15 @@ again:
 						DPRINTF("IDL %zu", idl[i]);
 				}
 #endif
+				/* We might have a zero-length IDL due to freelist growth
+				 * during a prior commit
+				 */
+				if (!mop_len)
+					goto again;
 			}
 		}
 none:
-		if (txn->mt_env->me_pghead) {
-			pgno_t *mop = txn->mt_env->me_pghead;
+		if (mop_len) {
 			if (num > 1) {
 				MDB_cursor m2;
 				int retry = 1, readit = 0, n2 = num-1;
@@ -1448,7 +1450,7 @@ none:
 #endif
 					if (readit) {
 						MDB_val key, data;
-						pgno_t *idl, *mop2;
+						pgno_t *idl, old_id, new_id;
 
 						last = txn->mt_env->me_pglast + 1;
 
@@ -1473,22 +1475,31 @@ none:
 						if (oldest <= last)
 							break;
 						idl = (MDB_ID *) data.mv_data;
-						mop2 = mdb_midl_alloc(idl[0] + mop[0]);
-						if (!mop2)
-							return ENOMEM;
-						/* merge in sorted order */
-						i = idl[0]; j = mop[0]; mop2[0] = k = i+j;
-						mop[0] = P_INVALID;
-						while (i>0  || j>0) {
-							if (i && idl[i] < mop[j])
-								mop2[k--] = idl[i--];
-							else
-								mop2[k--] = mop[j--];
+						i = idl[0];
+						if (mop_len+i > mop[-1]) {
+							if ((rc = mdb_midl_grow(&env->me_pghead, i)) != 0)
+								return rc;
+							mop = env->me_pghead;
 						}
+#if MDB_DEBUG > 1
+						DPRINTF("IDL read txn %zu root %zu num %u",
+							last, txn->mt_dbs[FREE_DBI].md_root, i);
+						for (k = i; k; k--)
+							DPRINTF("IDL %zu", idl[k]);
+#endif
+						/* merge in sorted order */
+						j = mop_len;
+						k = mop_len += i;
+						mop[0] = P_INVALID;
+						old_id = mop[j];
+						while (i) {
+							new_id = idl[i--];
+							for (; old_id < new_id; old_id = mop[--j])
+								mop[k--] = old_id;
+							mop[k--] = new_id;
+						}
+						mop[0] = mop_len;
 						txn->mt_env->me_pglast = last;
-						mdb_midl_free(txn->mt_env->me_pghead);
-						txn->mt_env->me_pghead = mop2;
-						mop = mop2;
 						/* Keep trying to read until we have enough */
 						if (mop[0] < (unsigned)num) {
 							continue;
@@ -1518,10 +1529,6 @@ none:
 				/* peel pages off tail, so we only have to truncate the list */
 				pgno = MDB_IDL_LAST(mop);
 				mop[0]--;
-			}
-			if (MDB_IDL_IS_ZERO(mop)) {
-				mdb_midl_free(txn->mt_env->me_pghead);
-				txn->mt_env->me_pghead = NULL;
 			}
 		}
 	}
@@ -1966,7 +1973,6 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 		txn->mt_toggle = parent->mt_toggle;
 		txn->mt_dirty_room = parent->mt_dirty_room;
 		txn->mt_u.dirty_list[0].mid = 0;
-		txn->mt_free_pgs[0] = 0;
 		txn->mt_next_pgno = parent->mt_next_pgno;
 		parent->mt_child = txn;
 		txn->mt_parent = parent;
@@ -2138,7 +2144,7 @@ mdb_freelist_save(MDB_txn *txn)
 
 	mdb_cursor_init(&mc, txn, FREE_DBI, NULL);
 
-	if (env->me_pghead || env->me_pglast) {
+	if (env->me_pghead) {
 		/* Make sure first page of freeDB is touched and on freelist */
 		rc = mdb_page_search(&mc, NULL, MDB_PS_MODIFY);
 		if (rc && rc != MDB_NOTFOUND)
