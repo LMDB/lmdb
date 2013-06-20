@@ -1340,14 +1340,27 @@ mdb_find_oldest(MDB_txn *txn)
 static int
 mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 {
+#ifdef MDB_PARANOID	/* Seems like we can ignore this now */
+	/* Get at most <Max_retries> more freeDB records once me_pghead
+	 * has enough pages.  If not enough, use new pages from the map.
+	 * If <Paranoid> and mc is updating the freeDB, only get new
+	 * records if me_pghead is empty. Then the freelist cannot play
+	 * catch-up with itself by growing while trying to save it.
+	 */
+	enum { Paranoid = 1, Max_retries = 500 };
+#else
+	enum { Paranoid = 0, Max_retries = INT_MAX /*infinite*/ };
+#endif
+	int rc, n2 = num-1, retry = Max_retries;
 	MDB_txn *txn = mc->mc_txn;
 	MDB_env *env = txn->mt_env;
-	pgno_t pgno = P_INVALID, *mop = env->me_pghead;
+	pgno_t pgno, *mop = env->me_pghead;
 	unsigned mop_len = mop ? mop[0] : 0;
 	MDB_page *np;
 	MDB_ID2 mid;
 	txnid_t oldest = 0, last;
-	int rc;
+	MDB_cursor_op op;
+	MDB_cursor m2;
 
 	*mp = NULL;
 
@@ -1355,211 +1368,121 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 	if (txn->mt_dirty_room == 0)
 		return MDB_TXN_FULL;
 
-	/* Pages freed by txn#1 (after allocating but discarding them)
-	 * are used when txn#1 is unreferenced, i.e. txn#3.
-	 */
-	if (txn->mt_txnid >= 3) {
-		if (!mop_len && txn->mt_dbs[FREE_DBI].md_root != P_INVALID) {
-			/* See if there's anything in the free DB */
-			MDB_cursor m2;
-			MDB_node *leaf;
-			MDB_val data;
-			txnid_t *kptr;
+	for (op = MDB_FIRST;; op = MDB_NEXT) {
+		unsigned int i, j, k;
+		MDB_val key, data;
+		MDB_node *leaf;
+		pgno_t *idl, old_id, new_id;
 
+		/* Seek a big enough contiguous page range. Prefer
+		 * pages at the tail, just truncating the list.
+		 */
+		if (mop_len >= (unsigned)num) {
+			i = mop_len;
+			do {
+				pgno = mop[i];
+				if (mop[i-n2] == pgno+n2) {
+					mop[0] = mop_len -= num;
+					/* Move any stragglers down */
+					for (j = i-n2; j <= mop_len; )
+						mop[j++] = mop[++i];
+					goto search_done;
+				}
+			} while (--i >= (unsigned)num);
+			if (Max_retries < INT_MAX && --retry < 0)
+				break;
+		}
+
+		if (op == MDB_FIRST) {	/* 1st iteration */
+			/* Prepare to fetch more and coalesce */
+			oldest = mdb_find_oldest(txn);
+			last = env->me_pglast;
 			mdb_cursor_init(&m2, txn, FREE_DBI, NULL);
-			if (!txn->mt_env->me_pglast) {
-				mdb_page_search(&m2, NULL, 0);
-				leaf = NODEPTR(m2.mc_pg[m2.mc_top], 0);
-				kptr = (txnid_t *)NODEKEY(leaf);
-				last = *kptr;
-			} else {
-				MDB_val key;
-again:
-				last = txn->mt_env->me_pglast + 1;
-				leaf = NULL;
-				key.mv_data = &last;
+			if (last) {
+				op = MDB_SET_RANGE;
+				key.mv_data = &last; /* will loop up last+1 */
 				key.mv_size = sizeof(last);
-				rc = mdb_cursor_set(&m2, &key, &data, MDB_SET_RANGE, NULL);
-				if (rc)
-					goto none;
-				last = *(txnid_t *)key.mv_data;
 			}
-
-			if (!oldest)
-				oldest = mdb_find_oldest(txn);
-
-			if (oldest > last) {
-				/* It's usable, grab it.
-				 */
-				pgno_t *idl;
-
-				if (!txn->mt_env->me_pglast) {
-					mdb_node_read(txn, leaf, &data);
-				}
-				idl = (MDB_ID *) data.mv_data;
-				mop_len = idl[0];
-				if (!mop) {
-					if (!(env->me_pghead = mop = mdb_midl_alloc(mop_len)))
-						return ENOMEM;
-				} else if (mop_len > mop[-1]) {
-					if ((rc = mdb_midl_grow(&env->me_pghead, mop_len)) != 0)
-						return rc;
-					mop = env->me_pghead;
-				}
-				txn->mt_env->me_pglast = last;
-				memcpy(mop, idl, MDB_IDL_SIZEOF(idl));
-
-#if MDB_DEBUG > 1
-				{
-					unsigned int i;
-					DPRINTF("IDL read txn %zu root %zu num %zu",
-						last, txn->mt_dbs[FREE_DBI].md_root, idl[0]);
-					for (i = idl[0]; i; i--)
-						DPRINTF("IDL %zu", idl[i]);
-				}
-#endif
-				/* We might have a zero-length IDL due to freelist growth
-				 * during a prior commit
-				 */
-				if (!mop_len)
-					goto again;
-			}
+			if (Paranoid && mc->mc_dbi == FREE_DBI)
+				retry = -1;
 		}
-none:
-		if (mop_len) {
-			if (num > 1) {
-				MDB_cursor m2;
-				int retry = 1, readit = 0, n2 = num-1;
-				unsigned int i, j, k;
+		if (Paranoid && retry < 0 && mop_len)
+			break;
 
-				/* If current list is too short, must fetch more and coalesce */
-				if (mop[0] < (unsigned)num)
-					readit = 1;
-
-				mdb_cursor_init(&m2, txn, FREE_DBI, NULL);
-				do {
-#ifdef MDB_PARANOID	/* Seems like we can ignore this now */
-					/* If on freelist, don't try to read more. If what we have
-					 * right now isn't enough just use new pages.
-					 * TODO: get all of this working. Many circular dependencies...
-					 */
-					if (mc->mc_dbi == FREE_DBI) {
-						retry = 0;
-						readit = 0;
-					}
-#endif
-					if (readit) {
-						MDB_val key, data;
-						pgno_t *idl, old_id, new_id;
-
-						last = txn->mt_env->me_pglast + 1;
-
-						/* We haven't hit the readers list yet? */
-						if (!oldest) {
-							oldest = mdb_find_oldest(txn);
-						}
-
-						/* There's nothing we can use on the freelist */
-						if (oldest - last < 1)
-							break;
-
-						key.mv_data = &last;
-						key.mv_size = sizeof(last);
-						rc = mdb_cursor_set(&m2,&key,&data,MDB_SET_RANGE,NULL);
-						if (rc) {
-							if (rc == MDB_NOTFOUND)
-								break;
-							return rc;
-						}
-						last = *(txnid_t*)key.mv_data;
-						if (oldest <= last)
-							break;
-						idl = (MDB_ID *) data.mv_data;
-						i = idl[0];
-						if (mop_len+i > mop[-1]) {
-							if ((rc = mdb_midl_grow(&env->me_pghead, i)) != 0)
-								return rc;
-							mop = env->me_pghead;
-						}
-#if MDB_DEBUG > 1
-						DPRINTF("IDL read txn %zu root %zu num %u",
-							last, txn->mt_dbs[FREE_DBI].md_root, i);
-						for (k = i; k; k--)
-							DPRINTF("IDL %zu", idl[k]);
-#endif
-						/* merge in sorted order */
-						j = mop_len;
-						k = mop_len += i;
-						mop[0] = P_INVALID;
-						old_id = mop[j];
-						while (i) {
-							new_id = idl[i--];
-							for (; old_id < new_id; old_id = mop[--j])
-								mop[k--] = old_id;
-							mop[k--] = new_id;
-						}
-						mop[0] = mop_len;
-						txn->mt_env->me_pglast = last;
-						/* Keep trying to read until we have enough */
-						if (mop[0] < (unsigned)num) {
-							continue;
-						}
-					}
-
-					/* current list has enough pages, but are they contiguous? */
-					for (i=mop[0]; i>=(unsigned)num; i--) {
-						if (mop[i-n2] == mop[i] + n2) {
-							pgno = mop[i];
-							i -= n2;
-							/* move any stragglers down */
-							for (j=i+num; j<=mop[0]; j++)
-								mop[i++] = mop[j];
-							mop[0] -= num;
-							break;
-						}
-					}
-
-					/* Stop if we succeeded, or no retries */
-					if (!retry || pgno != P_INVALID)
-						break;
-					readit = 1;
-
-				} while (1);
-			} else {
-				/* peel pages off tail, so we only have to truncate the list */
-				pgno = MDB_IDL_LAST(mop);
-				mop[0]--;
-			}
+		last++;
+		/* Do not fetch more if the record will be too recent */
+		if (oldest <= last)
+			break;
+		rc = mdb_cursor_get(&m2, &key, NULL, op);
+		if (rc) {
+			if (rc == MDB_NOTFOUND)
+				break;
+			return rc;
 		}
+		last = *(txnid_t*)key.mv_data;
+		if (oldest <= last)
+			break;
+		np = m2.mc_pg[m2.mc_top];
+		leaf = NODEPTR(np, m2.mc_ki[m2.mc_top]);
+		if ((rc = mdb_node_read(txn, leaf, &data)) != MDB_SUCCESS)
+			return rc;
+
+		idl = (MDB_ID *) data.mv_data;
+		i = idl[0];
+		if (!mop) {
+			if (!(env->me_pghead = mop = mdb_midl_alloc(i)))
+				return ENOMEM;
+		} else if (mop_len+i > mop[-1]) {
+			if ((rc = mdb_midl_grow(&env->me_pghead, i)) != 0)
+				return rc;
+			mop = env->me_pghead;
+		}
+		env->me_pglast = last;
+#if MDB_DEBUG > 1
+		DPRINTF("IDL read txn %zu root %zu num %u",
+				last, txn->mt_dbs[FREE_DBI].md_root, i);
+		for (k = i; k; k--)
+			DPRINTF("IDL %zu", idl[k]);
+#endif
+		/* Merge in descending sorted order */
+		j = mop_len;
+		k = mop_len += i;
+		mop[0] = (pgno_t)-1;
+		old_id = mop[j];
+		while (i) {
+			new_id = idl[i--];
+			for (; old_id < new_id; old_id = mop[--j])
+				mop[k--] = old_id;
+			mop[k--] = new_id;
+		}
+		mop[0] = mop_len;
 	}
 
-	if (pgno == P_INVALID) {
-		/* DB size is maxed out */
-		if (txn->mt_next_pgno + num >= txn->mt_env->me_maxpg) {
+	/* Use new pages from the map when nothing suitable in the freeDB */
+	pgno = P_INVALID;
+	if (txn->mt_next_pgno + num >= env->me_maxpg) {
 			DPUTS("DB size maxed out");
 			return MDB_MAP_FULL;
-		}
 	}
-	if (txn->mt_env->me_flags & MDB_WRITEMAP) {
+
+search_done:
+	if (env->me_flags & MDB_WRITEMAP) {
 		if (pgno == P_INVALID) {
 			pgno = txn->mt_next_pgno;
 			txn->mt_next_pgno += num;
 		}
-		np = (MDB_page *)(txn->mt_env->me_map + txn->mt_env->me_psize * pgno);
-		np->mp_pgno = pgno;
+		np = (MDB_page *)(env->me_map + env->me_psize * pgno);
 	} else {
 		if (!(np = mdb_page_malloc(mc, num)))
 			return ENOMEM;
 		if (pgno == P_INVALID) {
-			np->mp_pgno = txn->mt_next_pgno;
+			pgno = txn->mt_next_pgno;
 			txn->mt_next_pgno += num;
-		} else {
-			np->mp_pgno = pgno;
 		}
 	}
-	mid.mid = np->mp_pgno;
+	mid.mid = np->mp_pgno = pgno;
 	mid.mptr = np;
-	if (txn->mt_env->me_flags & MDB_WRITEMAP) {
+	if (env->me_flags & MDB_WRITEMAP) {
 		mdb_mid2l_append(txn->mt_u.dirty_list, &mid);
 	} else {
 		mdb_mid2l_insert(txn->mt_u.dirty_list, &mid);
