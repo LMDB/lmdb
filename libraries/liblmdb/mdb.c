@@ -1289,6 +1289,19 @@ mdb_page_free(MDB_env *env, MDB_page *mp)
 	env->me_dpages = mp;
 }
 
+/* Free a dirty page */
+static void
+mdb_dpage_free(MDB_env *env, MDB_page *dp)
+{
+	if (!IS_OVERFLOW(dp) || dp->mp_pages == 1) {
+		mdb_page_free(env, dp);
+	} else {
+		/* large pages just get freed directly */
+		VGMEMP_FREE(env, dp);
+		free(dp);
+	}
+}
+
 /* Return all dirty pages to dpage list */
 static void
 mdb_dlist_free(MDB_txn *txn)
@@ -1298,14 +1311,7 @@ mdb_dlist_free(MDB_txn *txn)
 	unsigned i, n = dl[0].mid;
 
 	for (i = 1; i <= n; i++) {
-		MDB_page *dp = dl[i].mptr;
-		if (!IS_OVERFLOW(dp) || dp->mp_pages == 1) {
-			mdb_page_free(env, dp);
-		} else {
-			/* large pages just get freed directly */
-			VGMEMP_FREE(env, dp);
-			free(dp);
-		}
+		mdb_dpage_free(env, dl[i].mptr);
 	}
 	dl[0].mid = 0;
 }
@@ -2191,16 +2197,111 @@ mdb_freelist_save(MDB_txn *txn)
 	return rc;
 }
 
+/** Flush dirty pages to the map, after clearing their dirty flag.
+ */
+static int
+mdb_page_flush(MDB_txn *txn)
+{
+	MDB_env		*env = txn->mt_env;
+	MDB_ID2L	dl = txn->mt_u.dirty_list;
+	unsigned	psize = env->me_psize;
+	int			i, pagecount = dl[0].mid, rc;
+	size_t		size, pos = 0;
+	pgno_t		pgno;
+	MDB_page	*dp;
+#ifdef _WIN32
+	OVERLAPPED	ov;
+	memset(&ov, 0, sizeof(ov));
+#else
+	struct iovec iov[MDB_COMMIT_PAGES];
+	ssize_t		wpos, wsize, wres;
+	size_t		next_pos = 1; /* impossible pos, so pos != next_pos */
+	int			n = 0;
+#endif
+
+	if (env->me_flags & MDB_WRITEMAP) {
+		/* Clear dirty flags */
+		for (i = pagecount; i; i--) {
+			dp = dl[i].mptr;
+			dp->mp_flags &= ~P_DIRTY;
+		}
+		dl[0].mid = 0;
+		return MDB_SUCCESS;
+	}
+
+	/* Write the pages */
+	for (i = 1;; i++) {
+		if (i <= pagecount) {
+			dp = dl[i].mptr;
+			pgno = dl[i].mid;
+			/* clear dirty flag */
+			dp->mp_flags &= ~P_DIRTY;
+			pos = pgno * psize;
+			size = psize;
+			if (IS_OVERFLOW(dp)) size *= dp->mp_pages;
+		}
+#ifdef _WIN32
+		else break;
+
+		/* Windows actually supports scatter/gather I/O, but only on
+		 * unbuffered file handles. Since we're relying on the OS page
+		 * cache for all our data, that's self-defeating. So we just
+		 * write pages one at a time. We use the ov structure to set
+		 * the write offset, to at least save the overhead of a Seek
+		 * system call.
+		 */
+		DPRINTF("committing page %zu", pgno);
+		ov.Offset = pos & 0xffffffff;
+		ov.OffsetHigh = pos >> 16;
+		ov.OffsetHigh >>= 16;
+		if (!WriteFile(env->me_fd, dp, size, NULL, &ov)) {
+			rc = ErrCode();
+			DPRINTF("WriteFile: %d", rc);
+			return rc;
+		}
+#else
+		/* Write up to MDB_COMMIT_PAGES dirty pages at a time. */
+		if (pos != next_pos || n == MDB_COMMIT_PAGES) {
+			if (n) {
+				/* Write previous page(s) */
+				lseek(env->me_fd, wpos, SEEK_SET);
+				wres = writev(env->me_fd, iov, n);
+				if (wres != wsize) {
+					rc = ErrCode();
+					if (wres < 0) {
+						DPRINTF("writev: %s", strerror(rc));
+					} else {
+						DPUTS("short write, filesystem full?");
+					}
+					return rc;
+				}
+				n = 0;
+			}
+			if (i > pagecount)
+				break;
+			wpos = pos;
+			wsize = 0;
+		}
+		DPRINTF("committing page %zu", pgno);
+		next_pos = pos + size;
+		iov[n].iov_len = size;
+		iov[n].iov_base = (char *)dp;
+		wsize += size;
+		n++;
+#endif	/* _WIN32 */
+	}
+
+	mdb_dlist_free(txn);
+
+	return MDB_SUCCESS;
+}
+
 int
 mdb_txn_commit(MDB_txn *txn)
 {
-	int		 n, done;
+	int		rc;
 	unsigned int i;
-	ssize_t		 rc;
-	off_t		 size;
-	MDB_page	*dp;
 	MDB_env	*env;
-	pgno_t	next;
 
 	assert(txn != NULL);
 	assert(txn->mt_env != NULL);
@@ -2208,10 +2309,8 @@ mdb_txn_commit(MDB_txn *txn)
 	if (txn->mt_child) {
 		rc = mdb_txn_commit(txn->mt_child);
 		txn->mt_child = NULL;
-		if (rc) {
-			mdb_txn_abort(txn);
-			return rc;
-		}
+		if (rc)
+			goto fail;
 	}
 
 	env = txn->mt_env;
@@ -2227,8 +2326,8 @@ mdb_txn_commit(MDB_txn *txn)
 		DPUTS("error flag is set, can't commit");
 		if (txn->mt_parent)
 			txn->mt_parent->mt_flags |= MDB_TXN_ERROR;
-		mdb_txn_abort(txn);
-		return EINVAL;
+		rc = EINVAL;
+		goto fail;
 	}
 
 	if (txn->mt_parent) {
@@ -2237,10 +2336,9 @@ mdb_txn_commit(MDB_txn *txn)
 		MDB_ID2L dst, src;
 
 		/* Append our free list to parent's */
-		if (mdb_midl_append_list(&parent->mt_free_pgs, txn->mt_free_pgs)) {
-			mdb_txn_abort(txn);
-			return ENOMEM;
-		}
+		rc = mdb_midl_append_list(&parent->mt_free_pgs, txn->mt_free_pgs);
+		if (rc)
+			goto fail;
 		mdb_midl_free(txn->mt_free_pgs);
 
 		parent->mt_next_pgno = txn->mt_next_pgno;
@@ -2302,8 +2400,8 @@ mdb_txn_commit(MDB_txn *txn)
 
 	if (txn != env->me_txn) {
 		DPUTS("attempt to commit unknown transaction");
-		mdb_txn_abort(txn);
-		return EINVAL;
+		rc = EINVAL;
+		goto fail;
 	}
 
 	mdb_cursors_close(txn, 0);
@@ -2338,125 +2436,17 @@ mdb_txn_commit(MDB_txn *txn)
 
 	mdb_midl_free(env->me_pghead);
 	env->me_pghead = NULL;
-	if (!MDB_IDL_IS_ZERO(txn->mt_free_pgs)) {
-		if (mdb_midl_shrink(&txn->mt_free_pgs))
-			env->me_free_pgs = txn->mt_free_pgs;
-	}
+	if (mdb_midl_shrink(&txn->mt_free_pgs))
+		env->me_free_pgs = txn->mt_free_pgs;
 
 #if MDB_DEBUG > 2
 	mdb_audit(txn);
 #endif
 
-	if (env->me_flags & MDB_WRITEMAP) {
-		for (i=1; i<=txn->mt_u.dirty_list[0].mid; i++) {
-			dp = txn->mt_u.dirty_list[i].mptr;
-			/* clear dirty flag */
-			dp->mp_flags &= ~P_DIRTY;
-		}
-		txn->mt_u.dirty_list[0].mid = 0;
-		goto sync;
-	}
-
-	/* Commit up to MDB_COMMIT_PAGES dirty pages to disk until done.
-	 */
-	next = 0;
-	i = 1;
-	do {
-#ifdef _WIN32
-		/* Windows actually supports scatter/gather I/O, but only on
-		 * unbuffered file handles. Since we're relying on the OS page
-		 * cache for all our data, that's self-defeating. So we just
-		 * write pages one at a time. We use the ov structure to set
-		 * the write offset, to at least save the overhead of a Seek
-		 * system call.
-		 */
-		OVERLAPPED ov;
-		memset(&ov, 0, sizeof(ov));
-		for (; i<=txn->mt_u.dirty_list[0].mid; i++) {
-			size_t wsize;
-			dp = txn->mt_u.dirty_list[i].mptr;
-			DPRINTF("committing page %zu", dp->mp_pgno);
-			size = dp->mp_pgno * env->me_psize;
-			ov.Offset = size & 0xffffffff;
-			ov.OffsetHigh = size >> 16;
-			ov.OffsetHigh >>= 16;
-			/* clear dirty flag */
-			dp->mp_flags &= ~P_DIRTY;
-			wsize = env->me_psize;
-			if (IS_OVERFLOW(dp)) wsize *= dp->mp_pages;
-			rc = WriteFile(env->me_fd, dp, wsize, NULL, &ov);
-			if (!rc) {
-				n = ErrCode();
-				DPRINTF("WriteFile: %d", n);
-				mdb_txn_abort(txn);
-				return n;
-			}
-		}
-		done = 1;
-#else
-		struct iovec	 iov[MDB_COMMIT_PAGES];
-		n = 0;
-		done = 1;
-		size = 0;
-		for (; i<=txn->mt_u.dirty_list[0].mid; i++) {
-			dp = txn->mt_u.dirty_list[i].mptr;
-			if (dp->mp_pgno != next) {
-				if (n) {
-					rc = writev(env->me_fd, iov, n);
-					if (rc != size) {
-						n = ErrCode();
-						if (rc > 0)
-							DPUTS("short write, filesystem full?");
-						else
-							DPRINTF("writev: %s", strerror(n));
-						mdb_txn_abort(txn);
-						return n;
-					}
-					n = 0;
-					size = 0;
-				}
-				lseek(env->me_fd, dp->mp_pgno * env->me_psize, SEEK_SET);
-				next = dp->mp_pgno;
-			}
-			DPRINTF("committing page %zu", dp->mp_pgno);
-			iov[n].iov_len = env->me_psize;
-			if (IS_OVERFLOW(dp)) iov[n].iov_len *= dp->mp_pages;
-			iov[n].iov_base = (char *)dp;
-			size += iov[n].iov_len;
-			next = dp->mp_pgno + (IS_OVERFLOW(dp) ? dp->mp_pages : 1);
-			/* clear dirty flag */
-			dp->mp_flags &= ~P_DIRTY;
-			if (++n >= MDB_COMMIT_PAGES) {
-				done = 0;
-				i++;
-				break;
-			}
-		}
-
-		if (n == 0)
-			break;
-
-		rc = writev(env->me_fd, iov, n);
-		if (rc != size) {
-			n = ErrCode();
-			if (rc > 0)
-				DPUTS("short write, filesystem full?");
-			else
-				DPRINTF("writev: %s", strerror(n));
-			mdb_txn_abort(txn);
-			return n;
-		}
-#endif
-	} while (!done);
-
-	mdb_dlist_free(txn);
-
-sync:
-	if ((n = mdb_env_sync(env, 0)) != 0 ||
-	    (n = mdb_env_write_meta(txn)) != MDB_SUCCESS) {
-		mdb_txn_abort(txn);
-		return n;
-	}
+	if ((rc = mdb_page_flush(txn)) ||
+		(rc = mdb_env_sync(env, 0)) ||
+		(rc = mdb_env_write_meta(txn)))
+		goto fail;
 
 done:
 	env->me_pglast = 0;
@@ -3499,8 +3489,7 @@ mdb_env_close0(MDB_env *env, int excl)
 	free(env->me_dbxs);
 	free(env->me_path);
 	free(env->me_dirty_list);
-	if (env->me_free_pgs)
-		mdb_midl_free(env->me_free_pgs);
+	mdb_midl_free(env->me_free_pgs);
 
 	if (env->me_flags & MDB_ENV_TXKEY) {
 		pthread_key_delete(env->me_txkey);
