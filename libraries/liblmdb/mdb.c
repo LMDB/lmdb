@@ -2211,7 +2211,6 @@ mdb_page_flush(MDB_txn *txn)
 	MDB_page	*dp;
 #ifdef _WIN32
 	OVERLAPPED	ov;
-	memset(&ov, 0, sizeof(ov));
 #else
 	struct iovec iov[MDB_COMMIT_PAGES];
 	ssize_t		wpos, wsize, wres;
@@ -2251,9 +2250,9 @@ mdb_page_flush(MDB_txn *txn)
 		 * system call.
 		 */
 		DPRINTF("committing page %zu", pgno);
+		memset(&ov, 0, sizeof(ov));
 		ov.Offset = pos & 0xffffffff;
-		ov.OffsetHigh = pos >> 16;
-		ov.OffsetHigh >>= 16;
+		ov.OffsetHigh = pos >> 16 >> 16;
 		if (!WriteFile(env->me_fd, dp, size, NULL, &ov)) {
 			rc = ErrCode();
 			DPRINTF("WriteFile: %d", rc);
@@ -2606,6 +2605,8 @@ mdb_env_write_meta(MDB_txn *txn)
 	HANDLE mfd;
 #ifdef _WIN32
 	OVERLAPPED ov;
+#else
+	int r2;
 #endif
 
 	assert(txn != NULL);
@@ -2674,7 +2675,6 @@ mdb_env_write_meta(MDB_txn *txn)
 	rc = pwrite(mfd, ptr, len, off);
 #endif
 	if (rc != len) {
-		int r2;
 		rc = ErrCode();
 		DPUTS("write failed, disk error?");
 		/* On a failure, the pagecache still contains the new data.
@@ -2782,9 +2782,12 @@ static int
 mdb_env_open2(MDB_env *env)
 {
 	unsigned int flags = env->me_flags;
-	int i, newenv = 0, prot;
+	int i, newenv = 0;
 	MDB_meta meta;
 	MDB_page *p;
+#ifndef _WIN32
+	int prot;
+#endif
 
 	memset(&meta, 0, sizeof(meta));
 
@@ -2815,16 +2818,15 @@ mdb_env_open2(MDB_env *env)
 		HANDLE mh;
 		LONG sizelo, sizehi;
 		sizelo = env->me_mapsize & 0xffffffff;
-		sizehi = env->me_mapsize >> 16;		/* pointless on WIN32, only needed on W64 */
-		sizehi >>= 16;
+		sizehi = env->me_mapsize >> 16 >> 16; /* only needed on Win64 */
 		/* Windows won't create mappings for zero length files.
 		 * Just allocate the maxsize right now.
 		 */
 		if (newenv) {
-			SetFilePointer(env->me_fd, sizelo, sizehi ? &sizehi : NULL, 0);
-			if (!SetEndOfFile(env->me_fd))
+			if (SetFilePointer(env->me_fd, sizelo, &sizehi, 0) != (DWORD)sizelo
+				|| !SetEndOfFile(env->me_fd)
+				|| SetFilePointer(env->me_fd, 0, NULL, 0) != 0)
 				return ErrCode();
-			SetFilePointer(env->me_fd, 0, NULL, 0);
 		}
 		mh = CreateFileMapping(env->me_fd, NULL, flags & MDB_WRITEMAP ?
 			PAGE_READWRITE : PAGE_READONLY,
