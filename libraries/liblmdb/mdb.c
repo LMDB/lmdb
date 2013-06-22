@@ -1438,8 +1438,8 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 		if (!mop) {
 			if (!(env->me_pghead = mop = mdb_midl_alloc(i)))
 				return ENOMEM;
-		} else if (mop_len+i > mop[-1]) {
-			if ((rc = mdb_midl_grow(&env->me_pghead, i)) != 0)
+		} else {
+			if ((rc = mdb_midl_need(&env->me_pghead, i)) != 0)
 				return rc;
 			mop = env->me_pghead;
 		}
@@ -1538,12 +1538,13 @@ mdb_page_touch(MDB_cursor *mc)
 	int rc;
 
 	if (!F_ISSET(mp->mp_flags, P_DIRTY)) {
-		if ((rc = mdb_page_alloc(mc, 1, &np)))
+		if ((rc = mdb_midl_need(&txn->mt_free_pgs, 1)) ||
+			(rc = mdb_page_alloc(mc, 1, &np)))
 			return rc;
 		pgno = np->mp_pgno;
 		DPRINTF("touched db %u page %zu -> %zu", mc->mc_dbi,mp->mp_pgno,pgno);
 		assert(mp->mp_pgno != pgno);
-		mdb_midl_append(&txn->mt_free_pgs, mp->mp_pgno);
+		mdb_midl_xappend(txn->mt_free_pgs, mp->mp_pgno);
 		/* Update the parent page, if any, to point to the new page */
 		if (mc->mc_top) {
 			MDB_page *parent = mc->mc_pg[mc->mc_top-1];
@@ -4207,16 +4208,11 @@ mdb_ovpage_free(MDB_cursor *mc, MDB_page *mp)
 	 */
 	if ((mp->mp_flags & P_DIRTY) && !txn->mt_parent && txn->mt_env->me_pghead) {
 		unsigned j, x;
-		pgno_t *mop = txn->mt_env->me_pghead;
+		pgno_t *mop;
 		MDB_ID2 *dl, ix, iy;
-		/* Prepare to insert pg */
-		j = mop[0] + ovpages;
-		if (j > mop[-1]) {
-			rc = mdb_midl_grow(&mop, ovpages);
-			if (rc)
-				return rc;
-			txn->mt_env->me_pghead = mop;
-		}
+		rc = mdb_midl_need(&txn->mt_env->me_pghead, ovpages);
+		if (rc)
+			return rc;
 		/* Remove from dirty list */
 		dl = txn->mt_u.dirty_list;
 		x = dl[0].mid--;
@@ -4231,16 +4227,17 @@ mdb_ovpage_free(MDB_cursor *mc, MDB_page *mp)
 			}
 		}
 		/* Insert in me_pghead */
+		mop = txn->mt_env->me_pghead;
+		j = mop[0] + ovpages;
 		for (i = mop[0]; i && mop[i] < pg; i--)
 			mop[j--] = mop[i];
 		while (j>i)
 			mop[j--] = pg++;
 		mop[0] += ovpages;
 	} else {
-		for (i=0; i<ovpages; i++) {
-			mdb_midl_append(&txn->mt_free_pgs, pg);
-			pg++;
-		}
+		rc = mdb_midl_append_range(&txn->mt_free_pgs, pg, ovpages);
+		if (rc)
+			return rc;
 	}
 	mc->mc_db->md_overflow_pages -= ovpages;
 	return 0;
@@ -5229,7 +5226,8 @@ current:
 					memcpy(METADATA(omp), data->mv_data, data->mv_size);
 				goto done;
 			} else {
-				mdb_ovpage_free(mc, omp);
+				if ((rc2 = mdb_ovpage_free(mc, omp)) != MDB_SUCCESS)
+					return rc2;
 			}
 		} else if (NODEDSZ(leaf) == data->mv_size) {
 			/* same size, just replace it. Note that we could
@@ -6308,7 +6306,10 @@ mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst)
 			return rc;
 	}
 
-	mdb_midl_append(&csrc->mc_txn->mt_free_pgs, csrc->mc_pg[csrc->mc_top]->mp_pgno);
+	rc = mdb_midl_append(&csrc->mc_txn->mt_free_pgs,
+		csrc->mc_pg[csrc->mc_top]->mp_pgno);
+	if (rc)
+		return rc;
 	if (IS_LEAF(csrc->mc_pg[csrc->mc_top]))
 		csrc->mc_db->md_leaf_pages--;
 	else
@@ -6409,7 +6410,9 @@ mdb_rebalance(MDB_cursor *mc)
 			mc->mc_db->md_root = P_INVALID;
 			mc->mc_db->md_depth = 0;
 			mc->mc_db->md_leaf_pages = 0;
-			mdb_midl_append(&mc->mc_txn->mt_free_pgs, mp->mp_pgno);
+			rc = mdb_midl_append(&mc->mc_txn->mt_free_pgs, mp->mp_pgno);
+			if (rc)
+				return rc;
 			/* Adjust cursors pointing to mp */
 			mc->mc_snum = 0;
 			mc->mc_top = 0;
@@ -6434,7 +6437,9 @@ mdb_rebalance(MDB_cursor *mc)
 			}
 		} else if (IS_BRANCH(mp) && NUMKEYS(mp) == 1) {
 			DPUTS("collapsing root page!");
-			mdb_midl_append(&mc->mc_txn->mt_free_pgs, mp->mp_pgno);
+			rc = mdb_midl_append(&mc->mc_txn->mt_free_pgs, mp->mp_pgno);
+			if (rc)
+				return rc;
 			mc->mc_db->md_root = NODEPGNO(NODEPTR(mp, 0));
 			rc = mdb_page_get(mc->mc_txn,mc->mc_db->md_root,&mc->mc_pg[0],NULL);
 			if (rc)
@@ -6539,10 +6544,9 @@ mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
 		pgno_t pg;
 
 		memcpy(&pg, NODEDATA(leaf), sizeof(pg));
-		if ((rc = mdb_page_get(mc->mc_txn, pg, &omp, NULL)) != 0)
+		if ((rc = mdb_page_get(mc->mc_txn, pg, &omp, NULL)) ||
+			(rc = mdb_ovpage_free(mc, omp)))
 			return rc;
-		assert(IS_OVERFLOW(omp));
-		mdb_ovpage_free(mc, omp);
 	}
 	mdb_node_del(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], mc->mc_db->md_pad);
 	mc->mc_db->md_entries--;
@@ -7312,7 +7316,6 @@ mdb_drop0(MDB_cursor *mc, int subs)
 				for (i=0; i<n; i++) {
 					ni = NODEPTR(mp, i);
 					if (ni->mn_flags & F_BIGDATA) {
-						int j, ovpages;
 						MDB_page *omp;
 						pgno_t pg;
 						memcpy(&pg, NODEDATA(ni), sizeof(pg));
@@ -7320,11 +7323,10 @@ mdb_drop0(MDB_cursor *mc, int subs)
 						if (rc != 0)
 							return rc;
 						assert(IS_OVERFLOW(omp));
-						ovpages = omp->mp_pages;
-						for (j=0; j<ovpages; j++) {
-							mdb_midl_append(&txn->mt_free_pgs, pg);
-							pg++;
-						}
+						rc = mdb_midl_append_range(&txn->mt_free_pgs,
+							pg, omp->mp_pages);
+						if (rc)
+							return rc;
 					} else if (subs && (ni->mn_flags & F_SUBDATA)) {
 						mdb_xcursor_init1(mc, ni);
 						rc = mdb_drop0(&mc->mc_xcursor->mx_cursor, 0);
@@ -7333,12 +7335,14 @@ mdb_drop0(MDB_cursor *mc, int subs)
 					}
 				}
 			} else {
+				if ((rc = mdb_midl_need(&txn->mt_free_pgs, n)) != 0)
+					return rc;
 				for (i=0; i<n; i++) {
 					pgno_t pg;
 					ni = NODEPTR(mp, i);
 					pg = NODEPGNO(ni);
 					/* free it */
-					mdb_midl_append(&txn->mt_free_pgs, pg);
+					mdb_midl_xappend(txn->mt_free_pgs, pg);
 				}
 			}
 			if (!mc->mc_top)
@@ -7358,9 +7362,11 @@ mdb_drop0(MDB_cursor *mc, int subs)
 			}
 		}
 		/* free it */
-		mdb_midl_append(&txn->mt_free_pgs, mc->mc_db->md_root);
+		rc = mdb_midl_append(&txn->mt_free_pgs, mc->mc_db->md_root);
+	} else if (rc == MDB_NOTFOUND) {
+		rc = MDB_SUCCESS;
 	}
-	return 0;
+	return rc;
 }
 
 int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)

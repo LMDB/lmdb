@@ -68,6 +68,12 @@ typedef MDB_ID *MDB_IDL;
 #define MDB_IDL_FIRST( ids )	( (ids)[1] )
 #define MDB_IDL_LAST( ids )		( (ids)[(ids)[0]] )
 
+	/** Append ID to IDL. The IDL must be big enough. */
+#define mdb_midl_xappend(idl, id) do { \
+		MDB_ID *xidl = (idl), xlen = ++(xidl[0]); \
+		xidl[xlen] = (id); \
+	} while (0)
+
 #if 0	/* superseded by append/sort */
 	/** Insert an ID into an IDL.
 	 * @param[in,out] ids	The IDL to insert into.
@@ -95,27 +101,34 @@ void mdb_midl_free(MDB_IDL ids);
 	 */
 int mdb_midl_shrink(MDB_IDL *idp);
 
-	/** Grow an IDL.
-	 * Add room for num additional elements.
-	 * @param[in,out] idp	Address of the IDL to grow.
-	 * @param[in] num	Number of elements to add.
-	 * @return	0 on success, -1 on failure.
+	/** Make room for num additional elements in an IDL.
+	 * @param[in,out] idp	Address of the IDL.
+	 * @param[in] num	Number of elements to make room for.
+	 * @return	0 on success, ENOMEM on failure.
 	 */
-int mdb_midl_grow(MDB_IDL *idp, int num);
+int mdb_midl_need(MDB_IDL *idp, unsigned num);
 
 	/** Append an ID onto an IDL.
 	 * @param[in,out] idp	Address of the IDL to append to.
 	 * @param[in] id	The ID to append.
-	 * @return	0 on success, -1 if the IDL is too large.
+	 * @return	0 on success, ENOMEM if the IDL is too large.
 	 */
 int mdb_midl_append( MDB_IDL *idp, MDB_ID id );
 
 	/** Append an IDL onto an IDL.
 	 * @param[in,out] idp	Address of the IDL to append to.
 	 * @param[in] app	The IDL to append.
-	 * @return	0 on success, -1 if the IDL is too large.
+	 * @return	0 on success, ENOMEM if the IDL is too large.
 	 */
 int mdb_midl_append_list( MDB_IDL *idp, MDB_IDL app );
+
+	/** Append an ID range onto an IDL.
+	 * @param[in,out] idp	Address of the IDL to append to.
+	 * @param[in] id	The lowest ID to append.
+	 * @param[in] n		Number of IDs to append.
+	 * @return	0 on success, ENOMEM if the IDL is too large.
+	 */
+int mdb_midl_append_range( MDB_IDL *idp, MDB_ID id, unsigned n );
 
 	/** Sort an IDL.
 	 * @param[in,out] ids	The IDL to sort.
