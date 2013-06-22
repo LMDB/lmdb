@@ -160,7 +160,7 @@
 #define	MDB_MSYNC(addr,len,flags)	(!FlushViewOfFile(addr,len))
 #define	ErrCode()	GetLastError()
 #define GET_PAGESIZE(x) {SYSTEM_INFO si; GetSystemInfo(&si); (x) = si.dwPageSize;}
-#define	close(fd)	CloseHandle(fd)
+#define	close(fd)	(CloseHandle(fd) ? 0 : -1)
 #define	munmap(ptr,len)	UnmapViewOfFile(ptr)
 #else
 
@@ -2263,13 +2263,22 @@ mdb_page_flush(MDB_txn *txn)
 		if (pos != next_pos || n == MDB_COMMIT_PAGES) {
 			if (n) {
 				/* Write previous page(s) */
-				lseek(env->me_fd, wpos, SEEK_SET);
-				wres = writev(env->me_fd, iov, n);
-				if (wres != wsize) {
+#ifdef HAVE_PWRITEV
+				wres = pwritev(env->me_fd, iov, n, wpos);
+#else
+				if (lseek(env->me_fd, wpos, SEEK_SET) < 0) {
 					rc = ErrCode();
+					DPRINTF("lseek: %s", strerror(rc));
+					return rc;
+				}
+				wres = writev(env->me_fd, iov, n);
+#endif
+				if (wres != wsize) {
 					if (wres < 0) {
+						rc = ErrCode();
 						DPRINTF("writev: %s", strerror(rc));
 					} else {
+						rc = EIO; /* TODO: Use which error code? */
 						DPUTS("short write, filesystem full?");
 					}
 					return rc;
@@ -2474,27 +2483,28 @@ mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 	MDB_pagebuf	pbuf;
 	MDB_page	*p;
 	MDB_meta	*m;
-	int		 i, rc, err;
+	int			i, rc, off;
 
 	/* We don't know the page size yet, so use a minimum value.
 	 * Read both meta pages so we can use the latest one.
 	 */
 
-	for (i=0; i<2; i++) {
+	for (i=off=0; i<2; i++, off = meta->mm_psize) {
 #ifdef _WIN32
-		if (!ReadFile(env->me_fd, &pbuf, MDB_PAGESIZE, (DWORD *)&rc, NULL) || rc == 0)
+		DWORD len;
+		OVERLAPPED ov;
+		memset(&ov, 0, sizeof(ov));
+		ov.Offset = off;
+		rc = ReadFile(env->me_fd,&pbuf,MDB_PAGESIZE,&len,&ov) ? (int)len : -1;
 #else
-		if ((rc = read(env->me_fd, &pbuf, MDB_PAGESIZE)) == 0)
+		rc = pread(env->me_fd, &pbuf, MDB_PAGESIZE, off);
 #endif
-		{
-			return ENOENT;
-		}
-		else if (rc != MDB_PAGESIZE) {
-			err = ErrCode();
-			if (rc > 0)
-				err = MDB_INVALID;
-			DPRINTF("read: %s", strerror(err));
-			return err;
+		if (rc != MDB_PAGESIZE) {
+			if (rc == 0 && off == 0)
+				return ENOENT;
+			rc = rc < 0 ? (int) ErrCode() : MDB_INVALID;
+			DPRINTF("read: %s", mdb_strerror(rc));
+			return rc;
 		}
 
 		p = (MDB_page *)&pbuf;
@@ -2516,18 +2526,8 @@ mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 			return MDB_VERSION_MISMATCH;
 		}
 
-		if (i) {
-			if (m->mm_txnid > meta->mm_txnid)
-				memcpy(meta, m, sizeof(*m));
-		} else {
+		if (off == 0 || m->mm_txnid > meta->mm_txnid)
 			memcpy(meta, m, sizeof(*m));
-#ifdef _WIN32
-			if (SetFilePointer(env->me_fd, meta->mm_psize, NULL, FILE_BEGIN) != meta->mm_psize)
-#else
-			if (lseek(env->me_fd, meta->mm_psize, SEEK_SET) != meta->mm_psize)
-#endif
-				return ErrCode();
-		}
 	}
 	return 0;
 }
@@ -2577,14 +2577,14 @@ mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 #ifdef _WIN32
 	{
 		DWORD len;
-		SetFilePointer(env->me_fd, 0, NULL, FILE_BEGIN);
-		rc = WriteFile(env->me_fd, p, psize * 2, &len, NULL);
-		rc = (len == psize * 2) ? MDB_SUCCESS : ErrCode();
+		OVERLAPPED ov;
+		memset(&ov, 0, sizeof(ov));
+		rc = WriteFile(env->me_fd, p, psize * 2, &len, &ov);
+		rc = rc ? (len == psize * 2 ? MDB_SUCCESS : EIO) : ErrCode();
 	}
 #else
-	lseek(env->me_fd, 0, SEEK_SET);
-	rc = write(env->me_fd, p, psize * 2);
-	rc = (rc == (int)psize * 2) ? MDB_SUCCESS : ErrCode();
+	rc = pwrite(env->me_fd, p, psize * 2, 0);
+	rc = (rc == (int)psize * 2) ? MDB_SUCCESS : rc < 0 ? ErrCode() : EIO;
 #endif
 	free(p);
 	return rc;
@@ -2669,13 +2669,14 @@ mdb_env_write_meta(MDB_txn *txn)
 	{
 		memset(&ov, 0, sizeof(ov));
 		ov.Offset = off;
-		WriteFile(mfd, ptr, len, (DWORD *)&rc, &ov);
+		if (!WriteFile(mfd, ptr, len, (DWORD *)&rc, &ov))
+			rc = -1;
 	}
 #else
 	rc = pwrite(mfd, ptr, len, off);
 #endif
 	if (rc != len) {
-		rc = ErrCode();
+		rc = rc < 0 ? ErrCode() : EIO;
 		DPUTS("write failed, disk error?");
 		/* On a failure, the pagecache still contains the new data.
 		 * Write some old data back, to prevent it from being used.
@@ -2815,6 +2816,7 @@ mdb_env_open2(MDB_env *env)
 
 #ifdef _WIN32
 	{
+		int rc;
 		HANDLE mh;
 		LONG sizelo, sizehi;
 		sizelo = env->me_mapsize & 0xffffffff;
@@ -2836,9 +2838,10 @@ mdb_env_open2(MDB_env *env)
 		env->me_map = MapViewOfFileEx(mh, flags & MDB_WRITEMAP ?
 			FILE_MAP_WRITE : FILE_MAP_READ,
 			0, 0, env->me_mapsize, meta.mm_address);
+		rc = env->me_map ? 0 : ErrCode();
 		CloseHandle(mh);
-		if (!env->me_map)
-			return ErrCode();
+		if (rc)
+			return rc;
 	}
 #else
 	i = MAP_SHARED;
@@ -3207,12 +3210,14 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 	size = GetFileSize(env->me_lfd, NULL);
 #else
 	size = lseek(env->me_lfd, 0, SEEK_END);
+	if (size == -1) goto fail_errno;
 #endif
 	rsize = (env->me_maxreaders-1) * sizeof(MDB_reader) + sizeof(MDB_txninfo);
 	if (size < rsize && *excl > 0) {
 #ifdef _WIN32
-		SetFilePointer(env->me_lfd, rsize, NULL, 0);
-		if (!SetEndOfFile(env->me_lfd)) goto fail_errno;
+		if (SetFilePointer(env->me_lfd, rsize, NULL, FILE_BEGIN) != rsize
+			|| !SetEndOfFile(env->me_lfd))
+			goto fail_errno;
 #else
 		if (ftruncate(env->me_lfd, rsize) != 0) goto fail_errno;
 #endif
@@ -3327,7 +3332,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 			goto fail;
 		}
 		rc = ErrCode();
-		if (rc != EACCES && rc != EAGAIN) {
+		if (rc && rc != EACCES && rc != EAGAIN) {
 			goto fail;
 		}
 #ifdef _WIN32
@@ -3510,9 +3515,9 @@ mdb_env_close0(MDB_env *env, int excl)
 		munmap(env->me_map, env->me_mapsize);
 	}
 	if (env->me_mfd != env->me_fd && env->me_mfd != INVALID_HANDLE_VALUE)
-		close(env->me_mfd);
+		(void) close(env->me_mfd);
 	if (env->me_fd != INVALID_HANDLE_VALUE)
-		close(env->me_fd);
+		(void) close(env->me_fd);
 	if (env->me_txns) {
 		pid_t pid = env->me_pid;
 		/* Clearing readers is done in this function because
@@ -3556,7 +3561,7 @@ mdb_env_close0(MDB_env *env, int excl)
 			UnlockFile(env->me_lfd, 0, 0, 1, 0);
 		}
 #endif
-		close(env->me_lfd);
+		(void) close(env->me_lfd);
 	}
 
 	env->me_flags &= ~(MDB_ENV_ACTIVE|MDB_ENV_TXKEY);
@@ -3596,11 +3601,11 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
 	{
 		DWORD len;
 		rc = WriteFile(fd, env->me_map, wsize, &len, NULL);
-		rc = (len == wsize) ? MDB_SUCCESS : ErrCode();
+		rc = rc ? (len == wsize ? MDB_SUCCESS : EIO) : ErrCode();
 	}
 #else
 	rc = write(fd, env->me_map, wsize);
-	rc = (rc == (int)wsize) ? MDB_SUCCESS : ErrCode();
+	rc = rc == (int)wsize ? MDB_SUCCESS : rc < 0 ? ErrCode() : EIO;
 #endif
 	if (env->me_txns)
 		UNLOCK_MUTEX_W(env);
@@ -3619,7 +3624,7 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
 		else
 			w2 = wsize;
 		rc = WriteFile(fd, ptr, w2, &len, NULL);
-		rc = (len == w2) ? MDB_SUCCESS : ErrCode();
+		rc = rc ? (len == w2 ? MDB_SUCCESS : EIO) : ErrCode();
 		if (rc) break;
 		wsize -= w2;
 		ptr += w2;
@@ -3633,7 +3638,7 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
 		else
 			w2 = wsize;
 		wres = write(fd, ptr, w2);
-		rc = (wres > 0) ? MDB_SUCCESS : ErrCode();
+		rc = wres == (ssize_t)w2 ? MDB_SUCCESS : rc < 0 ? ErrCode() : EIO;
 		if (rc) break;
 		wsize -= wres;
 		ptr += wres;
@@ -3677,8 +3682,6 @@ mdb_env_copy(MDB_env *env, const char *path)
 #endif
 		, 0666);
 #endif
-	if (!(env->me_flags & MDB_NOSUBDIR))
-		free(lpath);
 	if (newfd == INVALID_HANDLE_VALUE) {
 		rc = ErrCode();
 		goto leave;
@@ -3695,8 +3698,11 @@ mdb_env_copy(MDB_env *env, const char *path)
 	rc = mdb_env_copyfd(env, newfd);
 
 leave:
+	if (!(env->me_flags & MDB_NOSUBDIR))
+		free(lpath);
 	if (newfd != INVALID_HANDLE_VALUE)
-		close(newfd);
+		if (close(newfd) < 0 && rc == MDB_SUCCESS)
+			rc = ErrCode();
 
 	return rc;
 }
