@@ -1726,8 +1726,11 @@ mdb_cursors_close(MDB_txn *txn, unsigned merge)
 	}
 }
 
+#ifdef MDB_DEBUG_SKIP
+#define mdb_txn_reset0(txn, act) mdb_txn_reset0(txn)
+#endif
 static void
-mdb_txn_reset0(MDB_txn *txn);
+mdb_txn_reset0(MDB_txn *txn, const char *act);
 
 /** Common code for #mdb_txn_begin() and #mdb_txn_renew().
  * @param[in] txn the transaction handle to initialize
@@ -1816,7 +1819,7 @@ mdb_txn_renew0(MDB_txn *txn)
 	txn->mt_dbflags[0] = txn->mt_dbflags[1] = DB_VALID;
 
 	if (env->me_maxpg < txn->mt_next_pgno) {
-		mdb_txn_reset0(txn);
+		mdb_txn_reset0(txn, "renew0-mapfail");
 		if (new_notls) {
 			txn->mt_u.reader->mr_pid = 0;
 			txn->mt_u.reader = NULL;
@@ -1928,7 +1931,7 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 		if (!rc)
 			rc = mdb_cursor_shadow(parent, txn);
 		if (rc)
-			mdb_txn_reset0(txn);
+			mdb_txn_reset0(txn, "beginchild-fail");
 	} else {
 		rc = mdb_txn_renew0(txn);
 	}
@@ -1975,12 +1978,16 @@ mdb_dbis_update(MDB_txn *txn, int keep)
  * @param[in] txn the transaction handle to reset
  */
 static void
-mdb_txn_reset0(MDB_txn *txn)
+mdb_txn_reset0(MDB_txn *txn, const char *act)
 {
 	MDB_env	*env = txn->mt_env;
 
 	/* Close any DBI handles opened in this txn */
 	mdb_dbis_update(txn, 0);
+
+	DPRINTF("%s txn %zu%c %p on mdbenv %p, root page %zu",
+		act, txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w',
+		(void *) txn, (void *)txn->mt_env, txn->mt_dbs[MAIN_DBI].md_root);
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
 		if (txn->mt_u.reader) {
@@ -2023,15 +2030,11 @@ mdb_txn_reset(MDB_txn *txn)
 	if (txn == NULL)
 		return;
 
-	DPRINTF("reset txn %zu%c %p on mdbenv %p, root page %zu",
-		txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w',
-		(void *) txn, (void *)txn->mt_env, txn->mt_dbs[MAIN_DBI].md_root);
-
 	/* This call is only valid for read-only txns */
 	if (!(txn->mt_flags & MDB_TXN_RDONLY))
 		return;
 
-	mdb_txn_reset0(txn);
+	mdb_txn_reset0(txn, "reset");
 }
 
 void
@@ -2040,14 +2043,10 @@ mdb_txn_abort(MDB_txn *txn)
 	if (txn == NULL)
 		return;
 
-	DPRINTF("abort txn %zu%c %p on mdbenv %p, root page %zu",
-		txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w',
-		(void *)txn, (void *)txn->mt_env, txn->mt_dbs[MAIN_DBI].md_root);
-
 	if (txn->mt_child)
 		mdb_txn_abort(txn->mt_child);
 
-	mdb_txn_reset0(txn);
+	mdb_txn_reset0(txn, "abort");
 	/* Free reader slot tied to this txn (if MDB_NOTLS && writable FS) */
 	if ((txn->mt_flags & MDB_TXN_RDONLY) && txn->mt_u.reader)
 		txn->mt_u.reader->mr_pid = 0;
@@ -3578,7 +3577,7 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
 
 	if (env->me_txns) {
 		/* We must start the actual read txn after blocking writers */
-		mdb_txn_reset0(txn);
+		mdb_txn_reset0(txn, "reset-stage1");
 
 		/* Temporarily block writers until we snapshot the meta pages */
 		LOCK_MUTEX_W(env);
@@ -4146,7 +4145,9 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int flags)
 						&mc->mc_dbx->md_name, &exact);
 					if (!exact)
 						return MDB_NOTFOUND;
-					mdb_node_read(mc->mc_txn, leaf, &data);
+					rc = mdb_node_read(mc->mc_txn, leaf, &data);
+					if (rc)
+						return rc;
 					memcpy(&flags, ((char *) data.mv_data + offsetof(MDB_db, md_flags)),
 						sizeof(uint16_t));
 					/* The txn may not know this DBI, or another process may
@@ -4374,7 +4375,7 @@ mdb_cursor_next(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 		if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
 			if (op == MDB_NEXT || op == MDB_NEXT_DUP) {
 				rc = mdb_cursor_next(&mc->mc_xcursor->mx_cursor, data, NULL, MDB_NEXT);
-				if (op != MDB_NEXT || rc == MDB_SUCCESS)
+				if (op != MDB_NEXT || rc != MDB_NOTFOUND)
 					return rc;
 			}
 		} else {
@@ -4388,10 +4389,10 @@ mdb_cursor_next(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 
 	if (mc->mc_ki[mc->mc_top] + 1u >= NUMKEYS(mp)) {
 		DPUTS("=====> move to next sibling page");
-		if (mdb_cursor_sibling(mc, 1) != MDB_SUCCESS) {
+		if ((rc = mdb_cursor_sibling(mc, 1)) != MDB_SUCCESS) {
 			mc->mc_flags |= C_EOF;
 			mc->mc_flags &= ~C_INITIALIZED;
-			return MDB_NOTFOUND;
+			return rc;
 		}
 		mp = mc->mc_pg[mc->mc_top];
 		DPRINTF("next page is %zu, key index %u", mp->mp_pgno, mc->mc_ki[mc->mc_top]);
@@ -4445,7 +4446,7 @@ mdb_cursor_prev(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 		if (op == MDB_PREV || op == MDB_PREV_DUP) {
 			if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
 				rc = mdb_cursor_prev(&mc->mc_xcursor->mx_cursor, data, NULL, MDB_PREV);
-				if (op != MDB_PREV || rc == MDB_SUCCESS)
+				if (op != MDB_PREV || rc != MDB_NOTFOUND)
 					return rc;
 			} else {
 				mc->mc_xcursor->mx_cursor.mc_flags &= ~C_INITIALIZED;
@@ -4459,9 +4460,9 @@ mdb_cursor_prev(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 
 	if (mc->mc_ki[mc->mc_top] == 0)  {
 		DPUTS("=====> move to prev sibling page");
-		if (mdb_cursor_sibling(mc, 0) != MDB_SUCCESS) {
+		if ((rc = mdb_cursor_sibling(mc, 0)) != MDB_SUCCESS) {
 			mc->mc_flags &= ~C_INITIALIZED;
-			return MDB_NOTFOUND;
+			return rc;
 		}
 		mp = mc->mc_pg[mc->mc_top];
 		mc->mc_ki[mc->mc_top] = NUMKEYS(mp) - 1;
