@@ -1993,7 +1993,7 @@ mdb_txn_reset0(MDB_txn *txn, const char *act)
 
 	DPRINTF("%s txn %zu%c %p on mdbenv %p, root page %zu",
 		act, txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w',
-		(void *) txn, (void *)txn->mt_env, txn->mt_dbs[MAIN_DBI].md_root);
+		(void *) txn, (void *)env, txn->mt_dbs[MAIN_DBI].md_root);
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
 		if (txn->mt_u.reader) {
@@ -2537,7 +2537,7 @@ mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 		}
 
 		if (off == 0 || m->mm_txnid > meta->mm_txnid)
-			memcpy(meta, m, sizeof(*m));
+			*meta = *m;
 	}
 	return 0;
 }
@@ -2551,7 +2551,6 @@ static int
 mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 {
 	MDB_page *p, *q;
-	MDB_meta *m;
 	int rc;
 	unsigned int	 psize;
 
@@ -2572,17 +2571,12 @@ mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 	p = calloc(2, psize);
 	p->mp_pgno = 0;
 	p->mp_flags = P_META;
-
-	m = METADATA(p);
-	memcpy(m, meta, sizeof(*meta));
+	*(MDB_meta *)METADATA(p) = *meta;
 
 	q = (MDB_page *)((char *)p + psize);
-
 	q->mp_pgno = 1;
 	q->mp_flags = P_META;
-
-	m = METADATA(q);
-	memcpy(m, meta, sizeof(*meta));
+	*(MDB_meta *)METADATA(q) = *meta;
 
 #ifdef _WIN32
 	{
@@ -4218,6 +4212,7 @@ mdb_ovpage_free(MDB_cursor *mc, MDB_page *mp)
 	MDB_txn *txn = mc->mc_txn;
 	pgno_t pg = mp->mp_pgno;
 	unsigned i, ovpages = mp->mp_pages;
+	MDB_env *env = txn->mt_env;
 	int rc;
 
 	DPRINTF("free ov page %zu (%d)", pg, ovpages);
@@ -4226,11 +4221,11 @@ mdb_ovpage_free(MDB_cursor *mc, MDB_page *mp)
 	 * Not currently supported in nested txns.
 	 * Otherwise put it onto the list of pages we freed in this txn.
 	 */
-	if ((mp->mp_flags & P_DIRTY) && !txn->mt_parent && txn->mt_env->me_pghead) {
+	if ((mp->mp_flags & P_DIRTY) && !txn->mt_parent && env->me_pghead) {
 		unsigned j, x;
 		pgno_t *mop;
 		MDB_ID2 *dl, ix, iy;
-		rc = mdb_midl_need(&txn->mt_env->me_pghead, ovpages);
+		rc = mdb_midl_need(&env->me_pghead, ovpages);
 		if (rc)
 			return rc;
 		/* Remove from dirty list */
@@ -4247,7 +4242,7 @@ mdb_ovpage_free(MDB_cursor *mc, MDB_page *mp)
 			}
 		}
 		/* Insert in me_pghead */
-		mop = txn->mt_env->me_pghead;
+		mop = env->me_pghead;
 		j = mop[0] + ovpages;
 		for (i = mop[0]; i && mop[i] < pg; i--)
 			mop[j--] = mop[i];
@@ -7406,7 +7401,7 @@ int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)
 
 	rc = mdb_drop0(mc, mc->mc_db->md_flags & MDB_DUPSORT);
 	/* Invalidate the dropped DB's cursors */
-	for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2 = m2->mc_next)
+	for (m2 = txn->mt_cursors[dbi]; m2; m2 = m2->mc_next)
 		m2->mc_flags &= ~C_INITIALIZED;
 	if (rc)
 		goto leave;
