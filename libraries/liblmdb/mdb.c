@@ -995,6 +995,9 @@ typedef struct MDB_ntxn {
 #define MDB_COMMIT_PAGES	IOV_MAX
 #endif
 
+	/* max bytes to write in one call */
+#define MAX_WRITE		(0x80000000U >> (sizeof(ssize_t) == 4))
+
 static int  mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp);
 static int  mdb_page_new(MDB_cursor *mc, uint32_t flags, int num, MDB_page **mp);
 static int  mdb_page_touch(MDB_cursor *mc);
@@ -2260,23 +2263,27 @@ mdb_page_flush(MDB_txn *txn)
 		}
 #else
 		/* Write up to MDB_COMMIT_PAGES dirty pages at a time. */
-		if (pos != next_pos || n == MDB_COMMIT_PAGES) {
+		if (pos!=next_pos || n==MDB_COMMIT_PAGES || wsize+size>MAX_WRITE) {
 			if (n) {
 				/* Write previous page(s) */
-#ifdef HAVE_PWRITEV
+#ifdef MDB_USE_PWRITEV
 				wres = pwritev(env->me_fd, iov, n, wpos);
 #else
-				if (lseek(env->me_fd, wpos, SEEK_SET) < 0) {
-					rc = ErrCode();
-					DPRINTF("lseek: %s", strerror(rc));
-					return rc;
+				if (n == 1) {
+					wres = pwrite(env->me_fd, iov[0].iov_base, wsize, wpos);
+				} else {
+					if (lseek(env->me_fd, wpos, SEEK_SET) < 0) {
+						rc = ErrCode();
+						DPRINTF("lseek: %s", strerror(rc));
+						return rc;
+					}
+					wres = writev(env->me_fd, iov, n);
 				}
-				wres = writev(env->me_fd, iov, n);
 #endif
 				if (wres != wsize) {
 					if (wres < 0) {
 						rc = ErrCode();
-						DPRINTF("writev: %s", strerror(rc));
+						DPRINTF("Write error: %s", strerror(rc));
 					} else {
 						rc = EIO; /* TODO: Use which error code? */
 						DPUTS("short write, filesystem full?");
@@ -2685,6 +2692,8 @@ mdb_env_write_meta(MDB_txn *txn)
 		meta.mm_last_pg = metab.mm_last_pg;
 		meta.mm_txnid = metab.mm_txnid;
 #ifdef _WIN32
+		memset(&ov, 0, sizeof(ov));
+		ov.Offset = off;
 		WriteFile(env->me_fd, ptr, len, NULL, &ov);
 #else
 		r2 = pwrite(env->me_fd, ptr, len, off);
@@ -3615,7 +3624,6 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
 
 	ptr = env->me_map + wsize;
 	wsize = txn->mt_next_pgno * env->me_psize - wsize;
-#define MAX_WRITE	2147483648U
 #ifdef _WIN32
 	while (wsize > 0) {
 		DWORD len, w2;
@@ -3638,7 +3646,7 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
 		else
 			w2 = wsize;
 		wres = write(fd, ptr, w2);
-		rc = wres == (ssize_t)w2 ? MDB_SUCCESS : rc < 0 ? ErrCode() : EIO;
+		rc = wres == (ssize_t)w2 ? MDB_SUCCESS : wres < 0 ? ErrCode() : EIO;
 		if (rc) break;
 		wsize -= wres;
 		ptr += wres;
