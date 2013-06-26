@@ -349,6 +349,9 @@ static txnid_t mdb_debug_start;
 
 	/**	@brief The maximum size of a key in the database.
 	 *
+	 *	The library rejects bigger keys, and cannot deal with records
+	 *	with bigger keys stored by a library with bigger max keysize.
+	 *
 	 *	We require that keys all fit onto a regular page. This limit
 	 *	could be raised a bit further if needed; to something just
 	 *	under #MDB_PAGESIZE / #MDB_MINKEYS.
