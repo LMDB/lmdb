@@ -1367,12 +1367,13 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 	MDB_txn *txn = mc->mc_txn;
 	MDB_env *env = txn->mt_env;
 	pgno_t pgno, *mop = env->me_pghead;
-	unsigned mop_len = mop ? mop[0] : 0;
+	unsigned i, j, k, mop_len = mop ? mop[0] : 0;
 	MDB_page *np;
 	MDB_ID2 mid;
 	txnid_t oldest = 0, last;
 	MDB_cursor_op op;
 	MDB_cursor m2;
+	int (*insert)(MDB_ID2L, MDB_ID2 *);
 
 	*mp = NULL;
 
@@ -1381,7 +1382,6 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 		return MDB_TXN_FULL;
 
 	for (op = MDB_FIRST;; op = MDB_NEXT) {
-		unsigned int i, j, k;
 		MDB_val key, data;
 		MDB_node *leaf;
 		pgno_t *idl, old_id, new_id;
@@ -1393,13 +1393,8 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 			i = mop_len;
 			do {
 				pgno = mop[i];
-				if (mop[i-n2] == pgno+n2) {
-					mop[0] = mop_len -= num;
-					/* Move any stragglers down */
-					for (j = i-n2; j <= mop_len; )
-						mop[j++] = mop[++i];
+				if (mop[i-n2] == pgno+n2)
 					goto search_done;
-				}
 			} while (--i >= (unsigned)num);
 			if (Max_retries < INT_MAX && --retry < 0)
 				break;
@@ -1471,34 +1466,33 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 	}
 
 	/* Use new pages from the map when nothing suitable in the freeDB */
-	pgno = P_INVALID;
-	if (txn->mt_next_pgno + num >= env->me_maxpg) {
+	i = 0;
+	pgno = txn->mt_next_pgno;
+	if (pgno + num >= env->me_maxpg) {
 			DPUTS("DB size maxed out");
 			return MDB_MAP_FULL;
 	}
 
 search_done:
 	if (env->me_flags & MDB_WRITEMAP) {
-		if (pgno == P_INVALID) {
-			pgno = txn->mt_next_pgno;
-			txn->mt_next_pgno += num;
-		}
 		np = (MDB_page *)(env->me_map + env->me_psize * pgno);
+		insert = mdb_mid2l_append;
 	} else {
 		if (!(np = mdb_page_malloc(txn, num)))
 			return ENOMEM;
-		if (pgno == P_INVALID) {
-			pgno = txn->mt_next_pgno;
-			txn->mt_next_pgno += num;
-		}
+		insert = mdb_mid2l_insert;
+	}
+	if (i) {
+		mop[0] = mop_len -= num;
+		/* Move any stragglers down */
+		for (j = i-num; j < mop_len; )
+			mop[++j] = mop[++i];
+	} else {
+		txn->mt_next_pgno = pgno + num;
 	}
 	mid.mid = np->mp_pgno = pgno;
 	mid.mptr = np;
-	if (env->me_flags & MDB_WRITEMAP) {
-		mdb_mid2l_append(txn->mt_u.dirty_list, &mid);
-	} else {
-		mdb_mid2l_insert(txn->mt_u.dirty_list, &mid);
-	}
+	insert(txn->mt_u.dirty_list, &mid);
 	txn->mt_dirty_room--;
 	*mp = np;
 
@@ -4231,16 +4225,21 @@ mdb_ovpage_free(MDB_cursor *mc, MDB_page *mp)
 		/* Remove from dirty list */
 		dl = txn->mt_u.dirty_list;
 		x = dl[0].mid--;
-		for (ix = dl[x]; ix.mid != pg; ix = iy) {
+		for (ix = dl[x]; ix.mptr != mp; ix = iy) {
 			if (x > 1) {
 				x--;
 				iy = dl[x];
 				dl[x] = ix;
 			} else {
 				assert(x > 1);
+				j = ++(dl[0].mid);
+				dl[j] = ix;		/* Unsorted. OK when MDB_TXN_ERROR. */
+				txn->mt_flags |= MDB_TXN_ERROR;
 				return MDB_CORRUPTED;
 			}
 		}
+		if (!(env->me_flags & MDB_WRITEMAP))
+			mdb_dpage_free(env, mp);
 		/* Insert in me_pghead */
 		mop = env->me_pghead;
 		j = mop[0] + ovpages;
