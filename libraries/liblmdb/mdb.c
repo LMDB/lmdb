@@ -2206,14 +2206,14 @@ mdb_page_flush(MDB_txn *txn)
 	MDB_ID2L	dl = txn->mt_u.dirty_list;
 	unsigned	psize = env->me_psize;
 	int			i, pagecount = dl[0].mid, rc;
-	size_t		size, pos = 0;
+	size_t		size = 0, pos = 0;
 	pgno_t		pgno;
-	MDB_page	*dp;
+	MDB_page	*dp = NULL;
 #ifdef _WIN32
 	OVERLAPPED	ov;
 #else
 	struct iovec iov[MDB_COMMIT_PAGES];
-	ssize_t		wpos, wsize, wres;
+	ssize_t		wpos, wsize = 0, wres;
 	size_t		next_pos = 1; /* impossible pos, so pos != next_pos */
 	int			n = 0;
 #endif
@@ -2269,7 +2269,7 @@ mdb_page_flush(MDB_txn *txn)
 				if (n == 1) {
 					wres = pwrite(env->me_fd, iov[0].iov_base, wsize, wpos);
 				} else {
-					if (lseek(env->me_fd, wpos, SEEK_SET) < 0) {
+					if (lseek(env->me_fd, wpos, SEEK_SET) == -1) {
 						rc = ErrCode();
 						DPRINTF("lseek: %s", strerror(rc));
 						return rc;
