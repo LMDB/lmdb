@@ -1743,6 +1743,7 @@ mdb_txn_renew0(MDB_txn *txn)
 	unsigned int i;
 	uint16_t x;
 	int rc, new_notls = 0;
+	pgno_t lastpg2;
 
 	/* Setup db info */
 	txn->mt_numdbs = env->me_numdbs;
@@ -1811,6 +1812,17 @@ mdb_txn_renew0(MDB_txn *txn)
 
 	/* Copy the DB info and flags */
 	memcpy(txn->mt_dbs, env->me_metas[txn->mt_toggle]->mm_dbs, 2 * sizeof(MDB_db));
+	/* In a read txn, there is a data race here. Make sure our
+	 * last_pg/next_pg are up to date.
+	 */
+	lastpg2 = env->me_metas[txn->mt_toggle]->mm_last_pg+1;
+	if (lastpg2 != txn->mt_next_pgno) {
+		txn->mt_next_pgno = lastpg2;
+		/* When this situation occurs, the txnid will certainly also
+		 * be out of date. But as noted before, we don't care about having
+		 * up to date read txn IDs.
+		 */
+	}
 	for (i=2; i<txn->mt_numdbs; i++) {
 		x = env->me_dbflags[i];
 		txn->mt_dbs[i].md_flags = x & PERSISTENT_FLAGS;
