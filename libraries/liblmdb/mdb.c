@@ -4969,7 +4969,7 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	MDB_page	*fp;
 	MDB_db dummy;
 	int do_sub = 0, insert = 0;
-	unsigned int mcount = 0, dcount;
+	unsigned int mcount = 0, dcount = 0;
 	size_t nsize;
 	int rc, rc2;
 	MDB_pagebuf pbuf;
