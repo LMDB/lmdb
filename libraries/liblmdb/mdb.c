@@ -4969,13 +4969,23 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	MDB_page	*fp;
 	MDB_db dummy;
 	int do_sub = 0, insert = 0;
-	unsigned int mcount = 0;
+	unsigned int mcount = 0, dcount;
 	size_t nsize;
 	int rc, rc2;
 	MDB_pagebuf pbuf;
 	char dbuf[MDB_MAXKEYSIZE+1];
 	unsigned int nflags;
 	DKBUF;
+
+	/* Check this first so counter will always be zero on any
+	 * early failures.
+	 */
+	if (flags & MDB_MULTIPLE) {
+		dcount = data[1].mv_size;
+		data[1].mv_size = 0;
+		if (!F_ISSET(mc->mc_db->md_flags, MDB_DUPFIXED))
+			return EINVAL;
+	}
 
 	if (F_ISSET(mc->mc_txn->mt_flags, MDB_TXN_RDONLY))
 		return EACCES;
@@ -5340,8 +5350,8 @@ put_sub:
 						}
 					}
 				}
-                                /* we've done our job */
-                                dkey.mv_size = 0;
+				/* we've done our job */
+				dkey.mv_size = 0;
 			}
 			if (flags & MDB_APPENDDUP)
 				xflags |= MDB_APPEND;
@@ -5357,12 +5367,16 @@ put_sub:
 		if (!rc && !(flags & MDB_CURRENT))
 			mc->mc_db->md_entries++;
 		if (flags & MDB_MULTIPLE) {
-			mcount++;
-			if (mcount < data[1].mv_size) {
-				data[0].mv_data = (char *)data[0].mv_data + data[0].mv_size;
-				leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
-				goto more;
+			if (!rc) {
+				mcount++;
+				if (mcount < dcount) {
+					data[0].mv_data = (char *)data[0].mv_data + data[0].mv_size;
+					leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
+					goto more;
+				}
 			}
+			/* let caller know how many succeeded, if any */
+			data[1].mv_size = mcount;
 		}
 	}
 done:

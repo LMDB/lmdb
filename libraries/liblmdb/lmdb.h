@@ -309,7 +309,7 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
 #define MDB_APPEND	0x20000
 /** Duplicate data is being appended, don't split full pages. */
 #define MDB_APPENDDUP	0x40000
-/** Store multiple data items in one call. */
+/** Store multiple data items in one call. Only for #MDB_DUPFIXED. */
 #define MDB_MULTIPLE	0x80000
 /*	@} */
 
@@ -1210,6 +1210,16 @@ int  mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	 *		correct order. Loading unsorted keys with this flag will cause
 	 *		data corruption.
 	 *	<li>#MDB_APPENDDUP - as above, but for sorted dup data.
+	 *	<li>#MDB_MULTIPLE - store multiple contiguous data elements in a
+	 *		single request. This flag may only be specified if the database
+	 *		was opened with #MDB_DUPFIXED. The \b data argument must be an
+	 *		array of two MDB_vals. The mv_size of the first MDB_val must be
+	 *		the size of a single data element. The mv_data of the first MDB_val
+	 *		must point to the beginning of the array of contiguous data elements.
+	 *		The mv_size of the second MDB_val must be the count of the number
+	 *		of data elements to store. On return this field will be set to
+	 *		the count of the number of elements actually written. The mv_data
+	 *		of the second MDB_val is unused.
 	 * </ul>
 	 * @return A non-zero error value on failure and 0 on success. Some possible
 	 * errors are:
