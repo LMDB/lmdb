@@ -2209,13 +2209,13 @@ mdb_page_flush(MDB_txn *txn)
 	unsigned	psize = env->me_psize;
 	int			i, pagecount = dl[0].mid, rc;
 	size_t		size = 0, pos = 0;
-	pgno_t		pgno;
+	pgno_t		pgno = 0;
 	MDB_page	*dp = NULL;
 #ifdef _WIN32
 	OVERLAPPED	ov;
 #else
 	struct iovec iov[MDB_COMMIT_PAGES];
-	ssize_t		wpos, wsize = 0, wres;
+	ssize_t		wpos = 0, wsize = 0, wres;
 	size_t		next_pos = 1; /* impossible pos, so pos != next_pos */
 	int			n = 0;
 #endif
