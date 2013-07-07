@@ -1560,9 +1560,10 @@ mdb_page_touch(MDB_cursor *mc)
 		if (dl[0].mid) {
 			unsigned x = mdb_mid2l_search(dl, pgno);
 			if (x <= dl[0].mid && dl[x].mid == pgno) {
-				np = dl[x].mptr;
-				if (mp != np)
-					mc->mc_pg[mc->mc_top] = np;
+				if (mp != dl[x].mptr) { /* bad cursor? */
+					mc->mc_flags &= ~(C_INITIALIZED|C_EOF);
+					return MDB_CORRUPTED;
+				}
 				return 0;
 			}
 		}
