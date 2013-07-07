@@ -903,8 +903,6 @@ struct MDB_cursor {
 #define C_INITIALIZED	0x01	/**< cursor has been initialized and is valid */
 #define C_EOF	0x02			/**< No more data */
 #define C_SUB	0x04			/**< Cursor is a sub-cursor */
-#define C_SHADOW	0x08		/**< Cursor is a dup from a parent txn */
-#define C_ALLOCD	0x10		/**< Cursor was malloc'd */
 #define C_SPLITTING	0x20		/**< Cursor is in page_split */
 #define C_UNTRACK	0x40		/**< Un-track cursor when closing */
 /** @} */
@@ -1659,7 +1657,7 @@ mdb_cursor_shadow(MDB_txn *src, MDB_txn *dst)
 				mc->mc_dbflag = &dst->mt_dbflags[i];
 				mc->mc_snum = m2->mc_snum;
 				mc->mc_top = m2->mc_top;
-				mc->mc_flags = m2->mc_flags | (C_SHADOW|C_ALLOCD);
+				mc->mc_flags = m2->mc_flags;
 				for (j=0; j<mc->mc_snum; j++) {
 					mc->mc_pg[j] = m2->mc_pg[j];
 					mc->mc_ki[j] = m2->mc_ki[j];
@@ -1679,7 +1677,7 @@ mdb_cursor_shadow(MDB_txn *src, MDB_txn *dst)
 					mx->mx_cursor.mc_dbflag = &mx->mx_dbflag;
 					mx->mx_cursor.mc_snum = mx2->mx_cursor.mc_snum;
 					mx->mx_cursor.mc_top = mx2->mx_cursor.mc_top;
-					mx->mx_cursor.mc_flags = mx2->mx_cursor.mc_flags | C_SHADOW;
+					mx->mx_cursor.mc_flags = mx2->mx_cursor.mc_flags;
 					for (j=0; j<mx2->mx_cursor.mc_snum; j++) {
 						mx->mx_cursor.mc_pg[j] = mx2->mx_cursor.mc_pg[j];
 						mx->mx_cursor.mc_ki[j] = mx2->mx_cursor.mc_ki[j];
@@ -1698,7 +1696,7 @@ mdb_cursor_shadow(MDB_txn *src, MDB_txn *dst)
 /** Close this write txn's cursors, after optionally merging its shadow
  * cursors back into parent's.
  * @param[in] txn the transaction handle.
- * @param[in] merge 0 to not merge cursors, C_SHADOW to merge.
+ * @param[in] merge zero to not merge cursors, non-zero to merge.
  * @return 0 on success, non-zero on failure.
  */
 static void
@@ -1710,7 +1708,7 @@ mdb_cursors_close(MDB_txn *txn, unsigned merge)
 	for (i = txn->mt_numdbs; --i >= 0; ) {
 		for (mc = cursors[i]; mc; mc = next) {
 				next = mc->mc_next;
-				if (mc->mc_flags & merge) {
+				if (merge && mc->mc_orig) {
 					MDB_cursor *m2 = mc->mc_orig;
 					m2->mc_snum = mc->mc_snum;
 					m2->mc_top = mc->mc_top;
@@ -1719,8 +1717,8 @@ mdb_cursors_close(MDB_txn *txn, unsigned merge)
 						m2->mc_ki[j] = mc->mc_ki[j];
 					}
 				}
-				if (mc->mc_flags & C_ALLOCD)
-					free(mc);
+				/* Only malloced cursors are permanently tracked. */
+				free(mc);
 		}
 		cursors[i] = NULL;
 	}
@@ -2359,7 +2357,7 @@ mdb_txn_commit(MDB_txn *txn)
 		parent->mt_flags = txn->mt_flags;
 
 		/* Merge our cursors into parent's and close them */
-		mdb_cursors_close(txn, C_SHADOW);
+		mdb_cursors_close(txn, 1);
 
 		/* Update parent's DB table. */
 		memcpy(parent->mt_dbs, txn->mt_dbs, txn->mt_numdbs * sizeof(MDB_db));
@@ -5914,7 +5912,6 @@ mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **ret)
 			txn->mt_cursors[dbi] = mc;
 			mc->mc_flags |= C_UNTRACK;
 		}
-		mc->mc_flags |= C_ALLOCD;
 	} else {
 		return ENOMEM;
 	}
@@ -5927,19 +5924,13 @@ mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **ret)
 int
 mdb_cursor_renew(MDB_txn *txn, MDB_cursor *mc)
 {
-	unsigned flags;
-
 	if (txn == NULL || mc == NULL || mc->mc_dbi >= txn->mt_numdbs)
 		return EINVAL;
 
 	if ((mc->mc_flags & C_UNTRACK) || txn->mt_cursors)
 		return EINVAL;
 
-	flags = mc->mc_flags;
-
 	mdb_cursor_init(mc, txn, mc->mc_dbi, mc->mc_xcursor);
-
-	mc->mc_flags |= (flags & C_ALLOCD);
 	return MDB_SUCCESS;
 }
 
@@ -5978,8 +5969,7 @@ mdb_cursor_close(MDB_cursor *mc)
 			if (*prev == mc)
 				*prev = mc->mc_next;
 		}
-		if (mc->mc_flags & C_ALLOCD)
-			free(mc);
+		free(mc);
 	}
 }
 
