@@ -6544,9 +6544,14 @@ static int
 mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
 {
 	int rc;
+	MDB_page *mp;
+	indx_t ki;
+
+	mp = mc->mc_pg[mc->mc_top];
+	ki = mc->mc_ki[mc->mc_top];
 
 	/* add overflow pages to free list */
-	if (!IS_LEAF2(mc->mc_pg[mc->mc_top]) && F_ISSET(leaf->mn_flags, F_BIGDATA)) {
+	if (!IS_LEAF2(mp) && F_ISSET(leaf->mn_flags, F_BIGDATA)) {
 		MDB_page *omp;
 		pgno_t pg;
 
@@ -6555,7 +6560,7 @@ mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
 			(rc = mdb_ovpage_free(mc, omp)))
 			return rc;
 	}
-	mdb_node_del(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], mc->mc_db->md_pad);
+	mdb_node_del(mp, ki, mc->mc_db->md_pad);
 	mc->mc_db->md_entries--;
 	rc = mdb_rebalance(mc);
 	if (rc != MDB_SUCCESS)
@@ -6563,6 +6568,28 @@ mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
 	/* if mc points past last node in page, invalidate */
 	else if (mc->mc_ki[mc->mc_top] >= NUMKEYS(mc->mc_pg[mc->mc_top]))
 		mc->mc_flags &= ~C_INITIALIZED;
+
+	{
+		/* Adjust other cursors pointing to mp */
+		MDB_cursor *m2;
+		unsigned int nkeys;
+		MDB_dbi dbi = mc->mc_dbi;
+
+		mp = mc->mc_pg[mc->mc_top];
+		nkeys = NUMKEYS(mp);
+		for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
+			if (m2 == mc)
+				continue;
+			if (!(m2->mc_flags & C_INITIALIZED))
+				continue;
+			if (m2->mc_pg[mc->mc_top] == mp) {
+				if (m2->mc_ki[mc->mc_top] > ki)
+					m2->mc_ki[mc->mc_top]--;
+				if (m2->mc_ki[mc->mc_top] >= nkeys)
+					m2->mc_flags &= ~C_INITIALIZED;
+			}
+		}
+	}
 
 	return rc;
 }
