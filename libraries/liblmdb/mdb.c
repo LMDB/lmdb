@@ -4379,7 +4379,7 @@ mdb_cursor_next(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 					return rc;
 			}
 		} else {
-			mc->mc_xcursor->mx_cursor.mc_flags &= ~C_INITIALIZED;
+			mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
 			if (op == MDB_NEXT_DUP)
 				return MDB_NOTFOUND;
 		}
@@ -4391,7 +4391,6 @@ mdb_cursor_next(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 		DPUTS("=====> move to next sibling page");
 		if ((rc = mdb_cursor_sibling(mc, 1)) != MDB_SUCCESS) {
 			mc->mc_flags |= C_EOF;
-			mc->mc_flags &= ~C_INITIALIZED;
 			return rc;
 		}
 		mp = mc->mc_pg[mc->mc_top];
@@ -4449,7 +4448,7 @@ mdb_cursor_prev(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 				if (op != MDB_PREV || rc != MDB_NOTFOUND)
 					return rc;
 			} else {
-				mc->mc_xcursor->mx_cursor.mc_flags &= ~C_INITIALIZED;
+				mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
 				if (op == MDB_PREV_DUP)
 					return MDB_NOTFOUND;
 			}
@@ -4461,7 +4460,6 @@ mdb_cursor_prev(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 	if (mc->mc_ki[mc->mc_top] == 0)  {
 		DPUTS("=====> move to prev sibling page");
 		if ((rc = mdb_cursor_sibling(mc, 0)) != MDB_SUCCESS) {
-			mc->mc_flags &= ~C_INITIALIZED;
 			return rc;
 		}
 		mp = mc->mc_pg[mc->mc_top];
@@ -4667,7 +4665,7 @@ set1:
 
 		} else {
 			if (mc->mc_xcursor)
-				mc->mc_xcursor->mx_cursor.mc_flags &= ~C_INITIALIZED;
+				mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
 			if ((rc = mdb_node_read(mc->mc_txn, leaf, data)) != MDB_SUCCESS)
 				return rc;
 		}
@@ -4715,7 +4713,7 @@ mdb_cursor_first(MDB_cursor *mc, MDB_val *key, MDB_val *data)
 				return rc;
 		} else {
 			if (mc->mc_xcursor)
-				mc->mc_xcursor->mx_cursor.mc_flags &= ~C_INITIALIZED;
+				mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
 			if ((rc = mdb_node_read(mc->mc_txn, leaf, data)) != MDB_SUCCESS)
 				return rc;
 		}
@@ -4763,7 +4761,7 @@ mdb_cursor_last(MDB_cursor *mc, MDB_val *key, MDB_val *data)
 				return rc;
 		} else {
 			if (mc->mc_xcursor)
-				mc->mc_xcursor->mx_cursor.mc_flags &= ~C_INITIALIZED;
+				mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
 			if ((rc = mdb_node_read(mc->mc_txn, leaf, data)) != MDB_SUCCESS)
 				return rc;
 		}
@@ -6534,7 +6532,7 @@ mdb_rebalance(MDB_cursor *mc)
 			rc = mdb_page_merge(&mn, mc);
 		else
 			rc = mdb_page_merge(mc, &mn);
-		mc->mc_flags &= ~C_INITIALIZED;
+		mc->mc_flags &= ~(C_INITIALIZED|C_EOF);
 	}
 	return rc;
 }
@@ -6567,7 +6565,7 @@ mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
 		mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
 	/* if mc points past last node in page, invalidate */
 	else if (mc->mc_ki[mc->mc_top] >= NUMKEYS(mc->mc_pg[mc->mc_top]))
-		mc->mc_flags &= ~C_INITIALIZED;
+		mc->mc_flags &= ~(C_INITIALIZED|C_EOF);
 
 	{
 		/* Adjust other cursors pointing to mp */
@@ -6586,7 +6584,7 @@ mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
 				if (m2->mc_ki[mc->mc_top] > ki)
 					m2->mc_ki[mc->mc_top]--;
 				if (m2->mc_ki[mc->mc_top] >= nkeys)
-					m2->mc_flags &= ~C_INITIALIZED;
+					m2->mc_flags &= ~(C_INITIALIZED|C_EOF);
 			}
 		}
 	}
@@ -7421,7 +7419,7 @@ int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)
 	rc = mdb_drop0(mc, mc->mc_db->md_flags & MDB_DUPSORT);
 	/* Invalidate the dropped DB's cursors */
 	for (m2 = txn->mt_cursors[dbi]; m2; m2 = m2->mc_next)
-		m2->mc_flags &= ~C_INITIALIZED;
+		m2->mc_flags &= ~(C_INITIALIZED|C_EOF);
 	if (rc)
 		goto leave;
 
