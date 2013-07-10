@@ -5328,6 +5328,7 @@ put_sub:
 
 					for (m2 = mc->mc_txn->mt_cursors[mc->mc_dbi]; m2; m2=m2->mc_next) {
 						if (m2 == mc || m2->mc_snum < mc->mc_snum) continue;
+						if (!(m2->mc_flags & C_INITIALIZED)) continue;
 						if (m2->mc_pg[i] == mp && m2->mc_ki[i] == mc->mc_ki[i]) {
 							mdb_xcursor_init1(m2, leaf);
 						}
@@ -7025,7 +7026,7 @@ done:
 				m3 = m2;
 			if (m3 == mc)
 				continue;
-			if (!(m3->mc_flags & C_INITIALIZED))
+			if (!(m2->mc_flags & m3->mc_flags & C_INITIALIZED))
 				continue;
 			if (m3->mc_flags & C_SPLITTING)
 				continue;
