@@ -6451,6 +6451,7 @@ mdb_rebalance(MDB_cursor *mc)
 				return rc;
 			mc->mc_db->md_depth--;
 			mc->mc_db->md_branch_pages--;
+			mc->mc_ki[0] = mc->mc_ki[1];
 			{
 				/* Adjust other cursors pointing to mp */
 				MDB_cursor *m2, *m3;
@@ -6469,6 +6470,7 @@ mdb_rebalance(MDB_cursor *mc)
 						m3->mc_pg[0] = mc->mc_pg[0];
 						m3->mc_snum = 1;
 						m3->mc_top = 0;
+						m3->mc_ki[0] = m3->mc_ki[1];
 					}
 				}
 			}

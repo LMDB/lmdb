@@ -129,6 +129,8 @@ int main(int argc,char * argv[])
 		rc = mdb_cursor_open(txn, dbi, &cur2);
 		for (i=0; i<50; i++) {
 			rc = mdb_cursor_get(cur2, &key, &data, MDB_NEXT);
+			if (rc)
+				break;
 			printf("key: %p %.*s, data: %p %.*s\n",
 				key.mv_data,  (int) key.mv_size,  (char *) key.mv_data,
 				data.mv_data, (int) data.mv_size, (char *) data.mv_data);
@@ -142,6 +144,7 @@ int main(int argc,char * argv[])
 			data.mv_data, (int) data.mv_size, (char *) data.mv_data);
 		for (i=0; i<32; i++) {
 			rc = mdb_cursor_get(cur2, &key, &data, MDB_NEXT);
+			if (rc) break;
 			printf("key: %p %.*s, data: %p %.*s\n",
 				key.mv_data,  (int) key.mv_size,  (char *) key.mv_data,
 				data.mv_data, (int) data.mv_size, (char *) data.mv_data);
@@ -158,6 +161,7 @@ int main(int argc,char * argv[])
 			data.mv_data, (int) data.mv_size, (char *) data.mv_data);
 		for (i=0; i<32; i++) {
 			rc = mdb_cursor_get(cursor, &key, &data, MDB_NEXT);
+			if (rc) break;
 			printf("key: %p %.*s, data: %p %.*s\n",
 				key.mv_data,  (int) key.mv_size,  (char *) key.mv_data,
 				data.mv_data, (int) data.mv_size, (char *) data.mv_data);
