@@ -6663,6 +6663,7 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 		 * run out of space, triggering a split. We need this
 		 * cursor to be consistent until the end of the rebalance.
 		 */
+		mc.mc_flags |= C_UNTRACK;
 		mc.mc_next = txn->mt_cursors[dbi];
 		txn->mt_cursors[dbi] = &mc;
 		rc = mdb_cursor_del(&mc, data ? 0 : MDB_NODUPDATA);
