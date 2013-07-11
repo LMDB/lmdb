@@ -2348,16 +2348,16 @@ mdb_txn_commit(MDB_txn *txn)
 
 		/* Update parent's DB table. */
 		memcpy(parent->mt_dbs, txn->mt_dbs, txn->mt_numdbs * sizeof(MDB_db));
-		txn->mt_parent->mt_numdbs = txn->mt_numdbs;
-		txn->mt_parent->mt_dbflags[0] = txn->mt_dbflags[0];
-		txn->mt_parent->mt_dbflags[1] = txn->mt_dbflags[1];
+		parent->mt_numdbs = txn->mt_numdbs;
+		parent->mt_dbflags[0] = txn->mt_dbflags[0];
+		parent->mt_dbflags[1] = txn->mt_dbflags[1];
 		for (i=2; i<txn->mt_numdbs; i++) {
 			/* preserve parent's DB_NEW status */
-			x = txn->mt_parent->mt_dbflags[i] & DB_NEW;
-			txn->mt_parent->mt_dbflags[i] = txn->mt_dbflags[i] | x;
+			x = parent->mt_dbflags[i] & DB_NEW;
+			parent->mt_dbflags[i] = txn->mt_dbflags[i] | x;
 		}
 
-		dst = txn->mt_parent->mt_u.dirty_list;
+		dst = parent->mt_u.dirty_list;
 		src = txn->mt_u.dirty_list;
 		/* Find len = length of merging our dirty list with parent's */
 		x = dst[0].mid;
@@ -2391,7 +2391,7 @@ mdb_txn_commit(MDB_txn *txn)
 		free(txn->mt_u.dirty_list);
 		parent->mt_dirty_room = txn->mt_dirty_room;
 
-		txn->mt_parent->mt_child = NULL;
+		parent->mt_child = NULL;
 		mdb_midl_free(((MDB_ntxn *)txn)->mnt_pgstate.mf_pghead);
 		free(txn);
 		return MDB_SUCCESS;
