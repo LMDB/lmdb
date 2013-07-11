@@ -1337,6 +1337,24 @@ mdb_find_oldest(MDB_txn *txn)
 	return oldest;
 }
 
+/** Add a page to the txn's dirty list */
+static void
+mdb_page_dirty(MDB_txn *txn, MDB_page *mp)
+{
+	MDB_ID2 mid;
+	int (*insert)(MDB_ID2L, MDB_ID2 *);
+
+	if (txn->mt_env->me_flags & MDB_WRITEMAP) {
+		insert = mdb_mid2l_append;
+	} else {
+		insert = mdb_mid2l_insert;
+	}
+	mid.mid = mp->mp_pgno;
+	mid.mptr = mp;
+	insert(txn->mt_u.dirty_list, &mid);
+	txn->mt_dirty_room--;
+}
+
 /** Allocate pages for writing.
  * If there are free pages available from older transactions, they
  * will be re-used first. Otherwise a new page will be allocated.
@@ -1367,11 +1385,9 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 	pgno_t pgno, *mop = env->me_pghead;
 	unsigned i, j, k, mop_len = mop ? mop[0] : 0;
 	MDB_page *np;
-	MDB_ID2 mid;
 	txnid_t oldest = 0, last;
 	MDB_cursor_op op;
 	MDB_cursor m2;
-	int (*insert)(MDB_ID2L, MDB_ID2 *);
 
 	*mp = NULL;
 
@@ -1474,11 +1490,9 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 search_done:
 	if (env->me_flags & MDB_WRITEMAP) {
 		np = (MDB_page *)(env->me_map + env->me_psize * pgno);
-		insert = mdb_mid2l_append;
 	} else {
 		if (!(np = mdb_page_malloc(txn, num)))
 			return ENOMEM;
-		insert = mdb_mid2l_insert;
 	}
 	if (i) {
 		mop[0] = mop_len -= num;
@@ -1488,10 +1502,8 @@ search_done:
 	} else {
 		txn->mt_next_pgno = pgno + num;
 	}
-	mid.mid = np->mp_pgno = pgno;
-	mid.mptr = np;
-	insert(txn->mt_u.dirty_list, &mid);
-	txn->mt_dirty_room--;
+	np->mp_pgno = pgno;
+	mdb_page_dirty(txn, np);
 	*mp = np;
 
 	return MDB_SUCCESS;
