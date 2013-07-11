@@ -2171,25 +2171,32 @@ mdb_freelist_save(MDB_txn *txn)
 		total_room += head_room;
 	}
 
-	/* Fill in the reserved, touched me_pghead records. Avoid write ops
-	 * so they cannot rearrange anything, just read the destinations.
-	 */
+	/* Fill in the reserved, touched me_pghead records */
 	rc = MDB_SUCCESS;
 	if (mop_len) {
 		MDB_val key, data;
 
-		mop += mop_len + 1;
+		mop += mop_len;
 		rc = mdb_cursor_first(&mc, &key, &data);
 		for (; !rc; rc = mdb_cursor_next(&mc, &key, &data, MDB_NEXT)) {
-			MDB_IDL	dest = data.mv_data;
+			unsigned flags = MDB_CURRENT;
+			txnid_t id = *(txnid_t *)key.mv_data;
 			ssize_t	len = (ssize_t)(data.mv_size / sizeof(MDB_ID)) - 1;
+			MDB_ID save;
 
-			assert(len >= 0 && *(txnid_t*)key.mv_data <= env->me_pglast);
-			if (len > mop_len)
+			assert(len >= 0 && id <= env->me_pglast);
+			key.mv_data = &id;
+			if (len > mop_len) {
 				len = mop_len;
-			*dest++ = len;
-			memcpy(dest, mop -= len, len * sizeof(MDB_ID));
-			if (! (mop_len -= len))
+				data.mv_size = (len + 1) * sizeof(MDB_ID);
+				flags = 0;
+			}
+			data.mv_data = mop -= len;
+			save = mop[0];
+			mop[0] = len;
+			rc = mdb_cursor_put(&mc, &key, &data, flags);
+			mop[0] = save;
+			if (rc || !(mop_len -= len))
 				break;
 		}
 	}
