@@ -4968,6 +4968,7 @@ int
 mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
     unsigned int flags)
 {
+	enum { MDB_NO_ROOT = MDB_LAST_ERRCODE+10 }; /* internal code */
 	MDB_node	*leaf = NULL;
 	MDB_val	xdata, *rdata, dkey;
 	MDB_page	*fp;
@@ -5015,23 +5016,10 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 			return EINVAL;
 		rc = MDB_SUCCESS;
 	} else if (mc->mc_db->md_root == P_INVALID) {
-		MDB_page *np;
-		/* new database, write a root leaf page */
-		DPUTS("allocating new root leaf page");
-		if ((rc = mdb_page_new(mc, P_LEAF, 1, &np))) {
-			return rc;
-		}
+		/* new database, cursor has nothing to point to */
 		mc->mc_snum = 0;
-		mdb_cursor_push(mc, np);
-		mc->mc_db->md_root = np->mp_pgno;
-		mc->mc_db->md_depth++;
-		*mc->mc_dbflag |= DB_DIRTY;
-		if ((mc->mc_db->md_flags & (MDB_DUPSORT|MDB_DUPFIXED))
-			== MDB_DUPFIXED)
-			np->mp_flags |= P_LEAF2;
-		mc->mc_flags |= C_INITIALIZED;
-		rc = MDB_NOTFOUND;
-		goto top;
+		mc->mc_flags &= ~C_INITIALIZED;
+		rc = MDB_NO_ROOT;
 	} else {
 		int exact = 0;
 		MDB_val d2;
@@ -5049,7 +5037,7 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 				}
 			}
 		} else {
-		rc = mdb_cursor_set(mc, key, &d2, MDB_SET, &exact);
+			rc = mdb_cursor_set(mc, key, &d2, MDB_SET, &exact);
 		}
 		if ((flags & MDB_NOOVERWRITE) && rc == 0) {
 			DPRINTF("duplicate key [%s]", DKEY(key));
@@ -5060,12 +5048,30 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 			return rc;
 	}
 
-	/* Cursor is positioned, now make sure all pages are writable */
-	rc2 = mdb_cursor_touch(mc);
-	if (rc2)
-		return rc2;
+	/* Cursor is positioned */
 
-top:
+	if (rc == MDB_NO_ROOT) {
+		MDB_page *np;
+		/* new database, write a root leaf page */
+		DPUTS("allocating new root leaf page");
+		if ((rc2 = mdb_page_new(mc, P_LEAF, 1, &np))) {
+			return rc2;
+		}
+		mdb_cursor_push(mc, np);
+		mc->mc_db->md_root = np->mp_pgno;
+		mc->mc_db->md_depth++;
+		*mc->mc_dbflag |= DB_DIRTY;
+		if ((mc->mc_db->md_flags & (MDB_DUPSORT|MDB_DUPFIXED))
+			== MDB_DUPFIXED)
+			np->mp_flags |= P_LEAF2;
+		mc->mc_flags |= C_INITIALIZED;
+	} else {
+		/* make sure all cursor pages are writable */
+		rc2 = mdb_cursor_touch(mc);
+		if (rc2)
+			return rc2;
+	}
+
 	/* The key already exists */
 	if (rc == MDB_SUCCESS) {
 		/* there's only a key anyway, so this is a no-op */
