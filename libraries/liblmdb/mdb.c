@@ -2487,6 +2487,8 @@ mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 		memset(&ov, 0, sizeof(ov));
 		ov.Offset = off;
 		rc = ReadFile(env->me_fd,&pbuf,MDB_PAGESIZE,&len,&ov) ? (int)len : -1;
+		if (rc == -1 && ErrCode() == ERROR_HANDLE_EOF)
+			rc = 0;
 #else
 		rc = pread(env->me_fd, &pbuf, MDB_PAGESIZE, off);
 #endif
