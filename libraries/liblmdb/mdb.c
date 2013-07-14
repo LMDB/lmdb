@@ -4856,7 +4856,7 @@ mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	assert(key);
 	assert(key->mv_size > 0);
 
-	if (mc->mc_db->md_flags & MDB_DUPSORT)
+	if (mc->mc_xcursor)
 		mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
 
 	/* See if we're already on the right page */
@@ -5031,6 +5031,9 @@ mdb_cursor_first(MDB_cursor *mc, MDB_val *key, MDB_val *data)
 	int		 rc;
 	MDB_node	*leaf;
 
+	if (mc->mc_xcursor)
+		mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
+
 	if (!(mc->mc_flags & C_INITIALIZED) || mc->mc_top) {
 		rc = mdb_page_search(mc, NULL, 0);
 		if (rc != MDB_SUCCESS)
@@ -5057,8 +5060,6 @@ mdb_cursor_first(MDB_cursor *mc, MDB_val *key, MDB_val *data)
 			if (rc)
 				return rc;
 		} else {
-			if (mc->mc_xcursor)
-				mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
 			if ((rc = mdb_node_read(mc->mc_txn, leaf, data)) != MDB_SUCCESS)
 				return rc;
 		}
@@ -5073,6 +5074,9 @@ mdb_cursor_last(MDB_cursor *mc, MDB_val *key, MDB_val *data)
 {
 	int		 rc;
 	MDB_node	*leaf;
+
+	if (mc->mc_xcursor)
+		mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
 
 	if (!(mc->mc_flags & C_EOF)) {
 
@@ -5105,8 +5109,6 @@ mdb_cursor_last(MDB_cursor *mc, MDB_val *key, MDB_val *data)
 			if (rc)
 				return rc;
 		} else {
-			if (mc->mc_xcursor)
-				mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
 			if ((rc = mdb_node_read(mc->mc_txn, leaf, data)) != MDB_SUCCESS)
 				return rc;
 		}
