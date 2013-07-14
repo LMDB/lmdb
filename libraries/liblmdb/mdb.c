@@ -4856,6 +4856,9 @@ mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	assert(key);
 	assert(key->mv_size > 0);
 
+	if (mc->mc_db->md_flags & MDB_DUPSORT)
+		mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
+
 	/* See if we're already on the right page */
 	if (mc->mc_flags & C_INITIALIZED) {
 		MDB_val nodekey;
