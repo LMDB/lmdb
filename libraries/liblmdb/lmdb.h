@@ -889,6 +889,15 @@ int  mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *d
 	 */
 int  mdb_stat(MDB_txn *txn, MDB_dbi dbi, MDB_stat *stat);
 
+	/** @brief Retrieve the DB flags for a database handle.
+	 *
+	 * @param[in] env An environment handle returned by #mdb_env_create()
+	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
+	 * @param[out] flags Address where the flags will be returned.
+	 * @return A non-zero error value on failure and 0 on success.
+	 */
+int mdb_dbi_flags(MDB_env *env, MDB_dbi dbi, unsigned int *flags);
+
 	/** @brief Close a database handle.
 	 *
 	 * This call is not mutex protected. Handles should only be closed by

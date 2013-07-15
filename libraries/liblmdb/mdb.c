@@ -7743,6 +7743,15 @@ void mdb_dbi_close(MDB_env *env, MDB_dbi dbi)
 	free(ptr);
 }
 
+int mdb_dbi_flags(MDB_env *env, MDB_dbi dbi, unsigned int *flags)
+{
+	/* We could return the flags for the FREE_DBI too but what's the point? */
+	if (dbi <= MAIN_DBI || dbi >= env->me_numdbs)
+		return EINVAL;
+	*flags = env->me_dbflags[dbi];
+	return MDB_SUCCESS;
+}
+
 /** Add all the DB's pages to the free list.
  * @param[in] mc Cursor on the DB to free.
  * @param[in] subs non-Zero to check for sub-DBs in this DB.
