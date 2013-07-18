@@ -7920,7 +7920,7 @@ int mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx)
 {
 	unsigned int i, rdrs;
 	MDB_reader *mr;
-	char buf[128];
+	char buf[64];
 	int first = 1;
 
 	if (!env || !func)
