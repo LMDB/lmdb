@@ -344,8 +344,10 @@ static txnid_t mdb_debug_start;
 	 */
 #define MDB_MAGIC	 0xBEEFC0DE
 
-	/**	The version number for a database's file format. */
-#define MDB_VERSION	 1
+	/**	The version number for a database's datafile format. */
+#define MDB_DATA_VERSION	 1
+	/**	The version number for a database's lockfile format. */
+#define MDB_LOCK_VERSION	 1
 
 	/**	@brief The maximum size of a key in the database.
 	 *
@@ -513,7 +515,7 @@ typedef struct MDB_txbody {
 		/** Stamp identifying this as an MDB file. It must be set
 		 *	to #MDB_MAGIC. */
 	uint32_t	mtb_magic;
-		/** Version number of this lock file. Must be set to #MDB_VERSION. */
+		/** Version number of this lock file. Must be set to #MDB_LOCK_VERSION. */
 	uint32_t	mtb_version;
 #if defined(_WIN32) || defined(MDB_USE_POSIX_SEM)
 	char	mtb_rmname[MNAME_LEN];
@@ -770,7 +772,7 @@ typedef struct MDB_meta {
 		/** Stamp identifying this as an MDB file. It must be set
 		 *	to #MDB_MAGIC. */
 	uint32_t	mm_magic;
-		/** Version number of this lock file. Must be set to #MDB_VERSION. */
+		/** Version number of this lock file. Must be set to #MDB_DATA_VERSION. */
 	uint32_t	mm_version;
 	void		*mm_address;		/**< address for fixed mapping */
 	size_t		mm_mapsize;			/**< size of mmap region */
@@ -2862,9 +2864,9 @@ mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 			return MDB_INVALID;
 		}
 
-		if (m->mm_version != MDB_VERSION) {
+		if (m->mm_version != MDB_DATA_VERSION) {
 			DPRINTF("database is version %u, expected version %u",
-				m->mm_version, MDB_VERSION);
+				m->mm_version, MDB_DATA_VERSION);
 			return MDB_VERSION_MISMATCH;
 		}
 
@@ -2891,7 +2893,7 @@ mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 	GET_PAGESIZE(psize);
 
 	meta->mm_magic = MDB_MAGIC;
-	meta->mm_version = MDB_VERSION;
+	meta->mm_version = MDB_DATA_VERSION;
 	meta->mm_mapsize = env->me_mapsize;
 	meta->mm_psize = psize;
 	meta->mm_last_pg = 1;
@@ -3652,7 +3654,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		pthread_mutexattr_destroy(&mattr);
 #endif	/* _WIN32 || MDB_USE_POSIX_SEM */
 
-		env->me_txns->mti_version = MDB_VERSION;
+		env->me_txns->mti_version = MDB_LOCK_VERSION;
 		env->me_txns->mti_magic = MDB_MAGIC;
 		env->me_txns->mti_txnid = 0;
 		env->me_txns->mti_numreaders = 0;
@@ -3663,9 +3665,9 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 			rc = MDB_INVALID;
 			goto fail;
 		}
-		if (env->me_txns->mti_version != MDB_VERSION) {
+		if (env->me_txns->mti_version != MDB_LOCK_VERSION) {
 			DPRINTF("lock region is version %u, expected version %u",
-				env->me_txns->mti_version, MDB_VERSION);
+				env->me_txns->mti_version, MDB_LOCK_VERSION);
 			rc = MDB_VERSION_MISMATCH;
 			goto fail;
 		}
