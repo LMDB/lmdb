@@ -1315,6 +1315,14 @@ typedef int (MDB_msg_func)(const char *msg, void *ctx);
 	 * @return < 0 on failure, 0 on success.
 	 */
 int	mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx);
+
+	/** @brief Check for stale entries in the reader lock table.
+	 *
+	 * @param[in] env An environment handle returned by #mdb_env_create()
+	 * @param[out] dead Number of stale slots that were cleared
+	 * @return 0 on success, non-zero on failure.
+	 */
+int	mdb_reader_check(MDB_env *env, int *dead);
 /**	@} */
 
 #ifdef __cplusplus

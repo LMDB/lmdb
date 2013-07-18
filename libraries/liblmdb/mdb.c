@@ -952,6 +952,8 @@ struct MDB_env {
 #define	MDB_ENV_ACTIVE	0x20000000U
 	/** me_txkey is set */
 #define	MDB_ENV_TXKEY	0x10000000U
+	/** Have liveness lock in reader table */
+#define	MDB_LIVE_READER	0x08000000U
 	uint32_t 	me_flags;		/**< @ref mdb_env */
 	unsigned int	me_psize;	/**< size of a page, from #GET_PAGESIZE */
 	unsigned int	me_maxreaders;	/**< size of the reader table */
@@ -983,6 +985,7 @@ struct MDB_env {
 	/** Max size of a node on a page */
 	unsigned int	me_nodemax;
 #ifdef _WIN32
+	int		me_pidquery;		/**< Used in OpenProcess */
 	HANDLE		me_rmutex;		/* Windows mutexes don't reside in shared mem */
 	HANDLE		me_wmutex;
 #elif defined(MDB_USE_POSIX_SEM)
@@ -1994,6 +1997,56 @@ mdb_cursors_close(MDB_txn *txn, unsigned merge)
 static void
 mdb_txn_reset0(MDB_txn *txn, const char *act);
 
+#ifdef _WIN32
+enum Pidlock_op {
+	Pidset, Pidcheck
+};
+#else
+enum Pidlock_op {
+	Pidset = F_SETLK, Pidcheck = F_GETLK
+};
+#endif
+
+/** Set or check a pid lock. Set returns 0 on success.
+ * Check returns 0 if lock exists (meaning the process is alive).
+ *
+ * On Windows Pidset is a no-op, we merely check for the existence
+ * of the process with the given pid. On POSIX we use a single byte
+ * lock on the lockfile, set at an offset equal to the pid.
+ */
+static int
+mdb_reader_pid(MDB_env *env, enum Pidlock_op op, pid_t pid)
+{
+#ifdef _WIN32
+	HANDLE h;
+	int ver, query;
+	switch(op) {
+	case Pidset:
+		break;
+	case Pidcheck:
+		h = OpenProcess(env->me_pidquery, FALSE, pid);
+		if (!h)
+			return GetLastError();
+		CloseHandle(h);
+		break;
+	}
+	return 0;
+#else
+	int rc;
+	struct flock lock_info;
+	memset((void *)&lock_info, 0, sizeof(lock_info));
+	lock_info.l_type = F_WRLCK;
+	lock_info.l_whence = SEEK_SET;
+	lock_info.l_start = pid;
+	lock_info.l_len = 1;
+	while ((rc = fcntl(env->me_lfd, op, &lock_info)) &&
+			(rc = ErrCode()) == EINTR) ;
+	if (op == F_GETLK && rc == 0 && lock_info.l_type == F_UNLCK)
+		rc = -1;
+	return rc;
+#endif
+}
+
 /** Common code for #mdb_txn_begin() and #mdb_txn_renew().
  * @param[in] txn the transaction handle to initialize
  * @return 0 on success, non-zero on failure.
@@ -2032,6 +2085,14 @@ mdb_txn_renew0(MDB_txn *txn)
 				if (i == env->me_maxreaders) {
 					UNLOCK_MUTEX_R(env);
 					return MDB_READERS_FULL;
+				}
+				if (!(env->me_flags & MDB_LIVE_READER)) {
+					rc = mdb_reader_pid(env, Pidset, pid);
+					if (rc) {
+						UNLOCK_MUTEX_R(env);
+						return rc;
+					}
+					env->me_flags |= MDB_LIVE_READER;
 				}
 				env->me_txns->mti_readers[i].mr_pid = pid;
 				env->me_txns->mti_readers[i].mr_tid = tid;
@@ -3161,6 +3222,14 @@ mdb_env_open2(MDB_env *env)
 		LONG sizelo, sizehi;
 		sizelo = env->me_mapsize & 0xffffffff;
 		sizehi = env->me_mapsize >> 16 >> 16; /* only needed on Win64 */
+
+		/* See if we should use QueryLimited */
+		rc = GetVersion();
+		if ((rc & 0xff) > 5)
+			env->me_pidquery = PROCESS_QUERY_LIMITED_INFORMATION;
+		else
+			env->me_pidquery = PROCESS_QUERY_INFORMATION;
+
 		/* Windows won't create mappings for zero length files.
 		 * Just allocate the maxsize right now.
 		 */
@@ -7930,7 +7999,7 @@ int mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx)
 	if (!env->me_txns) {
 		return func("(no reader locks)\n", ctx);
 	}
-	rdrs = env->me_numreaders;
+	rdrs = env->me_maxreaders;
 	mr = env->me_txns->mti_readers;
 	for (i=0; i<rdrs; i++) {
 		if (mr[i].mr_pid) {
@@ -7955,5 +8024,86 @@ int mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx)
 		func("(no active readers)\n", ctx);
 	}
 	return 0;
+}
+
+/* insert pid into list if not already present.
+ * return -1 if already present.
+ */
+static int mdb_pid_insert(pid_t *ids, pid_t pid)
+{
+	/* binary search of pid in list */
+	unsigned base = 0;
+	unsigned cursor = 1;
+	int val = 0;
+	unsigned n = ids[0];
+
+	while( 0 < n ) {
+		unsigned pivot = n >> 1;
+		cursor = base + pivot + 1;
+		val = pid - ids[cursor];
+
+		if( val < 0 ) {
+			n = pivot;
+
+		} else if ( val > 0 ) {
+			base = cursor;
+			n -= pivot + 1;
+
+		} else {
+			/* found, so it's a duplicate */
+			return -1;
+		}
+	}
+	
+	if( val > 0 ) {
+		++cursor;
+	}
+	ids[0]++;
+	for (n = ids[0]; n > cursor; n--)
+		ids[n] = ids[n-1];
+	ids[n] = pid;
+	return 0;
+}
+
+int mdb_reader_check(MDB_env *env, int *dead)
+{
+	unsigned int i, j, rdrs;
+	MDB_reader *mr;
+	pid_t *pids, pid;
+	int count = 0;
+
+	if (!env)
+		return EINVAL;
+	if (dead)
+		*dead = 0;
+	if (!env->me_txns)
+		return MDB_SUCCESS;
+	rdrs = env->me_maxreaders;
+	pids = malloc((rdrs+1) * sizeof(pid_t));
+	if (!pids)
+		return ENOMEM;
+	pids[0] = 0;
+	mr = env->me_txns->mti_readers;
+	j = 0;
+	for (i=0; i<rdrs; i++) {
+		if (mr[i].mr_pid && mr[i].mr_pid != env->me_pid) {
+			pid = mr[i].mr_pid;
+			if (mdb_pid_insert(pids, pid) == 0) {
+				if (mdb_reader_pid(env, Pidcheck, pid)) {
+					LOCK_MUTEX_R(env);
+					for (j=i; j<rdrs; j++)
+						if (mr[j].mr_pid == pid) {
+							mr[j].mr_pid = 0;
+							count++;
+						}
+					UNLOCK_MUTEX_R(env);
+				}
+			}
+		}
+	}
+	free(pids);
+	if (dead)
+		*dead = count;
+	return MDB_SUCCESS;
 }
 /** @} */

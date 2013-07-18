@@ -31,7 +31,7 @@ static void prstat(MDB_stat *ms)
 
 static void usage(char *prog)
 {
-	fprintf(stderr, "usage: %s dbpath [-n] [-e] [-r] | [-f[f[f]]] [-a|-s subdb]\n", prog);
+	fprintf(stderr, "usage: %s dbpath [-n] [-e] [-r[r]] [-f[f[f]]] [-a|-s subdb]\n", prog);
 	exit(EXIT_FAILURE);
 }
 
@@ -122,6 +122,12 @@ int main(int argc, char *argv[])
 	if (rdrinfo) {
 		printf("Reader Table Status\n");
 		rc = mdb_reader_list(env, (MDB_msg_func *)fputs, stdout);
+		if (rdrinfo > 1) {
+			int dead;
+			mdb_reader_check(env, &dead);
+			printf("  %d stale readers cleared.\n", dead);
+			rc = mdb_reader_list(env, (MDB_msg_func *)fputs, stdout);
+		}
 		if (!(subname || alldbs || freinfo))
 			goto env_close;
 	}
