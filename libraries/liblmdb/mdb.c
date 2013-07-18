@@ -7999,7 +7999,7 @@ int mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx)
 	if (!env->me_txns) {
 		return func("(no reader locks)\n", ctx);
 	}
-	rdrs = env->me_maxreaders;
+	rdrs = env->me_txns->mti_numreaders;
 	mr = env->me_txns->mti_readers;
 	for (i=0; i<rdrs; i++) {
 		if (mr[i].mr_pid) {
@@ -8078,7 +8078,7 @@ int mdb_reader_check(MDB_env *env, int *dead)
 		*dead = 0;
 	if (!env->me_txns)
 		return MDB_SUCCESS;
-	rdrs = env->me_maxreaders;
+	rdrs = env->me_txns->mti_numreaders;
 	pids = malloc((rdrs+1) * sizeof(pid_t));
 	if (!pids)
 		return ENOMEM;
