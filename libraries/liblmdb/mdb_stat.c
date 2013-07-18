@@ -31,7 +31,7 @@ static void prstat(MDB_stat *ms)
 
 static void usage(char *prog)
 {
-	fprintf(stderr, "usage: %s dbpath [-e] [-f[f[f]]] [-n] [-a|-s subdb] [-r]\n", prog);
+	fprintf(stderr, "usage: %s dbpath [-n] [-e] [-r] | [-f[f[f]]] [-a|-s subdb]\n", prog);
 	exit(EXIT_FAILURE);
 }
 
@@ -56,6 +56,7 @@ int main(int argc, char *argv[])
 	 * -s: print stat of only the named subDB
 	 * -e: print env info
 	 * -f: print freelist info
+	 * -r: print reader info
 	 * -n: use NOSUBDIR flag on env_open
 	 * (default) print stat of only the main DB
 	 */
@@ -103,11 +104,6 @@ int main(int argc, char *argv[])
 		printf("mdb_env_open failed, error %d %s\n", rc, mdb_strerror(rc));
 		goto env_close;
 	}
-	rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
-	if (rc) {
-		printf("mdb_txn_begin failed, error %d %s\n", rc, mdb_strerror(rc));
-		goto env_close;
-	}
 
 	if (envinfo) {
 		rc = mdb_env_stat(env, &mst);
@@ -126,6 +122,14 @@ int main(int argc, char *argv[])
 	if (rdrinfo) {
 		printf("Reader Table Status\n");
 		rc = mdb_reader_list(env, (MDB_msg_func *)fputs, stdout);
+		if (!(subname || alldbs || freinfo))
+			goto env_close;
+	}
+
+	rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
+	if (rc) {
+		printf("mdb_txn_begin failed, error %d %s\n", rc, mdb_strerror(rc));
+		goto env_close;
 	}
 
 	if (freinfo) {

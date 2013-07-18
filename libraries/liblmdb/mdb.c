@@ -7926,7 +7926,7 @@ int mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx)
 	if (!env || !func)
 		return -1;
 	if (!env->me_txns) {
-		return func("No reader locks\n", ctx);
+		return func("(no reader locks)\n", ctx);
 	}
 	rdrs = env->me_numreaders;
 	mr = env->me_txns->mti_readers;
@@ -7948,6 +7948,9 @@ int mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx)
 			if (rc < 0)
 				return rc;
 		}
+	}
+	if (first) {
+		func("(no active readers)\n", ctx);
 	}
 	return 0;
 }
