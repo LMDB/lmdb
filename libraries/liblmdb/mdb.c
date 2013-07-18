@@ -7916,4 +7916,39 @@ int mdb_set_relctx(MDB_txn *txn, MDB_dbi dbi, void *ctx)
 	return MDB_SUCCESS;
 }
 
+int mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx)
+{
+	unsigned int i, rdrs;
+	MDB_reader *mr;
+	char buf[128];
+	int first = 1;
+
+	if (!env || !func)
+		return -1;
+	if (!env->me_txns) {
+		return func("No reader locks\n", ctx);
+	}
+	rdrs = env->me_numreaders;
+	mr = env->me_txns->mti_readers;
+	for (i=0; i<rdrs; i++) {
+		if (mr[i].mr_pid) {
+			size_t tid;
+			int rc;
+			tid = mr[i].mr_tid;
+			if (mr[i].mr_txnid == (txnid_t)-1) {
+				sprintf(buf, "%10d %zx -\n", mr[i].mr_pid, tid);
+			} else {
+				sprintf(buf, "%10d %zx %zu\n", mr[i].mr_pid, tid, mr[i].mr_txnid);
+			}
+			if (first) {
+				first = 0;
+				func("    pid     thread     txnid\n", ctx);
+			}
+			rc = func(buf, ctx);
+			if (rc < 0)
+				return rc;
+		}
+	}
+	return 0;
+}
 /** @} */

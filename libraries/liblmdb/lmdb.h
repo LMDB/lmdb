@@ -1298,6 +1298,23 @@ int  mdb_cmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b);
 	 * @return < 0 if a < b, 0 if a == b, > 0 if a > b
 	 */
 int  mdb_dcmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b);
+
+	/** @brief A callback function used to print a message from the library.
+	 *
+	 * @param[in] msg The string to be printed.
+	 * @param[in] ctx An arbitrary context pointer for the callback.
+	 * @return < 0 on failure, 0 on success.
+	 */
+typedef int (MDB_msg_func)(const char *msg, void *ctx);
+
+	/** @brief Dump the entries in the reader lock table.
+	 *
+	 * @param[in] env An environment handle returned by #mdb_env_create()
+	 * @param[in] func A #MDB_msg_func function
+	 * @param[in] ctx Anything the message function needs
+	 * @return < 0 on failure, 0 on success.
+	 */
+int	mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx);
 /**	@} */
 
 #ifdef __cplusplus

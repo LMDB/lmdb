@@ -31,7 +31,7 @@ static void prstat(MDB_stat *ms)
 
 static void usage(char *prog)
 {
-	fprintf(stderr, "usage: %s dbpath [-e] [-f[f[f]]] [-n] [-a|-s subdb]\n", prog);
+	fprintf(stderr, "usage: %s dbpath [-e] [-f[f[f]]] [-n] [-a|-s subdb] [-r]\n", prog);
 	exit(EXIT_FAILURE);
 }
 
@@ -46,7 +46,7 @@ int main(int argc, char *argv[])
 	char *prog = argv[0];
 	char *envname;
 	char *subname = NULL;
-	int alldbs = 0, envinfo = 0, envflags = 0, freinfo = 0;
+	int alldbs = 0, envinfo = 0, envflags = 0, freinfo = 0, rdrinfo = 0;
 
 	if (argc < 2) {
 		usage(prog);
@@ -59,7 +59,7 @@ int main(int argc, char *argv[])
 	 * -n: use NOSUBDIR flag on env_open
 	 * (default) print stat of only the main DB
 	 */
-	while ((i = getopt(argc, argv, "aefns:")) != EOF) {
+	while ((i = getopt(argc, argv, "aefnrs:")) != EOF) {
 		switch(i) {
 		case 'a':
 			if (subname)
@@ -74,6 +74,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'n':
 			envflags |= MDB_NOSUBDIR;
+			break;
+		case 'r':
+			rdrinfo++;
 			break;
 		case 's':
 			if (alldbs)
@@ -118,6 +121,11 @@ int main(int argc, char *argv[])
 		printf("  Last transaction ID: %zu\n", mei.me_last_txnid);
 		printf("  Max readers: %u\n", mei.me_maxreaders);
 		printf("  Number of readers used: %u\n", mei.me_numreaders);
+	}
+
+	if (rdrinfo) {
+		printf("Reader Table Status\n");
+		rc = mdb_reader_list(env, (MDB_msg_func *)fputs, stdout);
 	}
 
 	if (freinfo) {
