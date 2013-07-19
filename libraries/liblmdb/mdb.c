@@ -8092,11 +8092,13 @@ int mdb_reader_check(MDB_env *env, int *dead)
 			if (mdb_pid_insert(pids, pid) == 0) {
 				if (mdb_reader_pid(env, Pidcheck, pid)) {
 					LOCK_MUTEX_R(env);
-					for (j=i; j<rdrs; j++)
-						if (mr[j].mr_pid == pid) {
-							mr[j].mr_pid = 0;
-							count++;
-						}
+					if (mdb_reader_pid(env, Pidcheck, pid)) {
+						for (j=i; j<rdrs; j++)
+							if (mr[j].mr_pid == pid) {
+								mr[j].mr_pid = 0;
+								count++;
+							}
+					}
 					UNLOCK_MUTEX_R(env);
 				}
 			}
