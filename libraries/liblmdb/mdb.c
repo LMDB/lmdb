@@ -2078,14 +2078,6 @@ mdb_txn_renew0(MDB_txn *txn)
 				pid_t pid = env->me_pid;
 				pthread_t tid = pthread_self();
 
-				LOCK_MUTEX_R(env);
-				for (i=0; i<env->me_txns->mti_numreaders; i++)
-					if (env->me_txns->mti_readers[i].mr_pid == 0)
-						break;
-				if (i == env->me_maxreaders) {
-					UNLOCK_MUTEX_R(env);
-					return MDB_READERS_FULL;
-				}
 				if (!(env->me_flags & MDB_LIVE_READER)) {
 					rc = mdb_reader_pid(env, Pidset, pid);
 					if (rc) {
@@ -2093,6 +2085,15 @@ mdb_txn_renew0(MDB_txn *txn)
 						return rc;
 					}
 					env->me_flags |= MDB_LIVE_READER;
+				}
+
+				LOCK_MUTEX_R(env);
+				for (i=0; i<env->me_txns->mti_numreaders; i++)
+					if (env->me_txns->mti_readers[i].mr_pid == 0)
+						break;
+				if (i == env->me_maxreaders) {
+					UNLOCK_MUTEX_R(env);
+					return MDB_READERS_FULL;
 				}
 				env->me_txns->mti_readers[i].mr_pid = pid;
 				env->me_txns->mti_readers[i].mr_tid = tid;
