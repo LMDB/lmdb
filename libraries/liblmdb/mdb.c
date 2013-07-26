@@ -3535,19 +3535,36 @@ mdb_hash_val(MDB_val *val, mdb_hash_t hval)
 	return hval;
 }
 
-/** Hash the string and output the hash in hex.
+/** Hash the string and output the encoded hash.
+ * This uses modified RFC1924 Ascii85 encoding to accommodate systems with
+ * very short name limits. We don't care about the encoding being reversible,
+ * we just want to preserve as many bits of the input as possible in a
+ * small printable string.
  * @param[in] str string to hash
- * @param[out] hexbuf an array of 17 chars to hold the hash
+ * @param[out] encbuf an array of 11 chars to hold the hash
  */
+const static char mdb_a85[]= "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~";
+
 static void
-mdb_hash_hex(MDB_val *val, char *hexbuf)
+mdb_pack85(unsigned long l, char *out)
 {
 	int i;
-	mdb_hash_t h = mdb_hash_val(val, MDB_HASH_INIT);
-	for (i=0; i<8; i++) {
-		hexbuf += sprintf(hexbuf, "%02x", (unsigned int)h & 0xff);
-		h >>= 8;
+
+	for (i=0; i<5; i++) {
+		*out++ = mdb_a85[l % 85];
+		l /= 85;
 	}
+}
+
+static void
+mdb_hash_enc(MDB_val *val, char *encbuf)
+{
+	mdb_hash_t h = mdb_hash_val(val, MDB_HASH_INIT);
+	unsigned long *l = (unsigned long *)&h;
+
+	mdb_pack85(l[0], encbuf);
+	mdb_pack85(l[1], encbuf+5);
+	encbuf[10] = '\0';
 }
 #endif
 
@@ -3661,7 +3678,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 			DWORD nlow;
 		} idbuf;
 		MDB_val val;
-		char hexbuf[17];
+		char encbuf[11];
 
 		if (!mdb_sec_inited) {
 			InitializeSecurityDescriptor(&mdb_null_sd,
@@ -3678,9 +3695,9 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		idbuf.nlow   = stbuf.nFileIndexLow;
 		val.mv_data = &idbuf;
 		val.mv_size = sizeof(idbuf);
-		mdb_hash_hex(&val, hexbuf);
-		sprintf(env->me_txns->mti_rmname, "Global\\MDBr%s", hexbuf);
-		sprintf(env->me_txns->mti_wmname, "Global\\MDBw%s", hexbuf);
+		mdb_hash_enc(&val, encbuf);
+		sprintf(env->me_txns->mti_rmname, "Global\\MDBr%s", encbuf);
+		sprintf(env->me_txns->mti_wmname, "Global\\MDBw%s", encbuf);
 		env->me_rmutex = CreateMutex(&mdb_all_sa, FALSE, env->me_txns->mti_rmname);
 		if (!env->me_rmutex) goto fail_errno;
 		env->me_wmutex = CreateMutex(&mdb_all_sa, FALSE, env->me_txns->mti_wmname);
@@ -3692,16 +3709,22 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 			ino_t ino;
 		} idbuf;
 		MDB_val val;
-		char hexbuf[17];
+		char encbuf[11];
 
+#if defined(__NetBSD__)
+#define	MDB_SHORT_SEMNAMES	1	/* limited to 14 chars */
+#endif
 		if (fstat(env->me_lfd, &stbuf)) goto fail_errno;
 		idbuf.dev = stbuf.st_dev;
 		idbuf.ino = stbuf.st_ino;
 		val.mv_data = &idbuf;
 		val.mv_size = sizeof(idbuf);
-		mdb_hash_hex(&val, hexbuf);
-		sprintf(env->me_txns->mti_rmname, "/MDBr%s", hexbuf);
-		sprintf(env->me_txns->mti_wmname, "/MDBw%s", hexbuf);
+		mdb_hash_enc(&val, encbuf);
+#ifdef MDB_SHORT_SEMNAMES
+		encbuf[9] = '\0';	/* drop name from 15 chars to 14 chars */
+#endif
+		sprintf(env->me_txns->mti_rmname, "/MDBr%s", encbuf);
+		sprintf(env->me_txns->mti_wmname, "/MDBw%s", encbuf);
 		/* Clean up after a previous run, if needed:  Try to
 		 * remove both semaphores before doing anything else.
 		 */
