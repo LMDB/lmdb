@@ -4007,6 +4007,14 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
 	int rc;
 	size_t wsize;
 	char *ptr;
+#ifdef _WIN32
+	DWORD len, w2;
+#define DOWRITE(fd, ptr, w2, len)	WriteFile(fd, ptr, w2, &len)
+#else
+	ssize_t len;
+	size_t w2;
+#define DOWRITE(fd, ptr, w2, len)	len = write(fd, ptr, w2)
+#endif
 
 	/* Do the lock/unlock of the reader mutex before starting the
 	 * write txn.  Otherwise other read txns could block writers.
@@ -4030,52 +4038,50 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
 	}
 
 	wsize = env->me_psize * 2;
-#ifdef _WIN32
+	ptr = env->me_map;
 	{
-		DWORD len;
-		rc = WriteFile(fd, env->me_map, wsize, &len, NULL);
-		rc = (len == wsize) ? MDB_SUCCESS : ErrCode();
+		w2 = wsize;
+		while (w2 > 0) {
+			DOWRITE(fd, ptr, w2, len);
+			if (len > 0) {
+				rc = MDB_SUCCESS;
+				ptr += len;
+				w2 -= len;
+				continue;
+			} else {
+				/* Non-blocking or async handles are not supported */
+				rc = ErrCode();
+				if (!rc)
+					rc = EIO;
+				break;
+			}
+		}
 	}
-#else
-	rc = write(fd, env->me_map, wsize);
-	rc = (rc == (int)wsize) ? MDB_SUCCESS : ErrCode();
-#endif
 	if (env->me_txns)
 		UNLOCK_MUTEX_W(env);
 
 	if (rc)
 		goto leave;
 
-	ptr = env->me_map + wsize;
 	wsize = txn->mt_next_pgno * env->me_psize - wsize;
-#ifdef _WIN32
 	while (wsize > 0) {
-		DWORD len, w2;
 		if (wsize > MAX_WRITE)
 			w2 = MAX_WRITE;
 		else
 			w2 = wsize;
-		rc = WriteFile(fd, ptr, w2, &len, NULL);
-		rc = (len == w2) ? MDB_SUCCESS : ErrCode();
-		if (rc) break;
-		wsize -= w2;
-		ptr += w2;
+		DOWRITE(fd, ptr, w2, len);
+		if (len > 0) {
+			rc = MDB_SUCCESS;
+			ptr += len;
+			wsize -= len;
+			continue;
+		} else {
+			rc = ErrCode();
+			if (!rc)
+				rc = EIO;
+			break;
+		}
 	}
-#else
-	while (wsize > 0) {
-		size_t w2;
-		ssize_t wres;
-		if (wsize > MAX_WRITE)
-			w2 = MAX_WRITE;
-		else
-			w2 = wsize;
-		wres = write(fd, ptr, w2);
-		rc = (wres > 0 ) ? MDB_SUCCESS : ErrCode();
-		if (rc) break;
-		wsize -= wres;
-		ptr += wres;
-	}
-#endif
 
 leave:
 	mdb_txn_abort(txn);
