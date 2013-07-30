@@ -2980,7 +2980,7 @@ mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 		OVERLAPPED ov;
 		memset(&ov, 0, sizeof(ov));
 		rc = WriteFile(env->me_fd, p, psize * 2, &len, &ov);
-		rc = (len == psize * 2 ? MDB_SUCCESS : ErrCode();
+		rc = (len == psize * 2) ? MDB_SUCCESS : ErrCode();
 	}
 #else
 	rc = pwrite(env->me_fd, p, psize * 2, 0);
