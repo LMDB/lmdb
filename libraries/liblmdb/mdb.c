@@ -2980,11 +2980,11 @@ mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 		OVERLAPPED ov;
 		memset(&ov, 0, sizeof(ov));
 		rc = WriteFile(env->me_fd, p, psize * 2, &len, &ov);
-		rc = rc ? (len == psize * 2 ? MDB_SUCCESS : EIO) : ErrCode();
+		rc = (len == psize * 2 ? MDB_SUCCESS : ErrCode();
 	}
 #else
 	rc = pwrite(env->me_fd, p, psize * 2, 0);
-	rc = (rc == (int)psize * 2) ? MDB_SUCCESS : rc < 0 ? ErrCode() : EIO;
+	rc = (rc == (int)psize * 2) ? MDB_SUCCESS : ErrCode();
 #endif
 	free(p);
 	return rc;
@@ -4034,11 +4034,11 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
 	{
 		DWORD len;
 		rc = WriteFile(fd, env->me_map, wsize, &len, NULL);
-		rc = rc ? (len == wsize ? MDB_SUCCESS : EIO) : ErrCode();
+		rc = (len == wsize) ? MDB_SUCCESS : ErrCode();
 	}
 #else
 	rc = write(fd, env->me_map, wsize);
-	rc = rc == (int)wsize ? MDB_SUCCESS : rc < 0 ? ErrCode() : EIO;
+	rc = (rc == (int)wsize) ? MDB_SUCCESS : ErrCode();
 #endif
 	if (env->me_txns)
 		UNLOCK_MUTEX_W(env);
@@ -4056,7 +4056,7 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
 		else
 			w2 = wsize;
 		rc = WriteFile(fd, ptr, w2, &len, NULL);
-		rc = rc ? (len == w2 ? MDB_SUCCESS : EIO) : ErrCode();
+		rc = (len == w2) ? MDB_SUCCESS : ErrCode();
 		if (rc) break;
 		wsize -= w2;
 		ptr += w2;
@@ -4070,7 +4070,7 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
 		else
 			w2 = wsize;
 		wres = write(fd, ptr, w2);
-		rc = wres == (ssize_t)w2 ? MDB_SUCCESS : wres < 0 ? ErrCode() : EIO;
+		rc = (wres > 0 ) ? MDB_SUCCESS : ErrCode();
 		if (rc) break;
 		wsize -= wres;
 		ptr += wres;
