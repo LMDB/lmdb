@@ -2949,6 +2949,19 @@ mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 	MDB_page *p, *q;
 	int rc;
 	unsigned int	 psize;
+#ifdef _WIN32
+	DWORD len;
+	OVERLAPPED ov;
+	memset(&ov, 0, sizeof(ov));
+#define DO_PWRITE(rc, fd, ptr, size, len, pos)	do { \
+	ov.Offset = pos;	\
+	rc = WriteFile(fd, ptr, size, &len, &ov);	} while(0)
+#else
+	int len;
+#define DO_PWRITE(rc, fd, ptr, size, len, pos)	do { \
+	len = pwrite(fd, ptr, size, pos);	\
+	rc = (len >= 0); } while(0)
+#endif
 
 	DPUTS("writing new meta page");
 
@@ -2974,18 +2987,13 @@ mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 	q->mp_flags = P_META;
 	*(MDB_meta *)METADATA(q) = *meta;
 
-#ifdef _WIN32
-	{
-		DWORD len;
-		OVERLAPPED ov;
-		memset(&ov, 0, sizeof(ov));
-		rc = WriteFile(env->me_fd, p, psize * 2, &len, &ov);
-		rc = (len == psize * 2) ? MDB_SUCCESS : ErrCode();
-	}
-#else
-	rc = pwrite(env->me_fd, p, psize * 2, 0);
-	rc = (rc == (int)psize * 2) ? MDB_SUCCESS : ErrCode();
-#endif
+	DO_PWRITE(rc, env->me_fd, p, psize * 2, len, 0);
+	if (!rc)
+		rc = ErrCode();
+	else if (len == psize * 2)
+		rc = MDB_SUCCESS;
+	else
+		rc = ENOSPC;
 	free(p);
 	return rc;
 }
@@ -4009,11 +4017,11 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
 	char *ptr;
 #ifdef _WIN32
 	DWORD len, w2;
-#define DOWRITE(fd, ptr, w2, len)	WriteFile(fd, ptr, w2, &len)
+#define DO_WRITE(rc, fd, ptr, w2, len)	rc = WriteFile(fd, ptr, w2, &len, NULL)
 #else
 	ssize_t len;
 	size_t w2;
-#define DOWRITE(fd, ptr, w2, len)	len = write(fd, ptr, w2)
+#define DO_WRITE(rc, fd, ptr, w2, len)	len = write(fd, ptr, w2); rc = (len >= 0)
 #endif
 
 	/* Do the lock/unlock of the reader mutex before starting the
@@ -4039,22 +4047,21 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
 
 	wsize = env->me_psize * 2;
 	ptr = env->me_map;
-	{
-		w2 = wsize;
-		while (w2 > 0) {
-			DOWRITE(fd, ptr, w2, len);
-			if (len > 0) {
-				rc = MDB_SUCCESS;
-				ptr += len;
-				w2 -= len;
-				continue;
-			} else {
-				/* Non-blocking or async handles are not supported */
-				rc = ErrCode();
-				if (!rc)
-					rc = EIO;
-				break;
-			}
+	w2 = wsize;
+	while (w2 > 0) {
+		DO_WRITE(rc, fd, ptr, w2, len);
+		if (!rc) {
+			rc = ErrCode();
+			break;
+		} else if (len > 0) {
+			rc = MDB_SUCCESS;
+			ptr += len;
+			w2 -= len;
+			continue;
+		} else {
+			/* Non-blocking or async handles are not supported */
+			rc = EIO;
+			break;
 		}
 	}
 	if (env->me_txns)
@@ -4069,16 +4076,17 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
 			w2 = MAX_WRITE;
 		else
 			w2 = wsize;
-		DOWRITE(fd, ptr, w2, len);
-		if (len > 0) {
+		DO_WRITE(rc, fd, ptr, w2, len);
+		if (!rc) {
+			rc = ErrCode();
+			break;
+		} else if (len > 0) {
 			rc = MDB_SUCCESS;
 			ptr += len;
 			wsize -= len;
 			continue;
 		} else {
-			rc = ErrCode();
-			if (!rc)
-				rc = EIO;
+			rc = EIO;
 			break;
 		}
 	}
