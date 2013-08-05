@@ -827,13 +827,15 @@ struct MDB_txn {
 	/** The list of pages that became unused during this transaction.
 	 */
 	MDB_IDL		mt_free_pgs;
-	/** The list of dirty pages we temporarily wrote to disk
+	/** The sorted list of dirty pages we temporarily wrote to disk
 	 *	because the dirty list was full.
 	 */
 	MDB_IDL		mt_spill_pgs;
 	union {
-		MDB_ID2L	dirty_list;	/**< for write txns: modified pages */
-		MDB_reader	*reader;	/**< this thread's reader table slot or NULL */
+		/** For write txns: Modified pages. Sorted when not MDB_WRITEMAP. */
+		MDB_ID2L	dirty_list;
+		/** For read txns: This thread/txn's reader table slot, or NULL. */
+		MDB_reader	*reader;
 	} mt_u;
 	/** Array of records for each DB known in the environment. */
 	MDB_dbx		*mt_dbxs;
@@ -1267,7 +1269,7 @@ mdb_dcmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b)
 	return txn->mt_dbxs[dbi].md_dcmp(a, b);
 }
 
-/** Allocate a page.
+/** Allocate memory for a page.
  * Re-use old malloc'd pages first for singletons, otherwise just malloc.
  */
 static MDB_page *
@@ -1543,9 +1545,14 @@ mdb_page_dirty(MDB_txn *txn, MDB_page *mp)
 	txn->mt_dirty_room--;
 }
 
-/** Allocate pages for writing.
+/** Allocate page numbers and memory for writing.  Maintain me_pglast,
+ * me_pghead and mt_next_pgno.
+ *
  * If there are free pages available from older transactions, they
- * will be re-used first. Otherwise a new page will be allocated.
+ * are re-used first. Otherwise allocate a new page at mt_next_pgno.
+ * Do not modify the freedB, just merge freeDB records into me_pghead[]
+ * and move me_pglast to say which records were consumed.  Only this
+ * function can create me_pghead and move me_pglast/mt_next_pgno.
  * @param[in] mc cursor A cursor handle identifying the transaction and
  *	database for which we are allocating.
  * @param[in] num the number of pages to allocate.
@@ -1609,7 +1616,7 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 			mdb_cursor_init(&m2, txn, FREE_DBI, NULL);
 			if (last) {
 				op = MDB_SET_RANGE;
-				key.mv_data = &last; /* will loop up last+1 */
+				key.mv_data = &last; /* will look up last+1 */
 				key.mv_size = sizeof(last);
 			}
 			if (Paranoid && mc->mc_dbi == FREE_DBI)
@@ -1985,6 +1992,7 @@ mdb_cursors_close(MDB_txn *txn, unsigned merge)
 				}
 				mc = bk;
 			}
+			/* Only malloced cursors are permanently tracked. */
 			free(mc);
 		}
 		cursors[i] = NULL;
@@ -2304,6 +2312,7 @@ mdb_dbis_update(MDB_txn *txn, int keep)
 /** Common code for #mdb_txn_reset() and #mdb_txn_abort().
  * May be called twice for readonly txns: First reset it, then abort.
  * @param[in] txn the transaction handle to reset
+ * @param[in] act why the transaction is being reset
  */
 static void
 mdb_txn_reset0(MDB_txn *txn, const char *act)
@@ -3516,7 +3525,7 @@ typedef unsigned long long	mdb_hash_t;
 #define MDB_HASH_INIT ((mdb_hash_t)0xcbf29ce484222325ULL)
 
 /** perform a 64 bit Fowler/Noll/Vo FNV-1a hash on a buffer
- * @param[in] str string to hash
+ * @param[in] val	value to hash
  * @param[in] hval	initial value for hash
  * @return 64 bit hash
  *
