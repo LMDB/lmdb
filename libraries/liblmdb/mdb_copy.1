@@ -11,6 +11,7 @@ The
 .B mdb_copy
 utility copies an LMDB environment. The environment can
 be copied regardless of whether it is currently in use.
+No lockfile is created, since it gets recreated at need.
 
 If
 .I dstpath
@@ -22,6 +23,10 @@ written to stdout.
 Exit status is zero if no errors occur.
 Errors result in a non-zero exit status and
 a diagnostic message being written to standard error.
+.SH CAVEATS
+This utility can trigger significant file size growth if run
+in parallel with write transactions, because pages which they
+free during copying cannot be reused until the copy is done.
 .SH "SEE ALSO"
 .BR mdb_stat (1)
 .SH AUTHOR
