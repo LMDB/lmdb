@@ -2999,7 +2999,7 @@ mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 	DO_PWRITE(rc, env->me_fd, p, psize * 2, len, 0);
 	if (!rc)
 		rc = ErrCode();
-	else if (len == psize * 2)
+	else if ((unsigned) len == psize * 2)
 		rc = MDB_SUCCESS;
 	else
 		rc = ENOSPC;
@@ -3560,7 +3560,7 @@ mdb_hash_val(MDB_val *val, mdb_hash_t hval)
  * @param[in] str string to hash
  * @param[out] encbuf an array of 11 chars to hold the hash
  */
-const static char mdb_a85[]= "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~";
+static const char mdb_a85[]= "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~";
 
 static void
 mdb_pack85(unsigned long l, char *out)
