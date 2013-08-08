@@ -4452,12 +4452,11 @@ mdb_cursor_push(MDB_cursor *mc, MDB_page *mp)
 static int
 mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret, int *lvl)
 {
+	MDB_env *env = txn->mt_env;
 	MDB_page *p = NULL;
 	int level;
 
-	if (!((txn->mt_flags & MDB_TXN_RDONLY) |
-		  (txn->mt_env->me_flags & MDB_WRITEMAP)))
-	{
+	if (!((txn->mt_flags & MDB_TXN_RDONLY) | (env->me_flags & MDB_WRITEMAP))) {
 		MDB_txn *tx2 = txn;
 		level = 1;
 		do {
@@ -4471,7 +4470,7 @@ mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret, int *lvl)
 			if (tx2->mt_spill_pgs) {
 				x = mdb_midl_search(tx2->mt_spill_pgs, pgno);
 				if (x <= tx2->mt_spill_pgs[0] && tx2->mt_spill_pgs[x] == pgno) {
-					p = (MDB_page *)(txn->mt_env->me_map + txn->mt_env->me_psize * pgno);
+					p = (MDB_page *)(env->me_map + env->me_psize * pgno);
 					goto done;
 				}
 			}
@@ -4488,7 +4487,7 @@ mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret, int *lvl)
 
 	if (pgno < txn->mt_next_pgno) {
 		level = 0;
-		p = (MDB_page *)(txn->mt_env->me_map + txn->mt_env->me_psize * pgno);
+		p = (MDB_page *)(env->me_map + env->me_psize * pgno);
 	} else {
 		DPRINTF("page %"Z"u not found", pgno);
 		assert(p != NULL);
