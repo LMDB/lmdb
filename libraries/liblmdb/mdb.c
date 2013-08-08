@@ -1434,7 +1434,7 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 	MDB_page *dp;
 	MDB_ID2L dl = txn->mt_u.dirty_list;
 	unsigned int i, j;
-	int rc;
+	int rc, level;
 
 	if (m0->mc_flags & C_SUB)
 		return MDB_SUCCESS;
@@ -1461,11 +1461,13 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 	/* Mark all the dirty root pages we want to preserve */
 	for (i=0; i<txn->mt_numdbs; i++) {
 		if (txn->mt_dbflags[i] & DB_DIRTY) {
-			j = mdb_mid2l_search(dl, txn->mt_dbs[i].md_root);
-			if (j <= dl[0].mid) {
-				dp = dl[j].mptr;
+			pgno_t pgno = txn->mt_dbs[i].md_root;
+			if (pgno == P_INVALID)
+				continue;
+			if ((rc = mdb_page_get(txn, pgno, &dp, &level)) != MDB_SUCCESS)
+				goto done;
+			if ((dp->mp_flags & P_DIRTY) && level <= 1)
 				dp->mp_flags |= P_KEEP;
-			}
 		}
 	}
 
@@ -2592,7 +2594,7 @@ mdb_page_flush(MDB_txn *txn)
 	j = 0;
 	if (env->me_flags & MDB_WRITEMAP) {
 		/* Clear dirty flags */
-		for (i = pagecount; i; i--) {
+		for (i=1; i<=pagecount; i++) {
 			dp = dl[i].mptr;
 			/* Don't flush this page yet */
 			if (dp->mp_flags & P_KEEP) {
