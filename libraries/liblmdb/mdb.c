@@ -4703,33 +4703,38 @@ mdb_ovpage_free(MDB_cursor *mc, MDB_page *mp)
 {
 	MDB_txn *txn = mc->mc_txn;
 	pgno_t pg = mp->mp_pgno;
-	unsigned i, ovpages = mp->mp_pages;
+	unsigned x = 0, ovpages = mp->mp_pages;
 	MDB_env *env = txn->mt_env;
+	MDB_IDL sl = txn->mt_spill_pgs;
 	int rc;
 
 	DPRINTF("free ov page %"Z"u (%d)", pg, ovpages);
 	/* If the page is dirty or on the spill list we just acquired it,
 	 * so we should give it back to our current free list, if any.
-	 * Not currently supported in nested txns.
 	 * Otherwise put it onto the list of pages we freed in this txn.
+	 *
+	 * Won't create me_pghead: me_pglast must be inited along with it.
+	 * Unsupported in nested txns: They would need to hide the page
+	 * range in ancestor txns' dirty and spilled lists.
 	 */
-	if (!(mp->mp_flags & P_DIRTY) && txn->mt_spill_pgs) {
-		unsigned x = mdb_midl_search(txn->mt_spill_pgs, pg);
-		if (x <= txn->mt_spill_pgs[0] && txn->mt_spill_pgs[x] == pg) {
-			/* This page is no longer spilled */
-			for (; x < txn->mt_spill_pgs[0]; x++)
-				txn->mt_spill_pgs[x] = txn->mt_spill_pgs[x+1];
-			txn->mt_spill_pgs[0]--;
-			goto release;
-		}
-	}
-	if ((mp->mp_flags & P_DIRTY) && !txn->mt_parent && env->me_pghead) {
-		unsigned j, x;
+	if (env->me_pghead &&
+		!txn->mt_parent &&
+		((mp->mp_flags & P_DIRTY) ||
+		 (sl && (x = mdb_midl_search(sl, pg)) <= sl[0] && sl[x] == pg)))
+	{
+		unsigned i, j;
 		pgno_t *mop;
 		MDB_ID2 *dl, ix, iy;
 		rc = mdb_midl_need(&env->me_pghead, ovpages);
 		if (rc)
 			return rc;
+		if (!(mp->mp_flags & P_DIRTY)) {
+			/* This page is no longer spilled */
+			for (; x < sl[0]; x++)
+				sl[x] = sl[x+1];
+			sl[0]--;
+			goto release;
+		}
 		/* Remove from dirty list */
 		dl = txn->mt_u.dirty_list;
 		x = dl[0].mid--;
