@@ -1495,7 +1495,7 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 				continue;
 		}
 		if ((rc = mdb_midl_append(&txn->mt_spill_pgs, dl[i].mid)))
-			return rc;
+			goto done;
 	}
 	mdb_midl_sort(txn->mt_spill_pgs);
 
@@ -1503,6 +1503,7 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 
 	mdb_cursorpages_mark(m0, P_DIRTY|P_KEEP);
 
+done:
 	if (rc == 0) {
 		if (txn->mt_parent) {
 			MDB_txn *tx2;
@@ -1525,6 +1526,8 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 			txn->mt_dirty_room = MDB_IDL_UM_MAX - dl[0].mid;
 		}
 		txn->mt_flags |= MDB_TXN_SPILLS;
+	} else {
+		txn->mt_flags |= MDB_TXN_ERROR;
 	}
 	return rc;
 }
