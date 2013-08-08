@@ -1352,9 +1352,7 @@ mdb_dlist_free(MDB_txn *txn)
 	dl[0].mid = 0;
 }
 
-/* Set or clear P_KEEP in non-overflow, non-sub pages in known cursors.
- * When clearing, only consider backup cursors (from parent txns) since
- * other P_KEEP flags have already been cleared.
+/* Set or clear P_KEEP in non-overflow, non-sub pages in this txn's cursors.
  * @param[in] mc A cursor handle for the current operation.
  * @param[in] pflags Flags of the pages to update:
  * P_DIRTY to set P_KEEP, P_DIRTY|P_KEEP to clear it.
@@ -1363,7 +1361,7 @@ static void
 mdb_cursorpages_mark(MDB_cursor *mc, unsigned pflags)
 {
 	MDB_txn *txn = mc->mc_txn;
-	MDB_cursor *m2, *m3;
+	MDB_cursor *m3;
 	MDB_xcursor *mx;
 	unsigned i, j;
 
@@ -1371,18 +1369,14 @@ mdb_cursorpages_mark(MDB_cursor *mc, unsigned pflags)
 		mc = NULL;				/* will find mc in mt_cursors */
 	for (i = txn->mt_numdbs;; mc = txn->mt_cursors[--i]) {
 		for (; mc; mc=mc->mc_next) {
-			m2 = pflags == P_DIRTY ? mc : mc->mc_backup;
-			for (; m2; m2 = m2->mc_backup) {
-				for (m3=m2; m3->mc_flags & C_INITIALIZED; m3=&mx->mx_cursor) {
+			for (m3 = mc; m3->mc_flags & C_INITIALIZED; m3 = &mx->mx_cursor) {
 					for (j=0; j<m3->mc_snum; j++)
 						if ((m3->mc_pg[j]->mp_flags & (P_SUBP|P_DIRTY|P_KEEP))
 								== pflags)
 							m3->mc_pg[j]->mp_flags ^= P_KEEP;
-					if (!(m3->mc_db->md_flags & MDB_DUPSORT))
+					mx = m3->mc_xcursor;
+					if (mx == NULL)
 						break;
-					/* Cursor backups have mx malloced at the end of m2 */
-					mx = (m3 == mc ? m3->mc_xcursor : (MDB_xcursor *)(m3+1));
-				}
 			}
 		}
 		if (i == 0)
