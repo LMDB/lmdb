@@ -162,6 +162,11 @@
 #define GET_PAGESIZE(x) {SYSTEM_INFO si; GetSystemInfo(&si); (x) = si.dwPageSize;}
 #define	close(fd)	(CloseHandle(fd) ? 0 : -1)
 #define	munmap(ptr,len)	UnmapViewOfFile(ptr)
+#ifndef PROCESS_QUERY_LIMITED_INFORMATION
+#define MDB_PROCESS_QUERY_LIMITED_INFORMATION PROCESS_QUERY_LIMITED_INFORMATION
+#else
+#define MDB_PROCESS_QUERY_LIMITED_INFORMATION 0x1000
+#endif
 #define	Z	"I"
 #else
 
@@ -2019,7 +2024,8 @@ enum Pidlock_op {
 #endif
 
 /** Set or check a pid lock. Set returns 0 on success.
- * Check returns 0 if lock exists (meaning the process is alive).
+ * Check returns 0 if the process is certainly dead, nonzero if it may
+ * be alive (the lock exists or an error happened so we do not know).
  *
  * On Windows Pidset is a no-op, we merely check for the existence
  * of the process with the given pid. On POSIX we use a single byte
@@ -2029,32 +2035,35 @@ static int
 mdb_reader_pid(MDB_env *env, enum Pidlock_op op, pid_t pid)
 {
 #ifdef _WIN32
+	int ret = 0;
 	HANDLE h;
-	int ver, query;
-	switch(op) {
-	case Pidset:
-		break;
-	case Pidcheck:
+	if (op == Pidcheck) {
 		h = OpenProcess(env->me_pidquery, FALSE, pid);
+		/* No documented "no such process" code, but other program use this: */
 		if (!h)
-			return GetLastError();
+			return ErrCode() != ERROR_INVALID_PARAMETER;
+		/* A process exists until all handles to it close. Has it exited? */
+		ret = WaitForSingleObject(h, 0) != 0;
 		CloseHandle(h);
-		break;
 	}
-	return 0;
+	return ret;
 #else
-	int rc;
-	struct flock lock_info;
-	memset((void *)&lock_info, 0, sizeof(lock_info));
-	lock_info.l_type = F_WRLCK;
-	lock_info.l_whence = SEEK_SET;
-	lock_info.l_start = pid;
-	lock_info.l_len = 1;
-	while ((rc = fcntl(env->me_lfd, op, &lock_info)) &&
-			(rc = ErrCode()) == EINTR) ;
-	if (op == F_GETLK && rc == 0 && lock_info.l_type == F_UNLCK)
-		rc = -1;
-	return rc;
+	for (;;) {
+		int rc;
+		struct flock lock_info;
+		memset(&lock_info, 0, sizeof(lock_info));
+		lock_info.l_type = F_WRLCK;
+		lock_info.l_whence = SEEK_SET;
+		lock_info.l_start = pid;
+		lock_info.l_len = 1;
+		if ((rc = fcntl(env->me_lfd, op, &lock_info)) == 0) {
+			if (op == F_GETLK && lock_info.l_type != F_UNLCK)
+				rc = -1;
+		} else if ((rc = ErrCode()) == EINTR) {
+			continue;
+		}
+		return rc;
+	}
 #endif
 }
 
@@ -3247,7 +3256,7 @@ mdb_env_open2(MDB_env *env)
 		/* See if we should use QueryLimited */
 		rc = GetVersion();
 		if ((rc & 0xff) > 5)
-			env->me_pidquery = PROCESS_QUERY_LIMITED_INFORMATION;
+			env->me_pidquery = MDB_PROCESS_QUERY_LIMITED_INFORMATION;
 		else
 			env->me_pidquery = PROCESS_QUERY_INFORMATION;
 
@@ -8144,9 +8153,10 @@ int mdb_reader_check(MDB_env *env, int *dead)
 		if (mr[i].mr_pid && mr[i].mr_pid != env->me_pid) {
 			pid = mr[i].mr_pid;
 			if (mdb_pid_insert(pids, pid) == 0) {
-				if (mdb_reader_pid(env, Pidcheck, pid)) {
+				if (!mdb_reader_pid(env, Pidcheck, pid)) {
 					LOCK_MUTEX_R(env);
-					if (mdb_reader_pid(env, Pidcheck, pid)) {
+					/* Recheck, a new process may have reused pid */
+					if (!mdb_reader_pid(env, Pidcheck, pid)) {
 						for (j=i; j<rdrs; j++)
 							if (mr[j].mr_pid == pid) {
 								mr[j].mr_pid = 0;
