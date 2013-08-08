@@ -140,6 +140,7 @@
  *	@{
  */
 #ifdef _WIN32
+#define MDB_PIDLOCK	0
 #define pthread_t	DWORD
 #define pthread_mutex_t	HANDLE
 #define pthread_key_t	DWORD
@@ -171,6 +172,9 @@
 #else
 
 #define	Z	"z"
+
+	/** For MDB_LOCK_FORMAT: True if readers take a pid lock in the lockfile */
+#define MDB_PIDLOCK			1
 
 #ifdef MDB_USE_POSIX_SEM
 
@@ -523,8 +527,8 @@ typedef struct MDB_txbody {
 		/** Stamp identifying this as an MDB file. It must be set
 		 *	to #MDB_MAGIC. */
 	uint32_t	mtb_magic;
-		/** Version number of this lock file. Must be set to #MDB_LOCK_VERSION. */
-	uint32_t	mtb_version;
+		/** Format of this lock file. Must be set to #MDB_LOCK_FORMAT. */
+	uint32_t	mtb_format;
 #if defined(_WIN32) || defined(MDB_USE_POSIX_SEM)
 	char	mtb_rmname[MNAME_LEN];
 #else
@@ -550,7 +554,7 @@ typedef struct MDB_txninfo {
 	union {
 		MDB_txbody mtb;
 #define mti_magic	mt1.mtb.mtb_magic
-#define mti_version	mt1.mtb.mtb_version
+#define mti_format	mt1.mtb.mtb_format
 #define mti_mutex	mt1.mtb.mtb_mutex
 #define mti_rmname	mt1.mtb.mtb_rmname
 #define mti_txnid	mt1.mtb.mtb_txnid
@@ -569,6 +573,13 @@ typedef struct MDB_txninfo {
 	} mt2;
 	MDB_reader	mti_readers[1];
 } MDB_txninfo;
+
+	/** Lockfile format signature: version, features and field layout */
+#define MDB_LOCK_FORMAT \
+	((uint32_t) \
+	 ((MDB_LOCK_VERSION) \
+	  /* Flags which describe functionality */ \
+	  + (((MDB_PIDLOCK) != 0) << 16)))
 /** @} */
 
 /** Common header for all page types.
@@ -2013,7 +2024,7 @@ mdb_cursors_close(MDB_txn *txn, unsigned merge)
 static void
 mdb_txn_reset0(MDB_txn *txn, const char *act);
 
-#ifdef _WIN32
+#if !(MDB_PIDLOCK)		/* Currently the same as defined(_WIN32) */
 enum Pidlock_op {
 	Pidset, Pidcheck
 };
@@ -2034,7 +2045,7 @@ enum Pidlock_op {
 static int
 mdb_reader_pid(MDB_env *env, enum Pidlock_op op, pid_t pid)
 {
-#ifdef _WIN32
+#if !(MDB_PIDLOCK)		/* Currently the same as defined(_WIN32) */
 	int ret = 0;
 	HANDLE h;
 	if (op == Pidcheck) {
@@ -3776,8 +3787,8 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		pthread_mutexattr_destroy(&mattr);
 #endif	/* _WIN32 || MDB_USE_POSIX_SEM */
 
-		env->me_txns->mti_version = MDB_LOCK_VERSION;
 		env->me_txns->mti_magic = MDB_MAGIC;
+		env->me_txns->mti_format = MDB_LOCK_FORMAT;
 		env->me_txns->mti_txnid = 0;
 		env->me_txns->mti_numreaders = 0;
 
@@ -3787,9 +3798,9 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 			rc = MDB_INVALID;
 			goto fail;
 		}
-		if (env->me_txns->mti_version != MDB_LOCK_VERSION) {
-			DPRINTF("lock region is version %u, expected version %u",
-				env->me_txns->mti_version, MDB_LOCK_VERSION);
+		if (env->me_txns->mti_format != MDB_LOCK_FORMAT) {
+			DPRINTF("lock region has format+version 0x%x, expected 0x%x",
+				env->me_txns->mti_format, MDB_LOCK_FORMAT);
 			rc = MDB_VERSION_MISMATCH;
 			goto fail;
 		}
