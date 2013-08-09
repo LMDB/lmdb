@@ -163,7 +163,7 @@
 #define GET_PAGESIZE(x) {SYSTEM_INFO si; GetSystemInfo(&si); (x) = si.dwPageSize;}
 #define	close(fd)	(CloseHandle(fd) ? 0 : -1)
 #define	munmap(ptr,len)	UnmapViewOfFile(ptr)
-#ifndef PROCESS_QUERY_LIMITED_INFORMATION
+#ifdef PROCESS_QUERY_LIMITED_INFORMATION
 #define MDB_PROCESS_QUERY_LIMITED_INFORMATION PROCESS_QUERY_LIMITED_INFORMATION
 #else
 #define MDB_PROCESS_QUERY_LIMITED_INFORMATION 0x1000
