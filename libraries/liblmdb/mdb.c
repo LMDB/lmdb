@@ -8069,6 +8069,11 @@ int mdb_set_relctx(MDB_txn *txn, MDB_dbi dbi, void *ctx)
 	return MDB_SUCCESS;
 }
 
+int mdb_env_get_maxkeysize(MDB_env *env)
+{
+	return MDB_MAXKEYSIZE;
+}
+
 int mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx)
 {
 	unsigned int i, rdrs;

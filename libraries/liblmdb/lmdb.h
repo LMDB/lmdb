@@ -720,6 +720,13 @@ int  mdb_env_get_maxreaders(MDB_env *env, unsigned int *readers);
 	 */
 int  mdb_env_set_maxdbs(MDB_env *env, MDB_dbi dbs);
 
+	/** @brief Get the maximum size of a key for the environment.
+	 *
+	 * @param[in] env An environment handle returned by #mdb_env_create()
+	 * @return The maximum size of a key. (#MDB_MAXKEYSIZE)
+	 */
+int  mdb_env_get_maxkeysize(MDB_env *env);
+
 	/** @brief Create a transaction for use with the environment.
 	 *
 	 * The transaction handle may be discarded using #mdb_txn_abort() or #mdb_txn_commit().
