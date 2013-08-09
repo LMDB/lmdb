@@ -1127,6 +1127,8 @@ static char *const mdb_errstr[] = {
 	"MDB_MAP_RESIZED: Database contents grew beyond environment mapsize",
 	"MDB_INCOMPATIBLE: Database flags changed or would change",
 	"MDB_BAD_RSLOT: Invalid reuse of reader locktable slot",
+	"MDB_BAD_TXN: Transaction cannot recover - it must be aborted",
+	"MDB_BAD_VALSIZE: Too big key/data, key is empty, or wrong DUPFIXED size",
 };
 
 char *
@@ -2729,7 +2731,7 @@ mdb_txn_commit(MDB_txn *txn)
 		DPUTS("error flag is set, can't commit");
 		if (txn->mt_parent)
 			txn->mt_parent->mt_flags |= MDB_TXN_ERROR;
-		rc = EINVAL;
+		rc = MDB_BAD_TXN;
 		goto fail;
 	}
 
@@ -4624,7 +4626,7 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int flags)
 	 */
 	if (F_ISSET(mc->mc_txn->mt_flags, MDB_TXN_ERROR)) {
 		DPUTS("transaction has failed, must abort");
-		return EINVAL;
+		return MDB_BAD_TXN;
 	} else {
 		/* Make sure we're using an up-to-date root */
 		if (mc->mc_dbi > MAIN_DBI) {
@@ -4814,7 +4816,7 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 		return EINVAL;
 
 	if (key->mv_size == 0 || key->mv_size > MDB_MAXKEYSIZE) {
-		return EINVAL;
+		return MDB_BAD_VALSIZE;
 	}
 
 	mdb_cursor_init(&mc, txn, dbi, &mx);
@@ -5344,8 +5346,10 @@ mdb_cursor_get(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	case MDB_SET:
 	case MDB_SET_KEY:
 	case MDB_SET_RANGE:
-		if (key == NULL || key->mv_size == 0 || key->mv_size > MDB_MAXKEYSIZE) {
+		if (key == NULL) {
 			rc = EINVAL;
+		} else if (key->mv_size == 0 || key->mv_size > MDB_MAXKEYSIZE) {
+			rc = MDB_BAD_VALSIZE;
 		} else if (op == MDB_SET_RANGE)
 			rc = mdb_cursor_set(mc, key, data, op, NULL);
 		else
@@ -5507,14 +5511,14 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 		return EACCES;
 
 	if (flags != MDB_CURRENT && (key->mv_size == 0 || key->mv_size > MDB_MAXKEYSIZE))
-		return EINVAL;
+		return MDB_BAD_VALSIZE;
 
 	if (F_ISSET(mc->mc_db->md_flags, MDB_DUPSORT) && data->mv_size > MDB_MAXKEYSIZE)
-		return EINVAL;
+		return MDB_BAD_VALSIZE;
 
 #if SIZE_MAX > MAXDATASIZE
 	if (data->mv_size > MAXDATASIZE)
-		return EINVAL;
+		return MDB_BAD_VALSIZE;
 #endif
 
 	DPRINTF("==> put db %u key [%s], size %"Z"u, data size %"Z"u",
@@ -5599,7 +5603,7 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 		if (IS_LEAF2(mc->mc_pg[mc->mc_top])) {
 			unsigned int ksize = mc->mc_db->md_pad;
 			if (key->mv_size != ksize)
-				return EINVAL;
+				return MDB_BAD_VALSIZE;
 			if (flags == MDB_CURRENT) {
 				char *ptr = LEAF2KEY(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], ksize);
 				memcpy(ptr, key->mv_data, ksize);
@@ -7182,7 +7186,7 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 	}
 
 	if (key->mv_size == 0 || key->mv_size > MDB_MAXKEYSIZE) {
-		return EINVAL;
+		return MDB_BAD_VALSIZE;
 	}
 
 	mdb_cursor_init(&mc, txn, dbi, &mx);
@@ -7646,7 +7650,7 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 	}
 
 	if (key->mv_size == 0 || key->mv_size > MDB_MAXKEYSIZE) {
-		return EINVAL;
+		return MDB_BAD_VALSIZE;
 	}
 
 	if ((flags & (MDB_NOOVERWRITE|MDB_NODUPDATA|MDB_RESERVE|MDB_APPEND|MDB_APPENDDUP)) != flags)

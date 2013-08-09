@@ -387,7 +387,11 @@ typedef enum MDB_cursor_op {
 #define MDB_INCOMPATIBLE	(-30784)
 	/** Invalid reuse of reader locktable slot */
 #define MDB_BAD_RSLOT		(-30783)
-#define MDB_LAST_ERRCODE	MDB_BAD_RSLOT
+	/** Transaction cannot recover - it must be aborted */
+#define MDB_BAD_TXN			(-30782)
+	/** Too big key/data, key is empty, or wrong DUPFIXED size */
+#define MDB_BAD_VALSIZE		(-30781)
+#define MDB_LAST_ERRCODE	MDB_BAD_VALSIZE
 /** @} */
 
 /** @brief Statistics for a database in the environment */
