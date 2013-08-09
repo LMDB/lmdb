@@ -7192,6 +7192,10 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 	mdb_cursor_init(&mc, txn, dbi, &mx);
 
 	exact = 0;
+	if (!F_ISSET(txn->mt_dbs[dbi].md_flags, MDB_DUPSORT)) {
+		/* must ignore any data */
+		data = NULL;
+	}
 	if (data) {
 		op = MDB_GET_BOTH;
 		rdata = *data;
