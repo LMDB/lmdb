@@ -2307,6 +2307,13 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 	return rc;
 }
 
+MDB_env *
+mdb_txn_env(MDB_txn *txn)
+{
+	if(!txn) return NULL;
+	return txn->mt_env;
+}
+
 /** Export or close DBI handles opened in this txn. */
 static void
 mdb_dbis_update(MDB_txn *txn, int keep)

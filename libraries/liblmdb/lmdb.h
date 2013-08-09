@@ -762,6 +762,12 @@ int  mdb_env_get_maxkeysize(MDB_env *env);
 	 */
 int  mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **txn);
 
+	/** @brief Returns the transaction's #MDB_env
+	 *
+	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
+	 */
+MDB_env *mdb_txn_env(MDB_txn *txn);
+
 	/** @brief Commit all the operations of a transaction into the database.
 	 *
 	 * The transaction handle is freed. It and its cursors must not be used
