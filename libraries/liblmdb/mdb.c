@@ -1125,7 +1125,7 @@ static char *const mdb_errstr[] = {
 	"MDB_CURSOR_FULL: Internal error - cursor stack limit reached",
 	"MDB_PAGE_FULL: Internal error - page has no more space",
 	"MDB_MAP_RESIZED: Database contents grew beyond environment mapsize",
-	"MDB_INCOMPATIBLE: Database flags changed or would change",
+	"MDB_INCOMPATIBLE: Operation and DB incompatible, or DB flags changed",
 	"MDB_BAD_RSLOT: Invalid reuse of reader locktable slot",
 	"MDB_BAD_TXN: Transaction cannot recover - it must be aborted",
 	"MDB_BAD_VALSIZE: Too big key/data, key is empty, or wrong DUPFIXED size",
@@ -5313,6 +5313,7 @@ mdb_cursor_get(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 {
 	int		 rc;
 	int		 exact = 0;
+	int		 (*mfunc)(MDB_cursor *mc, MDB_val *key, MDB_val *data);
 
 	assert(mc);
 
@@ -5346,8 +5347,12 @@ mdb_cursor_get(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 		break;
 	case MDB_GET_BOTH:
 	case MDB_GET_BOTH_RANGE:
-		if (data == NULL || mc->mc_xcursor == NULL) {
+		if (data == NULL) {
 			rc = EINVAL;
+			break;
+		}
+		if (mc->mc_xcursor == NULL) {
+			rc = MDB_INCOMPATIBLE;
 			break;
 		}
 		/* FALLTHRU */
@@ -5364,10 +5369,12 @@ mdb_cursor_get(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 			rc = mdb_cursor_set(mc, key, data, op, &exact);
 		break;
 	case MDB_GET_MULTIPLE:
-		if (data == NULL ||
-			!(mc->mc_db->md_flags & MDB_DUPFIXED) ||
-			!(mc->mc_flags & C_INITIALIZED)) {
+		if (data == NULL || !(mc->mc_flags & C_INITIALIZED)) {
 			rc = EINVAL;
+			break;
+		}
+		if (!(mc->mc_db->md_flags & MDB_DUPFIXED)) {
+			rc = MDB_INCOMPATIBLE;
 			break;
 		}
 		rc = MDB_SUCCESS;
@@ -5376,9 +5383,12 @@ mdb_cursor_get(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 			break;
 		goto fetchm;
 	case MDB_NEXT_MULTIPLE:
-		if (data == NULL ||
-			!(mc->mc_db->md_flags & MDB_DUPFIXED)) {
+		if (data == NULL) {
 			rc = EINVAL;
+			break;
+		}
+		if (!(mc->mc_db->md_flags & MDB_DUPFIXED)) {
+			rc = MDB_INCOMPATIBLE;
 			break;
 		}
 		if (!(mc->mc_flags & C_INITIALIZED))
@@ -5423,28 +5433,28 @@ fetchm:
 		rc = mdb_cursor_first(mc, key, data);
 		break;
 	case MDB_FIRST_DUP:
-		if (data == NULL ||
-			!(mc->mc_db->md_flags & MDB_DUPSORT) ||
-			!(mc->mc_flags & C_INITIALIZED) ||
-			!(mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED)) {
+		mfunc = mdb_cursor_first;
+	mmove:
+		if (data == NULL || !(mc->mc_flags & C_INITIALIZED)) {
 			rc = EINVAL;
 			break;
 		}
-		rc = mdb_cursor_first(&mc->mc_xcursor->mx_cursor, data, NULL);
+		if (mc->mc_xcursor == NULL) {
+			rc = MDB_INCOMPATIBLE;
+			break;
+		}
+		if (!(mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED)) {
+			rc = EINVAL;
+			break;
+		}
+		rc = mfunc(&mc->mc_xcursor->mx_cursor, data, NULL);
 		break;
 	case MDB_LAST:
 		rc = mdb_cursor_last(mc, key, data);
 		break;
 	case MDB_LAST_DUP:
-		if (data == NULL ||
-			!(mc->mc_db->md_flags & MDB_DUPSORT) ||
-			!(mc->mc_flags & C_INITIALIZED) ||
-			!(mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED)) {
-			rc = EINVAL;
-			break;
-		}
-		rc = mdb_cursor_last(&mc->mc_xcursor->mx_cursor, data, NULL);
-		break;
+		mfunc = mdb_cursor_last;
+		goto mmove;
 	default:
 		DPRINTF("unhandled/unimplemented cursor operation %u", op);
 		rc = EINVAL;
@@ -5509,7 +5519,7 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 		dcount = data[1].mv_size;
 		data[1].mv_size = 0;
 		if (!F_ISSET(mc->mc_db->md_flags, MDB_DUPFIXED))
-			return EINVAL;
+			return MDB_INCOMPATIBLE;
 	}
 
 	nospill = flags & MDB_NOSPILL;
@@ -6505,8 +6515,8 @@ mdb_cursor_count(MDB_cursor *mc, size_t *countp)
 	if (mc == NULL || countp == NULL)
 		return EINVAL;
 
-	if (!(mc->mc_db->md_flags & MDB_DUPSORT))
-		return EINVAL;
+	if (mc->mc_xcursor == NULL)
+		return MDB_INCOMPATIBLE;
 
 	leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
 	if (!F_ISSET(leaf->mn_flags, F_DUPDATA)) {
@@ -7850,7 +7860,7 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 		/* make sure this is actually a DB */
 		MDB_node *node = NODEPTR(mc.mc_pg[mc.mc_top], mc.mc_ki[mc.mc_top]);
 		if (!(node->mn_flags & F_SUBDATA))
-			return EINVAL;
+			return MDB_INCOMPATIBLE;
 	} else if (rc == MDB_NOTFOUND && (flags & MDB_CREATE)) {
 		/* Create if requested */
 		MDB_db dummy;
