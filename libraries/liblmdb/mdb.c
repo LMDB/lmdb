@@ -2851,7 +2851,8 @@ mdb_txn_commit(MDB_txn *txn)
 
 	mdb_cursors_close(txn, 0);
 
-	if (!txn->mt_u.dirty_list[0].mid && !(txn->mt_flags & MDB_TXN_DIRTY))
+	if (!txn->mt_u.dirty_list[0].mid &&
+		!(txn->mt_flags & (MDB_TXN_DIRTY|MDB_TXN_SPILLS)))
 		goto done;
 
 	DPRINTF("committing txn %"Z"u %p on mdbenv %p, root page %"Z"u",
