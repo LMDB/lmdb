@@ -2227,10 +2227,11 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 	if (parent) {
 		/* Nested transactions: Max 1 child, write txns only, no writemap */
 		if (parent->mt_child ||
-			(flags & MDB_RDONLY) || (parent->mt_flags & MDB_TXN_RDONLY) ||
+			(flags & MDB_RDONLY) ||
+			(parent->mt_flags & (MDB_TXN_RDONLY|MDB_TXN_ERROR)) ||
 			(env->me_flags & MDB_WRITEMAP))
 		{
-			return EINVAL;
+			return (parent->mt_flags & MDB_TXN_RDONLY) ? EINVAL : MDB_BAD_TXN;
 		}
 		tsize = sizeof(MDB_ntxn);
 	}
@@ -4823,6 +4824,9 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
 		return EINVAL;
 
+	if (txn->mt_flags & MDB_TXN_ERROR)
+		return MDB_BAD_TXN;
+
 	if (key->mv_size == 0 || key->mv_size > MDB_MAXKEYSIZE) {
 		return MDB_BAD_VALSIZE;
 	}
@@ -5317,6 +5321,9 @@ mdb_cursor_get(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 
 	assert(mc);
 
+	if (mc->mc_txn->mt_flags & MDB_TXN_ERROR)
+		return MDB_BAD_TXN;
+
 	switch (op) {
 	case MDB_GET_CURRENT:
 		if (!(mc->mc_flags & C_INITIALIZED)) {
@@ -5525,8 +5532,8 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	nospill = flags & MDB_NOSPILL;
 	flags &= ~MDB_NOSPILL;
 
-	if (F_ISSET(mc->mc_txn->mt_flags, MDB_TXN_RDONLY))
-		return EACCES;
+	if (mc->mc_txn->mt_flags & (MDB_TXN_RDONLY|MDB_TXN_ERROR))
+		return (mc->mc_txn->mt_flags & MDB_TXN_RDONLY) ? EACCES : MDB_BAD_TXN;
 
 	if (flags != MDB_CURRENT && (key->mv_size == 0 || key->mv_size > MDB_MAXKEYSIZE))
 		return MDB_BAD_VALSIZE;
@@ -5959,8 +5966,8 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 	MDB_node	*leaf;
 	int rc;
 
-	if (F_ISSET(mc->mc_txn->mt_flags, MDB_TXN_RDONLY))
-		return EACCES;
+	if (mc->mc_txn->mt_flags & (MDB_TXN_RDONLY|MDB_TXN_ERROR))
+		return (mc->mc_txn->mt_flags & MDB_TXN_RDONLY) ? EACCES : MDB_BAD_TXN;
 
 	if (!(mc->mc_flags & C_INITIALIZED))
 		return EINVAL;
@@ -6469,6 +6476,9 @@ mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **ret)
 
 	if (txn == NULL || ret == NULL || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
 		return EINVAL;
+
+	if (txn->mt_flags & MDB_TXN_ERROR)
+		return MDB_BAD_TXN;
 
 	/* Allow read access to the freelist */
 	if (!dbi && !F_ISSET(txn->mt_flags, MDB_TXN_RDONLY))
@@ -7199,9 +7209,8 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
 		return EINVAL;
 
-	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
-		return EACCES;
-	}
+	if (txn->mt_flags & (MDB_TXN_RDONLY|MDB_TXN_ERROR))
+		return (txn->mt_flags & MDB_TXN_RDONLY) ? EACCES : MDB_BAD_TXN;
 
 	if (key->mv_size == 0 || key->mv_size > MDB_MAXKEYSIZE) {
 		return MDB_BAD_VALSIZE;
@@ -7667,9 +7676,8 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
 		return EINVAL;
 
-	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
-		return EACCES;
-	}
+	if (txn->mt_flags & (MDB_TXN_RDONLY|MDB_TXN_ERROR))
+		return (txn->mt_flags & MDB_TXN_RDONLY) ? EACCES : MDB_BAD_TXN;
 
 	if (key->mv_size == 0 || key->mv_size > MDB_MAXKEYSIZE) {
 		return MDB_BAD_VALSIZE;
@@ -7806,6 +7814,8 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 
 	if ((flags & VALID_FLAGS) != flags)
 		return EINVAL;
+	if (txn->mt_flags & MDB_TXN_ERROR)
+		return MDB_BAD_TXN;
 
 	/* main DB? */
 	if (!name) {
