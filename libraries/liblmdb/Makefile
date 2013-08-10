@@ -5,29 +5,16 @@
 #
 # Preprocessor macros (for CPPFLAGS) of interest...
 # Note that the defaults should already be correct for most
-# platforms; you should not need to change any of these:
+# platforms; you should not need to change any of these.
+# Read their descriptions in mdb.c if you do:
 #
-# To compile successfully if the default does not:
-# - MDB_USE_POSIX_SEM	(enabled by default on BSD, Apple)
-#	Define if shared mutexes are unsupported.  Note that Posix
-#	semaphores and shared mutexes have different behaviors and
-#	different problems, see the Caveats section in lmdb.h.
-#
-# For best performance or to compile successfully:
-# - MDB_DSYNC = "O_DSYNC" (default) or "O_SYNC" (less efficient)
-#	If O_DSYNC is undefined but exists in /usr/include,
-#	preferably set some compiler flag to get the definition.
-# - MDB_FDATASYNC = "fdatasync" or "fsync"
-#	Function for flushing the data of a file. Define this to
-#	"fsync" if fdatasync() is not supported. fdatasync is
-#	default except on BSD, Apple, Android which use fsync.
+# - MDB_USE_POSIX_SEM
+# - MDB_DSYNC
+# - MDB_FDATASYNC
 # - MDB_USE_PWRITEV
-#	Define if the pwritev() function is supported.
 #
-# Data format:
-# - MDB_MAXKEYSIZE
-#	Controls data packing and limits, see mdb.c.
-#	You might need to change this if the default size is too small.
+# There may be other macros in mdb.c of interest. You should
+# read mdb.c before changing any of them.
 #
 CC	= gcc
 W	= -W -Wall -Wno-unused-parameter -Wbad-function-cast
