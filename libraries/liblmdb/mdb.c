@@ -5653,9 +5653,16 @@ more:
 					mc->mc_dbx->md_dcmp = mdb_cmp_cint;
 #endif
 #endif
-				/* if data matches, ignore it */
-				if (!mc->mc_dbx->md_dcmp(data, &dkey))
-					return (flags == MDB_NODUPDATA) ? MDB_KEYEXIST : MDB_SUCCESS;
+				/* if data matches, skip it */
+				if (!mc->mc_dbx->md_dcmp(data, &dkey)) {
+					if (flags == MDB_NODUPDATA)
+						rc = MDB_KEYEXIST;
+					else if (flags & MDB_MULTIPLE)
+						goto next_mult;
+					else
+						rc = MDB_SUCCESS;
+					return rc;
+				}
 
 				/* create a fake page for the dup items */
 				memcpy(dbuf, dkey.mv_data, dkey.mv_size);
@@ -5936,15 +5943,16 @@ put_sub:
 			mc->mc_db->md_entries++;
 		if (flags & MDB_MULTIPLE) {
 			if (!rc) {
+next_mult:
 				mcount++;
+				/* let caller know how many succeeded, if any */
+				data[1].mv_size = mcount;
 				if (mcount < dcount) {
 					data[0].mv_data = (char *)data[0].mv_data + data[0].mv_size;
 					leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
 					goto more;
 				}
 			}
-			/* let caller know how many succeeded, if any */
-			data[1].mv_size = mcount;
 		}
 	}
 done:
