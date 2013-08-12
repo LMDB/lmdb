@@ -5655,7 +5655,7 @@ more:
 #endif
 				/* if data matches, skip it */
 				if (!mc->mc_dbx->md_dcmp(data, &dkey)) {
-					if (flags == MDB_NODUPDATA)
+					if (flags & MDB_NODUPDATA)
 						rc = MDB_KEYEXIST;
 					else if (flags & MDB_MULTIPLE)
 						goto next_mult;
@@ -5987,7 +5987,7 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 	leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
 
 	if (!IS_LEAF2(mc->mc_pg[mc->mc_top]) && F_ISSET(leaf->mn_flags, F_DUPDATA)) {
-		if (flags != MDB_NODUPDATA) {
+		if (!(flags & MDB_NODUPDATA)) {
 			if (!F_ISSET(leaf->mn_flags, F_SUBDATA)) {
 				mc->mc_xcursor->mx_cursor.mc_pg[0] = NODEDATA(leaf);
 			}
