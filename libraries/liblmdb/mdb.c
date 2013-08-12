@@ -7653,7 +7653,7 @@ done:
 				m3->mc_snum++;
 				m3->mc_top++;
 			}
-			if (m3->mc_pg[mc->mc_top] == mp) {
+			if (m3->mc_top >= mc->mc_top && m3->mc_pg[mc->mc_top] == mp) {
 				if (m3->mc_ki[mc->mc_top] >= newindx && !(nflags & MDB_SPLIT_REPLACE))
 					m3->mc_ki[mc->mc_top]++;
 				if (m3->mc_ki[mc->mc_top] >= fixup) {
@@ -7661,7 +7661,7 @@ done:
 					m3->mc_ki[mc->mc_top] -= fixup;
 					m3->mc_ki[ptop] = mn.mc_ki[ptop];
 				}
-			} else if (!did_split && m3->mc_pg[ptop] == mc->mc_pg[ptop] &&
+			} else if (!did_split && m3->mc_top >= ptop && m3->mc_pg[ptop] == mc->mc_pg[ptop] &&
 				m3->mc_ki[ptop] >= mc->mc_ki[ptop]) {
 				m3->mc_ki[ptop]++;
 			}
