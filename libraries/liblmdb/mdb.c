@@ -163,7 +163,6 @@
 #define GET_PAGESIZE(x) {SYSTEM_INFO si; GetSystemInfo(&si); (x) = si.dwPageSize;}
 #define	close(fd)	(CloseHandle(fd) ? 0 : -1)
 #define	munmap(ptr,len)	UnmapViewOfFile(ptr)
-#define	unlink(file)	DeleteFile(file)
 #ifdef PROCESS_QUERY_LIMITED_INFORMATION
 #define MDB_PROCESS_QUERY_LIMITED_INFORMATION PROCESS_QUERY_LIMITED_INFORMATION
 #else
@@ -3852,7 +3851,7 @@ fail:
 int
 mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode)
 {
-	int		oflags, rc, len, excl = -1, rmlock = 0;
+	int		oflags, rc, len, excl = -1;
 	char *lpath, *dpath;
 
 	if (env->me_fd!=INVALID_HANDLE_VALUE || (flags & ~(CHANGEABLE|CHANGELESS)))
@@ -3904,7 +3903,6 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 		goto leave;
 
 #ifdef _WIN32
-#define	MDB_NO_SUCH_FILE	ERROR_FILE_NOT_FOUND
 	if (F_ISSET(flags, MDB_RDONLY)) {
 		oflags = GENERIC_READ;
 		len = OPEN_EXISTING;
@@ -3916,7 +3914,6 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 	env->me_fd = CreateFile(dpath, oflags, FILE_SHARE_READ|FILE_SHARE_WRITE,
 		NULL, len, mode, NULL);
 #else
-#define	MDB_NO_SUCH_FILE	ENOENT
 	if (F_ISSET(flags, MDB_RDONLY))
 		oflags = O_RDONLY;
 	else
@@ -3926,8 +3923,6 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 #endif
 	if (env->me_fd == INVALID_HANDLE_VALUE) {
 		rc = ErrCode();
-		if (F_ISSET(flags, MDB_RDONLY) && rc == MDB_NO_SUCH_FILE) 
-			rmlock = 1;
 		goto leave;
 	}
 
@@ -3959,8 +3954,6 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 leave:
 	if (rc) {
 		mdb_env_close0(env, excl);
-		if (rmlock && excl)
-			unlink(lpath);
 	}
 	free(lpath);
 	return rc;
