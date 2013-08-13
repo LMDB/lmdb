@@ -3898,9 +3898,12 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 		goto leave;
 	}
 
-	rc = mdb_env_setup_locks(env, lpath, mode, &excl);
-	if (rc)
-		goto leave;
+	/* For RDONLY, get lockfile after we know datafile exists */
+	if (!F_ISSET(flags, MDB_RDONLY)) {
+		rc = mdb_env_setup_locks(env, lpath, mode, &excl);
+		if (rc)
+			goto leave;
+	}
 
 #ifdef _WIN32
 	if (F_ISSET(flags, MDB_RDONLY)) {
@@ -3926,6 +3929,12 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 		goto leave;
 	}
 
+	if (F_ISSET(flags, MDB_RDONLY)) {
+		rc = mdb_env_setup_locks(env, lpath, mode, &excl);
+		if (rc)
+			goto leave;
+	}
+
 	if ((rc = mdb_env_open2(env)) == MDB_SUCCESS) {
 		if (flags & (MDB_RDONLY|MDB_WRITEMAP)) {
 			env->me_mfd = env->me_fd;
@@ -3934,10 +3943,12 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 			 * MDB_NOSYNC/MDB_NOMETASYNC, in case these get reset.
 			 */
 #ifdef _WIN32
+			len = OPEN_EXISTING;
 			env->me_mfd = CreateFile(dpath, oflags,
 				FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, len,
 				mode | FILE_FLAG_WRITE_THROUGH, NULL);
 #else
+			oflags &= ~O_CREAT;
 			env->me_mfd = open(dpath, oflags | MDB_DSYNC, mode);
 #endif
 			if (env->me_mfd == INVALID_HANDLE_VALUE) {
