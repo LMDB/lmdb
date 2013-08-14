@@ -3607,10 +3607,9 @@ static void
 mdb_hash_enc(MDB_val *val, char *encbuf)
 {
 	mdb_hash_t h = mdb_hash_val(val, MDB_HASH_INIT);
-	unsigned long *l = (unsigned long *)&h;
 
-	mdb_pack85(l[0], encbuf);
-	mdb_pack85(l[1], encbuf+5);
+	mdb_pack85(h, encbuf);
+	mdb_pack85(h>>32, encbuf+5);
 	encbuf[10] = '\0';
 }
 #endif
