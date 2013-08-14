@@ -392,7 +392,7 @@ static txnid_t mdb_debug_start;
 	 */
 #define	DKEY(x)	mdb_dkey(x, kbuf)
 #else
-#define	DKBUF	typedef int dummy_kbuf	/* so we can put ';' after */
+#define	DKBUF
 #define DKEY(x)	0
 #endif
 
@@ -756,9 +756,12 @@ typedef struct MDB_node {
 	 */
 #define LEAF2KEY(p, i, ks)	((char *)(p) + PAGEHDRSZ + ((i)*(ks)))
 
-	/** Set the \b node's key into \b key, if requested. */
-#define MDB_GET_KEY(node, key)	{ if ((key) != NULL) { \
-	(key)->mv_size = NODEKSZ(node); (key)->mv_data = NODEKEY(node); } }
+	/** Set the \b node's key into \b keyptr, if requested. */
+#define MDB_GET_KEY(node, keyptr)	{ if ((keyptr) != NULL) { \
+	(keyptr)->mv_size = NODEKSZ(node); (keyptr)->mv_data = NODEKEY(node); } }
+
+	/** Set the \b node's key into \b key. */
+#define MDB_GET_KEY2(node, key)	{ key.mv_size = NODEKSZ(node); key.mv_data = NODEKEY(node); }
 
 	/** Information about a single database in the environment. */
 typedef struct MDB_db {
@@ -3137,6 +3140,7 @@ mdb_env_write_meta(MDB_txn *txn)
 		WriteFile(env->me_fd, ptr, len, NULL, &ov);
 #else
 		r2 = pwrite(env->me_fd, ptr, len, off);
+		(void)r2;	/* Silence warnings. We don't care about pwrite's return value */
 #endif
 fail:
 		env->me_flags |= MDB_FATAL_ERROR;
@@ -4532,9 +4536,8 @@ static int
 mdb_page_search_root(MDB_cursor *mc, MDB_val *key, int modify)
 {
 	MDB_page	*mp = mc->mc_pg[mc->mc_top];
-	DKBUF;
 	int rc;
-
+	DKBUF;
 
 	while (IS_BRANCH(mp)) {
 		MDB_node	*node;
@@ -5072,7 +5075,7 @@ mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 			nodekey.mv_data = LEAF2KEY(mp, 0, nodekey.mv_size);
 		} else {
 			leaf = NODEPTR(mp, 0);
-			MDB_GET_KEY(leaf, &nodekey);
+			MDB_GET_KEY2(leaf, nodekey);
 		}
 		rc = mc->mc_dbx->md_cmp(key, &nodekey);
 		if (rc == 0) {
@@ -5093,7 +5096,7 @@ mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 						 nkeys-1, nodekey.mv_size);
 				} else {
 					leaf = NODEPTR(mp, nkeys-1);
-					MDB_GET_KEY(leaf, &nodekey);
+					MDB_GET_KEY2(leaf, nodekey);
 				}
 				rc = mc->mc_dbx->md_cmp(key, &nodekey);
 				if (rc == 0) {
@@ -5111,7 +5114,7 @@ mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 								 mc->mc_ki[mc->mc_top], nodekey.mv_size);
 						} else {
 							leaf = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
-							MDB_GET_KEY(leaf, &nodekey);
+							MDB_GET_KEY2(leaf, nodekey);
 						}
 						rc = mc->mc_dbx->md_cmp(key, &nodekey);
 						if (rc == 0) {
