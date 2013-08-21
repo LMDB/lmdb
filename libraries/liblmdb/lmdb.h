@@ -48,8 +48,10 @@
  *	  cause further writes to grow the database quickly, and
  *	  stale locks can block further operation.
  *
- *	  Fix: Terminate all programs using the database, or make
- *	  them close it.  Next database user will reset the lockfile.
+ *	  Fix: Check for stale readers periodically, using the
+ *	  #mdb_reader_check function or the mdb_stat tool. Or just
+ *	  make all programs using the database close it; the lockfile
+ *	  is always reset on first open of the environment.
  *
  *	- On BSD systems or others configured with MDB_USE_POSIX_SEM,
  *	  startup can fail due to semaphores owned by another userid.
@@ -86,11 +88,12 @@
  *	...when several processes can use a database concurrently:
  *
  *	- Avoid aborting a process with an active transaction.
- *	  The transaction becomes "long-lived" as above until the lockfile
- *	  is reset, since the process may not remove it from the lockfile.
+ *	  The transaction becomes "long-lived" as above until a check
+ *	  for stale readers is performed or the lockfile is reset,
+ *	  since the process may not remove it from the lockfile.
  *
- *	- If you do that anyway, close the environment once in a while,
- *	  so the lockfile can get reset.
+ *	- If you do that anyway, do a periodic check for stale readers. Or
+ *	  close the environment once in a while, so the lockfile can get reset.
  *
  *	- Do not use MDB databases on remote filesystems, even between
  *	  processes on the same host.  This breaks flock() on some OSes,
