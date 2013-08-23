@@ -7192,6 +7192,7 @@ mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
 	int rc;
 	MDB_page *mp;
 	indx_t ki;
+	unsigned int nkeys;
 
 	mp = mc->mc_pg[mc->mc_top];
 	ki = mc->mc_ki[mc->mc_top];
@@ -7211,18 +7212,18 @@ mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
 	rc = mdb_rebalance(mc);
 	if (rc != MDB_SUCCESS)
 		mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
-	/* if mc points past last node in page, invalidate */
-	else if (mc->mc_ki[mc->mc_top] >= NUMKEYS(mc->mc_pg[mc->mc_top]))
-		mc->mc_flags &= ~(C_INITIALIZED|C_EOF);
-
-	{
-		/* Adjust other cursors pointing to mp */
+	else {
 		MDB_cursor *m2;
-		unsigned int nkeys;
 		MDB_dbi dbi = mc->mc_dbi;
 
 		mp = mc->mc_pg[mc->mc_top];
 		nkeys = NUMKEYS(mp);
+
+		/* if mc points past last node in page, find next sibling */
+		if (mc->mc_ki[mc->mc_top] >= nkeys)
+			mdb_cursor_sibling(mc, 1);
+
+		/* Adjust other cursors pointing to mp */
 		for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
 			if (m2 == mc)
 				continue;
@@ -7232,7 +7233,7 @@ mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
 				if (m2->mc_ki[mc->mc_top] > ki)
 					m2->mc_ki[mc->mc_top]--;
 				if (m2->mc_ki[mc->mc_top] >= nkeys)
-					m2->mc_flags &= ~(C_INITIALIZED|C_EOF);
+					mdb_cursor_sibling(m2, 1);
 			}
 		}
 	}
