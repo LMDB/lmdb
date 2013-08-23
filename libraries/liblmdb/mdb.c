@@ -1479,7 +1479,6 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 	 * better than 1/2, 1/4, or 1/10.
 	 */
 	k = 0;
-	need *= 100;
 	if (need < MDB_IDL_UM_MAX / 8)
 		need = MDB_IDL_UM_MAX / 8;
 
@@ -1519,32 +1518,38 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 	 */
 	{
 		MDB_ID2 old;
-		k = dl[0].mid - i + 1;
-		old = dl[i-1];
-		dl[i-1].mid = k;
-		txn->mt_u.dirty_list = &dl[i-1];
+		if (i) {
+			k = dl[0].mid - i + 1;
+			old = dl[i-1];
+			dl[i-1].mid = k;
+			txn->mt_u.dirty_list = &dl[i-1];
+		}
 
 		rc = mdb_page_flush(txn);
 
-		/* reset back to the real list */
-		dl[0].mid -= k;
-		dl[0].mid += dl[i-1].mid;
-		dl[i-1] = old;
-		txn->mt_u.dirty_list = dl;
+		if (i) {
+			/* reset back to the real list */
+			dl[0].mid -= k;
+			dl[0].mid += dl[i-1].mid;
+			dl[i-1] = old;
+			txn->mt_u.dirty_list = dl;
+		}
 	}
 
 	mdb_cursorpages_mark(m0, P_DIRTY|P_KEEP);
 
-	/* Reset any dirty root pages we kept that page_flush didn't see */
-	for (i=0; i<txn->mt_numdbs; i++) {
-		if (txn->mt_dbflags[i] & DB_DIRTY) {
-			pgno_t pgno = txn->mt_dbs[i].md_root;
-			if (pgno == P_INVALID)
-				continue;
-			if ((rc = mdb_page_get(txn, pgno, &dp, &level)) != MDB_SUCCESS)
-				goto done;
-			if (dp->mp_flags & P_KEEP)
-				dp->mp_flags ^= P_KEEP;
+	if (i) {
+		/* Reset any dirty root pages we kept that page_flush didn't see */
+		for (i=0; i<txn->mt_numdbs; i++) {
+			if (txn->mt_dbflags[i] & DB_DIRTY) {
+				pgno_t pgno = txn->mt_dbs[i].md_root;
+				if (pgno == P_INVALID)
+					continue;
+				if ((rc = mdb_page_get(txn, pgno, &dp, &level)) != MDB_SUCCESS)
+					goto done;
+				if (dp->mp_flags & P_KEEP)
+					dp->mp_flags ^= P_KEEP;
+			}
 		}
 	}
 
