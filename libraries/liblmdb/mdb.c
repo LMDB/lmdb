@@ -1354,19 +1354,24 @@ mdb_dlist_free(MDB_txn *txn)
 	dl[0].mid = 0;
 }
 
-/* Set or clear P_KEEP in non-overflow, non-sub pages in this txn's cursors.
+/* Set or clear P_KEEP in dirty, non-overflow, non-sub pages watched by txn.
  * @param[in] mc A cursor handle for the current operation.
  * @param[in] pflags Flags of the pages to update:
  * P_DIRTY to set P_KEEP, P_DIRTY|P_KEEP to clear it.
+ * @param[in] all No shortcuts. Needed except after a full #mdb_page_flush().
+ * @return 0 on success, non-zero on failure.
  */
-static void
-mdb_cursorpages_mark(MDB_cursor *mc, unsigned pflags)
+static int
+mdb_pages_xkeep(MDB_cursor *mc, unsigned pflags, int all)
 {
 	MDB_txn *txn = mc->mc_txn;
 	MDB_cursor *m3;
 	MDB_xcursor *mx;
+	MDB_page *dp;
 	unsigned i, j;
+	int rc = MDB_SUCCESS, level;
 
+	/* Mark pages seen by cursors */
 	if (mc->mc_flags & C_UNTRACK)
 		mc = NULL;				/* will find mc in mt_cursors */
 	for (i = txn->mt_numdbs;; mc = txn->mt_cursors[--i]) {
@@ -1384,9 +1389,26 @@ mdb_cursorpages_mark(MDB_cursor *mc, unsigned pflags)
 		if (i == 0)
 			break;
 	}
+
+	if (all) {
+		/* Mark dirty root pages */
+		for (i=0; i<txn->mt_numdbs; i++) {
+			if (txn->mt_dbflags[i] & DB_DIRTY) {
+				pgno_t pgno = txn->mt_dbs[i].md_root;
+				if (pgno == P_INVALID)
+					continue;
+				if ((rc = mdb_page_get(txn, pgno, &dp, &level)) != MDB_SUCCESS)
+					break;
+				if ((dp->mp_flags & (P_DIRTY|P_KEEP)) == pflags && level <= 1)
+					dp->mp_flags ^= P_KEEP;
+			}
+		}
+	}
+
+	return rc;
 }
 
-static int mdb_page_flush(MDB_txn *txn);
+static int mdb_page_flush(MDB_txn *txn, int keep);
 
 /**	Spill pages from the dirty list back to disk.
  * This is intended to prevent running into #MDB_TXN_FULL situations,
@@ -1429,8 +1451,8 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 	MDB_txn *txn = m0->mc_txn;
 	MDB_page *dp;
 	MDB_ID2L dl = txn->mt_u.dirty_list;
-	unsigned int i, j, k, need;
-	int rc, level;
+	unsigned int i, j, need;
+	int rc;
 
 	if (m0->mc_flags & C_SUB)
 		return MDB_SUCCESS;
@@ -1455,21 +1477,9 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 			return ENOMEM;
 	}
 
-	/* Mark all the dirty root pages we want to preserve */
-	for (i=0; i<txn->mt_numdbs; i++) {
-		if (txn->mt_dbflags[i] & DB_DIRTY) {
-			pgno_t pgno = txn->mt_dbs[i].md_root;
-			if (pgno == P_INVALID)
-				continue;
-			if ((rc = mdb_page_get(txn, pgno, &dp, &level)) != MDB_SUCCESS)
-				goto done;
-			if ((dp->mp_flags & P_DIRTY) && level <= 1)
-				dp->mp_flags |= P_KEEP;
-		}
-	}
-
-	/* Preserve pages used by cursors */
-	mdb_cursorpages_mark(m0, P_DIRTY);
+	/* Preserve pages which may soon be dirtied again */
+	if ((rc = mdb_pages_xkeep(m0, P_DIRTY, 1)) != MDB_SUCCESS)
+		goto done;
 
 	/* Less aggressive spill - we originally spilled the entire dirty list,
 	 * with a few exceptions for cursor pages and DB root pages. But this
@@ -1478,13 +1488,12 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 	 * of the dirty pages. Testing revealed this to be a good tradeoff,
 	 * better than 1/2, 1/4, or 1/10.
 	 */
-	k = 0;
 	if (need < MDB_IDL_UM_MAX / 8)
 		need = MDB_IDL_UM_MAX / 8;
 
 	/* Save the page IDs of all the pages we're flushing */
 	/* flush from the tail forward, this saves a lot of shifting later on. */
-	for (i=dl[0].mid; i>0; i--) {
+	for (i=dl[0].mid; i && need; i--) {
 		dp = dl[i].mptr;
 		if (dp->mp_flags & P_KEEP)
 			continue;
@@ -1507,51 +1516,16 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 		}
 		if ((rc = mdb_midl_append(&txn->mt_spill_pgs, dl[i].mid)))
 			goto done;
-		k++;
-		if (k > need)
-			break;
+		need--;
 	}
 	mdb_midl_sort(txn->mt_spill_pgs);
 
-	/* Since we're only doing the tail 1/8th of the dirty list,
-	 * fake a dirty list to reflect this.
-	 */
-	{
-		MDB_ID2 old;
-		if (i) {
-			k = dl[0].mid - i + 1;
-			old = dl[i-1];
-			dl[i-1].mid = k;
-			txn->mt_u.dirty_list = &dl[i-1];
-		}
+	/* Flush the spilled part of dirty list */
+	if ((rc = mdb_page_flush(txn, i)) != MDB_SUCCESS)
+		goto done;
 
-		rc = mdb_page_flush(txn);
-
-		if (i) {
-			/* reset back to the real list */
-			dl[0].mid -= k;
-			dl[0].mid += dl[i-1].mid;
-			dl[i-1] = old;
-			txn->mt_u.dirty_list = dl;
-		}
-	}
-
-	mdb_cursorpages_mark(m0, P_DIRTY|P_KEEP);
-
-	if (i) {
-		/* Reset any dirty root pages we kept that page_flush didn't see */
-		for (i=0; i<txn->mt_numdbs; i++) {
-			if (txn->mt_dbflags[i] & DB_DIRTY) {
-				pgno_t pgno = txn->mt_dbs[i].md_root;
-				if (pgno == P_INVALID)
-					continue;
-				if ((rc = mdb_page_get(txn, pgno, &dp, &level)) != MDB_SUCCESS)
-					goto done;
-				if (dp->mp_flags & P_KEEP)
-					dp->mp_flags ^= P_KEEP;
-			}
-		}
-	}
+	/* Reset any dirty pages we kept that page_flush didn't see */
+	rc = mdb_pages_xkeep(m0, P_DIRTY|P_KEEP, i);
 
 done:
 	if (rc == 0) {
@@ -2626,10 +2600,13 @@ mdb_freelist_save(MDB_txn *txn)
 	return rc;
 }
 
-/** Flush dirty pages to the map, after clearing their dirty flag.
+/** Flush (some) dirty pages to the map, after clearing their dirty flag.
+ * @param[in] txn the transaction that's being committed
+ * @param[in] keep number of initial pages in dirty_list to keep dirty.
+ * @return 0 on success, non-zero on failure.
  */
 static int
-mdb_page_flush(MDB_txn *txn)
+mdb_page_flush(MDB_txn *txn, int keep)
 {
 	MDB_env		*env = txn->mt_env;
 	MDB_ID2L	dl = txn->mt_u.dirty_list;
@@ -2647,10 +2624,11 @@ mdb_page_flush(MDB_txn *txn)
 	int			n = 0;
 #endif
 
-	j = 0;
+	j = i = keep;
+
 	if (env->me_flags & MDB_WRITEMAP) {
 		/* Clear dirty flags */
-		for (i=1; i<=pagecount; i++) {
+		while (++i <= pagecount) {
 			dp = dl[i].mptr;
 			/* Don't flush this page yet */
 			if (dp->mp_flags & P_KEEP) {
@@ -2665,8 +2643,8 @@ mdb_page_flush(MDB_txn *txn)
 	}
 
 	/* Write the pages */
-	for (i = 1;; i++) {
-		if (i <= pagecount) {
+	for (;;) {
+		if (++i <= pagecount) {
 			dp = dl[i].mptr;
 			/* Don't flush this page yet */
 			if (dp->mp_flags & P_KEEP) {
@@ -2745,8 +2723,7 @@ mdb_page_flush(MDB_txn *txn)
 #endif	/* _WIN32 */
 	}
 
-	j = 0;
-	for (i=1; i<=pagecount; i++) {
+	for (i = keep; ++i <= pagecount; ) {
 		dp = dl[i].mptr;
 		/* This is a page we skipped above */
 		if (!dl[i].mid) {
@@ -2949,7 +2926,7 @@ mdb_txn_commit(MDB_txn *txn)
 	mdb_audit(txn);
 #endif
 
-	if ((rc = mdb_page_flush(txn)) ||
+	if ((rc = mdb_page_flush(txn, 0)) ||
 		(rc = mdb_env_sync(env, 0)) ||
 		(rc = mdb_env_write_meta(txn)))
 		goto fail;
