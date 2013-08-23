@@ -4948,8 +4948,11 @@ mdb_cursor_next(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 		if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
 			if (op == MDB_NEXT || op == MDB_NEXT_DUP) {
 				rc = mdb_cursor_next(&mc->mc_xcursor->mx_cursor, data, NULL, MDB_NEXT);
-				if (op != MDB_NEXT || rc != MDB_NOTFOUND)
+				if (op != MDB_NEXT || rc != MDB_NOTFOUND) {
+					if (rc == MDB_SUCCESS)
+						MDB_GET_KEY(leaf, key);
 					return rc;
+				}
 			}
 		} else {
 			mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
@@ -5015,11 +5018,14 @@ mdb_cursor_prev(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 
 	if (mc->mc_db->md_flags & MDB_DUPSORT) {
 		leaf = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
-		if (op == MDB_PREV || op == MDB_PREV_DUP) {
-			if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
+		if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
+			if (op == MDB_PREV || op == MDB_PREV_DUP) {
 				rc = mdb_cursor_prev(&mc->mc_xcursor->mx_cursor, data, NULL, MDB_PREV);
-				if (op != MDB_PREV || rc != MDB_NOTFOUND)
+				if (op != MDB_PREV || rc != MDB_NOTFOUND) {
+					if (rc == MDB_SUCCESS)
+						MDB_GET_KEY(leaf, key);
 					return rc;
+				}
 			} else {
 				mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
 				if (op == MDB_PREV_DUP)
