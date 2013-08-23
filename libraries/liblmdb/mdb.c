@@ -1530,13 +1530,13 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 done:
 	if (rc == 0) {
 		if (txn->mt_parent) {
-			MDB_txn *tx2;
-			pgno_t pgno = dl[i].mid;
 			txn->mt_dirty_room = txn->mt_parent->mt_dirty_room - dl[0].mid;
 			/* dirty pages that are dirty in an ancestor don't
 			 * count against this txn's dirty_room.
 			 */
 			for (i=1; i<=dl[0].mid; i++) {
+				pgno_t pgno = dl[i].mid;
+				MDB_txn *tx2;
 				for (tx2 = txn->mt_parent; tx2; tx2 = tx2->mt_parent) {
 					j = mdb_mid2l_search(tx2->mt_u.dirty_list, pgno);
 					if (j <= tx2->mt_u.dirty_list[0].mid &&
