@@ -1429,7 +1429,7 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 	MDB_txn *txn = m0->mc_txn;
 	MDB_page *dp;
 	MDB_ID2L dl = txn->mt_u.dirty_list;
-	unsigned int i, j;
+	unsigned int i, j, k, need;
 	int rc, level;
 
 	if (m0->mc_flags & C_SUB)
@@ -1444,6 +1444,7 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 	if (key)
 		i += (LEAFSIZE(key, data) + txn->mt_env->me_psize) / txn->mt_env->me_psize;
 	i += i;	/* double it for good measure */
+	need = i;
 
 	if (txn->mt_dirty_room > i)
 		return MDB_SUCCESS;
@@ -1470,8 +1471,21 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 	/* Preserve pages used by cursors */
 	mdb_cursorpages_mark(m0, P_DIRTY);
 
+	/* Less aggressive spill - we originally spilled the entire dirty list,
+	 * with a few exceptions for cursor pages and DB root pages. But this
+	 * turns out to be a lot of wasted effort because in a large txn many
+	 * of those pages will need to be used again. So now we spill only 1/8th
+	 * of the dirty pages. Testing revealed this to be a good tradeoff,
+	 * better than 1/2, 1/4, or 1/10.
+	 */
+	k = 0;
+	need *= 100;
+	if (need < MDB_IDL_UM_MAX / 8)
+		need = MDB_IDL_UM_MAX / 8;
+
 	/* Save the page IDs of all the pages we're flushing */
-	for (i=1; i<=dl[0].mid; i++) {
+	/* flush from the tail forward, this saves a lot of shifting later on. */
+	for (i=dl[0].mid; i>0; i--) {
 		dp = dl[i].mptr;
 		if (dp->mp_flags & P_KEEP)
 			continue;
@@ -1494,12 +1508,45 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 		}
 		if ((rc = mdb_midl_append(&txn->mt_spill_pgs, dl[i].mid)))
 			goto done;
+		k++;
+		if (k > need)
+			break;
 	}
 	mdb_midl_sort(txn->mt_spill_pgs);
 
-	rc = mdb_page_flush(txn);
+	/* Since we're only doing the tail 1/8th of the dirty list,
+	 * fake a dirty list to reflect this.
+	 */
+	{
+		MDB_ID2 old;
+		k = dl[0].mid - i + 1;
+		old = dl[i-1];
+		dl[i-1].mid = k;
+		txn->mt_u.dirty_list = &dl[i-1];
+
+		rc = mdb_page_flush(txn);
+
+		/* reset back to the real list */
+		dl[0].mid -= k;
+		dl[0].mid += dl[i-1].mid;
+		dl[i-1] = old;
+		txn->mt_u.dirty_list = dl;
+	}
 
 	mdb_cursorpages_mark(m0, P_DIRTY|P_KEEP);
+
+	/* Reset any dirty root pages we kept that page_flush didn't see */
+	for (i=0; i<txn->mt_numdbs; i++) {
+		if (txn->mt_dbflags[i] & DB_DIRTY) {
+			pgno_t pgno = txn->mt_dbs[i].md_root;
+			if (pgno == P_INVALID)
+				continue;
+			if ((rc = mdb_page_get(txn, pgno, &dp, &level)) != MDB_SUCCESS)
+				goto done;
+			if (dp->mp_flags & P_KEEP)
+				dp->mp_flags ^= P_KEEP;
+		}
+	}
 
 done:
 	if (rc == 0) {
