@@ -847,7 +847,8 @@ struct MDB_txn {
 	 */
 	MDB_IDL		mt_free_pgs;
 	/** The sorted list of dirty pages we temporarily wrote to disk
-	 *	because the dirty list was full.
+	 *	because the dirty list was full. page numbers in here are
+	 *	shifted left by 1, deleted slots have the LSB set.
 	 */
 	MDB_IDL		mt_spill_pgs;
 	union {
@@ -1476,12 +1477,12 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 		if (!txn->mt_spill_pgs)
 			return ENOMEM;
 	} else {
-		/* strip any dups */
+		/* purge deleted slots */
 		MDB_IDL sl = txn->mt_spill_pgs;
 		unsigned int num = sl[0];
-		j=1;
+		j=0;
 		for (i=1; i<=num; i++) {
-			if (sl[j] != sl[i])
+			if (!(sl[i] & 1))
 				sl[++j] = sl[i];
 		}
 		sl[0] = j;
@@ -1504,6 +1505,7 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 	/* Save the page IDs of all the pages we're flushing */
 	/* flush from the tail forward, this saves a lot of shifting later on. */
 	for (i=dl[0].mid; i && need; i--) {
+		MDB_ID pn = dl[i].mid << 1;
 		dp = dl[i].mptr;
 		if (dp->mp_flags & P_KEEP)
 			continue;
@@ -1514,8 +1516,8 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 			MDB_txn *tx2;
 			for (tx2 = txn->mt_parent; tx2; tx2 = tx2->mt_parent) {
 				if (tx2->mt_spill_pgs) {
-					j = mdb_midl_search(tx2->mt_spill_pgs, dl[i].mid);
-					if (j <= tx2->mt_spill_pgs[0] && tx2->mt_spill_pgs[j] == dl[i].mid) {
+					j = mdb_midl_search(tx2->mt_spill_pgs, pn);
+					if (j <= tx2->mt_spill_pgs[0] && tx2->mt_spill_pgs[j] == pn) {
 						dp->mp_flags |= P_KEEP;
 						break;
 					}
@@ -1524,7 +1526,7 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 			if (tx2)
 				continue;
 		}
-		if ((rc = mdb_midl_append(&txn->mt_spill_pgs, dl[i].mid)))
+		if ((rc = mdb_midl_append(&txn->mt_spill_pgs, pn)))
 			goto done;
 		need--;
 	}
@@ -1798,13 +1800,13 @@ mdb_page_unspill(MDB_txn *tx0, MDB_page *mp, MDB_page **ret)
 	MDB_env *env = tx0->mt_env;
 	MDB_txn *txn;
 	unsigned x;
-	pgno_t pgno = mp->mp_pgno;
+	pgno_t pgno = mp->mp_pgno, pn = pgno << 1;
 
 	for (txn = tx0; txn; txn=txn->mt_parent) {
 		if (!txn->mt_spill_pgs)
 			continue;
-		x = mdb_midl_search(txn->mt_spill_pgs, pgno);
-		if (x <= txn->mt_spill_pgs[0] && txn->mt_spill_pgs[x] == pgno) {
+		x = mdb_midl_search(txn->mt_spill_pgs, pn);
+		if (x <= txn->mt_spill_pgs[0] && txn->mt_spill_pgs[x] == pn) {
 			MDB_page *np;
 			int num;
 			if (IS_OVERFLOW(mp))
@@ -1825,13 +1827,12 @@ mdb_page_unspill(MDB_txn *tx0, MDB_page *mp, MDB_page **ret)
 			if (txn == tx0) {
 				/* If in current txn, this page is no longer spilled.
 				 * If it happens to be the last page, truncate the spill list.
-				 * Otherwise temporarily dup its neighbor over it. Dups will
-				 * be stripped out later by the next mdb_page_spill run.
+				 * Otherwise mark it as deleted by setting the LSB.
 				 */
 				if (x == txn->mt_spill_pgs[0])
 					txn->mt_spill_pgs[0]--;
 				else
-					txn->mt_spill_pgs[x] = txn->mt_spill_pgs[x+1];
+					txn->mt_spill_pgs[x] |= 1;
 			}	/* otherwise, if belonging to a parent txn, the
 				 * page remains spilled until child commits
 				 */
@@ -2823,9 +2824,10 @@ mdb_txn_commit(MDB_txn *txn)
 			len = x;
 			/* zero out our dirty pages in parent spill list */
 			for (i=1; i<=src[0].mid; i++) {
-				if (src[i].mid < parent->mt_spill_pgs[x])
+				MDB_ID pn = src[i].mid << 1;
+				if (pn < parent->mt_spill_pgs[x])
 					continue;
-				if (src[i].mid > parent->mt_spill_pgs[x]) {
+				if (pn > parent->mt_spill_pgs[x]) {
 					if (x <= 1)
 						break;
 					x--;
@@ -4533,8 +4535,9 @@ mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret, int *lvl)
 			 * leave that unless page_touch happens again).
 			 */
 			if (tx2->mt_spill_pgs) {
-				x = mdb_midl_search(tx2->mt_spill_pgs, pgno);
-				if (x <= tx2->mt_spill_pgs[0] && tx2->mt_spill_pgs[x] == pgno) {
+				MDB_ID pn = pgno << 1;
+				x = mdb_midl_search(tx2->mt_spill_pgs, pn);
+				if (x <= tx2->mt_spill_pgs[0] && tx2->mt_spill_pgs[x] == pn) {
 					p = (MDB_page *)(env->me_map + env->me_psize * pgno);
 					goto done;
 				}
@@ -4764,6 +4767,7 @@ mdb_ovpage_free(MDB_cursor *mc, MDB_page *mp)
 	unsigned x = 0, ovpages = mp->mp_pages;
 	MDB_env *env = txn->mt_env;
 	MDB_IDL sl = txn->mt_spill_pgs;
+	MDB_ID pn = pg << 1;
 	int rc;
 
 	DPRINTF(("free ov page %"Z"u (%d)", pg, ovpages));
@@ -4778,7 +4782,7 @@ mdb_ovpage_free(MDB_cursor *mc, MDB_page *mp)
 	if (env->me_pghead &&
 		!txn->mt_parent &&
 		((mp->mp_flags & P_DIRTY) ||
-		 (sl && (x = mdb_midl_search(sl, pg)) <= sl[0] && sl[x] == pg)))
+		 (sl && (x = mdb_midl_search(sl, pn)) <= sl[0] && sl[x] == pn)))
 	{
 		unsigned i, j;
 		pgno_t *mop;
@@ -4788,9 +4792,10 @@ mdb_ovpage_free(MDB_cursor *mc, MDB_page *mp)
 			return rc;
 		if (!(mp->mp_flags & P_DIRTY)) {
 			/* This page is no longer spilled */
-			for (; x < sl[0]; x++)
-				sl[x] = sl[x+1];
-			sl[0]--;
+			if (x == sl[0])
+				sl[0]--;
+			else
+				sl[x] |= 1;
 			goto release;
 		}
 		/* Remove from dirty list */
