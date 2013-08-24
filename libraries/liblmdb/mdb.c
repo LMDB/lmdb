@@ -1475,6 +1475,17 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 		txn->mt_spill_pgs = mdb_midl_alloc(MDB_IDL_UM_MAX);
 		if (!txn->mt_spill_pgs)
 			return ENOMEM;
+	} else {
+		/* strip any dups */
+		MDB_IDL sl = txn->mt_spill_pgs;
+		unsigned int num = sl[0];
+		j=1;
+		for (i=1; i<=num; i++) {
+			if (sl[i] == sl[j])
+				continue;
+			sl[++j] = sl[i];
+		}
+		sl[0] = j;
 	}
 
 	/* Preserve pages which may soon be dirtied again */
@@ -1813,10 +1824,15 @@ mdb_page_unspill(MDB_txn *tx0, MDB_page *mp, MDB_page **ret)
 					mdb_page_copy(np, mp, env->me_psize);
 			}
 			if (txn == tx0) {
-				/* If in current txn, this page is no longer spilled */
-				for (; x < txn->mt_spill_pgs[0]; x++)
+				/* If in current txn, this page is no longer spilled.
+				 * If it happens to be the last page, truncate the spill list.
+				 * Otherwise temporarily dup its neighbor over it. Dups will
+				 * be stripped out later by the next mdb_page_spill run.
+				 */
+				if (x == txn->mt_spill_pgs[0])
+					txn->mt_spill_pgs[0]--;
+				else
 					txn->mt_spill_pgs[x] = txn->mt_spill_pgs[x+1];
-				txn->mt_spill_pgs[0]--;
 			}	/* otherwise, if belonging to a parent txn, the
 				 * page remains spilled until child commits
 				 */
