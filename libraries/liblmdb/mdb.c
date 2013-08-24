@@ -1481,9 +1481,8 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 		unsigned int num = sl[0];
 		j=1;
 		for (i=1; i<=num; i++) {
-			if (sl[i] == sl[j])
-				continue;
-			sl[++j] = sl[i];
+			if (sl[j] != sl[i])
+				sl[++j] = sl[i];
 		}
 		sl[0] = j;
 	}
