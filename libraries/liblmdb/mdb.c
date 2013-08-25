@@ -1847,7 +1847,7 @@ mdb_page_unspill(MDB_txn *tx0, MDB_page *mp, MDB_page **ret)
 					x = mdb_mid2l_search(tx2->mt_u.dirty_list, pgno);
 					if (x <= tx2->mt_u.dirty_list[0].mid &&
 						tx2->mt_u.dirty_list[x].mid == pgno) {
-						txn->mt_dirty_room++;
+						tx0->mt_dirty_room++;
 						break;
 					}
 				}
