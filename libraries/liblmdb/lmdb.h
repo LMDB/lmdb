@@ -920,12 +920,12 @@ int  mdb_stat(MDB_txn *txn, MDB_dbi dbi, MDB_stat *stat);
 
 	/** @brief Retrieve the DB flags for a database handle.
 	 *
-	 * @param[in] env An environment handle returned by #mdb_env_create()
+	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 * @param[out] flags Address where the flags will be returned.
 	 * @return A non-zero error value on failure and 0 on success.
 	 */
-int mdb_dbi_flags(MDB_env *env, MDB_dbi dbi, unsigned int *flags);
+int mdb_dbi_flags(MDB_txn *txn, MDB_dbi dbi, unsigned int *flags);
 
 	/** @brief Close a database handle.
 	 *
