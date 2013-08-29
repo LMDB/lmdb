@@ -3053,7 +3053,7 @@ mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 
 	DPUTS("writing new meta page");
 
-	GET_PAGESIZE(psize);
+	psize = env->me_psize;
 
 	meta->mm_magic = MDB_MAGIC;
 	meta->mm_version = MDB_DATA_VERSION;
@@ -3238,11 +3238,97 @@ mdb_env_create(MDB_env **env)
 	return MDB_SUCCESS;
 }
 
+static int
+mdb_env_map(MDB_env *env, void *addr, int newsize)
+{
+	MDB_page *p;
+	unsigned int flags = env->me_flags;
+#ifdef _WIN32
+	int rc;
+	HANDLE mh;
+	LONG sizelo, sizehi;
+	sizelo = env->me_mapsize & 0xffffffff;
+	sizehi = env->me_mapsize >> 16 >> 16; /* only needed on Win64 */
+
+	/* Windows won't create mappings for zero length files.
+	 * Just allocate the maxsize right now.
+	 */
+	if (newsize) {
+		if (SetFilePointer(env->me_fd, sizelo, &sizehi, 0) != (DWORD)sizelo
+			|| !SetEndOfFile(env->me_fd)
+			|| SetFilePointer(env->me_fd, 0, NULL, 0) != 0)
+			return ErrCode();
+	}
+	mh = CreateFileMapping(env->me_fd, NULL, flags & MDB_WRITEMAP ?
+		PAGE_READWRITE : PAGE_READONLY,
+		sizehi, sizelo, NULL);
+	if (!mh)
+		return ErrCode();
+	env->me_map = MapViewOfFileEx(mh, flags & MDB_WRITEMAP ?
+		FILE_MAP_WRITE : FILE_MAP_READ,
+		0, 0, env->me_mapsize, addr);
+	rc = env->me_map ? 0 : ErrCode();
+	CloseHandle(mh);
+	if (rc)
+		return rc;
+#else
+	int prot = PROT_READ;
+	if (flags & MDB_WRITEMAP) {
+		prot |= PROT_WRITE;
+		if (newsize && ftruncate(env->me_fd, env->me_mapsize) < 0)
+			return ErrCode();
+	}
+	env->me_map = mmap(addr, env->me_mapsize, prot, MAP_SHARED,
+		env->me_fd, 0);
+	if (env->me_map == MAP_FAILED) {
+		env->me_map = NULL;
+		return ErrCode();
+	}
+	/* Turn off readahead. It's harmful when the DB is larger than RAM. */
+#ifdef MADV_RANDOM
+	madvise(env->me_map, env->me_mapsize, MADV_RANDOM);
+#else
+#ifdef POSIX_MADV_RANDOM
+	posix_madvise(env->me_map, env->me_mapsize, POSIX_MADV_RANDOM);
+#endif /* POSIX_MADV_RANDOM */
+#endif /* MADV_RANDOM */
+#endif /* _WIN32 */
+
+	/* Can happen because the address argument to mmap() is just a
+	 * hint.  mmap() can pick another, e.g. if the range is in use.
+	 * The MAP_FIXED flag would prevent that, but then mmap could
+	 * instead unmap existing pages to make room for the new map.
+	 */
+	if (addr && env->me_map != addr)
+		return EBUSY;	/* TODO: Make a new MDB_* error code? */
+
+	p = (MDB_page *)env->me_map;
+	env->me_metas[0] = METADATA(p);
+	env->me_metas[1] = (MDB_meta *)((char *)env->me_metas[0] + env->me_psize);
+
+	return MDB_SUCCESS;
+}
+
 int
 mdb_env_set_mapsize(MDB_env *env, size_t size)
 {
-	if (env->me_map)
-		return EINVAL;
+	/* If env is already open, caller is responsible for making
+	 * sure there are no active txns.
+	 */
+	if (env->me_map) {
+		int rc;
+		void *old;
+		if (env->me_txn)
+			return EINVAL;
+		if (!size)
+			size = env->me_metas[mdb_env_pick_meta(env)]->mm_mapsize;
+		munmap(env->me_map, env->me_mapsize);
+		env->me_mapsize = size;
+		old = (env->me_flags & MDB_FIXEDMAP) ? env->me_map : NULL;
+		rc = mdb_env_map(env, old, 1);
+		if (rc)
+			return rc;
+	}
 	env->me_mapsize = size;
 	if (env->me_psize)
 		env->me_maxpg = env->me_mapsize / env->me_psize;
@@ -3282,12 +3368,17 @@ static int
 mdb_env_open2(MDB_env *env)
 {
 	unsigned int flags = env->me_flags;
-	int i, newenv = 0;
+	int i, newenv = 0, rc;
 	MDB_meta meta;
-	MDB_page *p;
-#ifndef _WIN32
-	int prot;
-#endif
+
+#ifdef _WIN32
+	/* See if we should use QueryLimited */
+	rc = GetVersion();
+	if ((rc & 0xff) > 5)
+		env->me_pidquery = MDB_PROCESS_QUERY_LIMITED_INFORMATION;
+	else
+		env->me_pidquery = PROCESS_QUERY_INFORMATION;
+#endif /* _WIN32 */
 
 	memset(&meta, 0, sizeof(meta));
 
@@ -3296,6 +3387,9 @@ mdb_env_open2(MDB_env *env)
 			return i;
 		DPUTS("new mdbenv");
 		newenv = 1;
+		GET_PAGESIZE(env->me_psize);
+	} else {
+		env->me_psize = meta.mm_psize;
 	}
 
 	/* Was a mapsize configured? */
@@ -3313,66 +3407,9 @@ mdb_env_open2(MDB_env *env)
 			env->me_mapsize = minsize;
 	}
 
-#ifdef _WIN32
-	{
-		int rc;
-		HANDLE mh;
-		LONG sizelo, sizehi;
-		sizelo = env->me_mapsize & 0xffffffff;
-		sizehi = env->me_mapsize >> 16 >> 16; /* only needed on Win64 */
-
-		/* See if we should use QueryLimited */
-		rc = GetVersion();
-		if ((rc & 0xff) > 5)
-			env->me_pidquery = MDB_PROCESS_QUERY_LIMITED_INFORMATION;
-		else
-			env->me_pidquery = PROCESS_QUERY_INFORMATION;
-
-		/* Windows won't create mappings for zero length files.
-		 * Just allocate the maxsize right now.
-		 */
-		if (newenv) {
-			if (SetFilePointer(env->me_fd, sizelo, &sizehi, 0) != (DWORD)sizelo
-				|| !SetEndOfFile(env->me_fd)
-				|| SetFilePointer(env->me_fd, 0, NULL, 0) != 0)
-				return ErrCode();
-		}
-		mh = CreateFileMapping(env->me_fd, NULL, flags & MDB_WRITEMAP ?
-			PAGE_READWRITE : PAGE_READONLY,
-			sizehi, sizelo, NULL);
-		if (!mh)
-			return ErrCode();
-		env->me_map = MapViewOfFileEx(mh, flags & MDB_WRITEMAP ?
-			FILE_MAP_WRITE : FILE_MAP_READ,
-			0, 0, env->me_mapsize, meta.mm_address);
-		rc = env->me_map ? 0 : ErrCode();
-		CloseHandle(mh);
-		if (rc)
-			return rc;
-	}
-#else
-	i = MAP_SHARED;
-	prot = PROT_READ;
-	if (flags & MDB_WRITEMAP) {
-		prot |= PROT_WRITE;
-		if (ftruncate(env->me_fd, env->me_mapsize) < 0)
-			return ErrCode();
-	}
-	env->me_map = mmap(meta.mm_address, env->me_mapsize, prot, i,
-		env->me_fd, 0);
-	if (env->me_map == MAP_FAILED) {
-		env->me_map = NULL;
-		return ErrCode();
-	}
-	/* Turn off readahead. It's harmful when the DB is larger than RAM. */
-#ifdef MADV_RANDOM
-	madvise(env->me_map, env->me_mapsize, MADV_RANDOM);
-#else
-#ifdef POSIX_MADV_RANDOM
-	posix_madvise(env->me_map, env->me_mapsize, POSIX_MADV_RANDOM);
-#endif /* POSIX_MADV_RANDOM */
-#endif /* MADV_RANDOM */
-#endif /* _WIN32 */
+	rc = mdb_env_map(env, meta.mm_address, newenv);
+	if (rc)
+		return rc;
 
 	if (newenv) {
 		if (flags & MDB_FIXEDMAP)
@@ -3381,24 +3418,11 @@ mdb_env_open2(MDB_env *env)
 		if (i != MDB_SUCCESS) {
 			return i;
 		}
-	} else if (meta.mm_address && env->me_map != meta.mm_address) {
-		/* Can happen because the address argument to mmap() is just a
-		 * hint.  mmap() can pick another, e.g. if the range is in use.
-		 * The MAP_FIXED flag would prevent that, but then mmap could
-		 * instead unmap existing pages to make room for the new map.
-		 */
-		return EBUSY;	/* TODO: Make a new MDB_* error code? */
 	}
-	env->me_psize = meta.mm_psize;
 	env->me_maxfree_1pg = (env->me_psize - PAGEHDRSZ) / sizeof(pgno_t) - 1;
 	env->me_nodemax = (env->me_psize - PAGEHDRSZ) / MDB_MINKEYS;
 
 	env->me_maxpg = env->me_mapsize / env->me_psize;
-
-	p = (MDB_page *)env->me_map;
-	env->me_metas[0] = METADATA(p);
-	env->me_metas[1] = (MDB_meta *)((char *)env->me_metas[0] + meta.mm_psize);
-
 #if MDB_DEBUG
 	{
 		int toggle = mdb_env_pick_meta(env);

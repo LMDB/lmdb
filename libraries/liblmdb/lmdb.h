@@ -662,8 +662,15 @@ int  mdb_env_get_path(MDB_env *env, const char **path);
 	 * 10485760 bytes. The size of the memory map is also the maximum size
 	 * of the database. The value should be chosen as large as possible,
 	 * to accommodate future growth of the database.
-	 * This function may only be called after #mdb_env_create() and before #mdb_env_open().
-	 * The size may be changed by closing and reopening the environment.
+	 * This function should be called after #mdb_env_create() and before #mdb_env_open().
+	 * It may be called at later times if no transactions are active in
+	 * this process. Note that the library does not check for this condition,
+	 * the caller must ensure it explicitly.
+	 *
+	 * If the mapsize is changed by another process, #mdb_txn_begin() will
+	 * return #MDB_MAP_RESIZED. This function may be called with a size
+	 * of zero to adopt the new size.
+	 *
 	 * Any attempt to set a size smaller than the space already consumed
 	 * by the environment will be silently changed to the current size of the used space.
 	 * @param[in] env An environment handle returned by #mdb_env_create()
@@ -671,7 +678,8 @@ int  mdb_env_get_path(MDB_env *env, const char **path);
 	 * @return A non-zero error value on failure and 0 on success. Some possible
 	 * errors are:
 	 * <ul>
-	 *	<li>EINVAL - an invalid parameter was specified, or the environment is already open.
+	 *	<li>EINVAL - an invalid parameter was specified, or the environment has
+	 *   	an active write transaction.
 	 * </ul>
 	 */
 int  mdb_env_set_mapsize(MDB_env *env, size_t size);
@@ -757,7 +765,8 @@ int  mdb_env_get_maxkeysize(MDB_env *env);
 	 *	<li>#MDB_PANIC - a fatal error occurred earlier and the environment
 	 *		must be shut down.
 	 *	<li>#MDB_MAP_RESIZED - another process wrote data beyond this MDB_env's
-	 *		mapsize and the environment must be shut down.
+	 *		mapsize and this environment's map must be resized as well.
+	 *		See #mdb_env_set_mapsize().
 	 *	<li>#MDB_READERS_FULL - a read-only transaction was requested and
 	 *		the reader lock table is full. See #mdb_env_set_maxreaders().
 	 *	<li>ENOMEM - out of memory.
