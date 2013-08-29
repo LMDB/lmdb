@@ -1,0 +1,38 @@
+LMDB 0.9 Change Log
+
+LMDB 0.9.8 Engineering
+	Allow mdb_env_set_mapsize() on an open environment
+	Fix mdb_dbi_flags() (ITS#7672)
+	Fix mdb_page_unspill() in nested txns
+	Fix mdb_cursor_get(DUP) to always return key (ITS#7671)
+	Fix mdb_cursor_del() to always advance to next item (ITS#7670)
+	Tweak mdb_page_spill() to be less aggressive
+	Documentation
+		Update caveats since mdb_reader_check() added in 0.9.7
+
+LMDB 0.9.7 Release (2013/08/17)
+	Don't leave stale lockfile on failed RDONLY open (ITS#7664)
+	Fix mdb_page_split() ref beyond cursor depth
+	Fix read txn data race (ITS#7635)
+	Fix mdb_rebalance (ITS#7536, #7538)
+	Fix mdb_drop() (ITS#7561)
+	Misc DEBUG macro fixes
+	Add MDB_NOTLS envflag
+	Add mdb_env_copyfd()
+	Add mdb_txn_env() (ITS#7660)
+	Add mdb_dbi_flags() (ITS#7661)
+	Add mdb_env_get_maxkeysize()
+	Add mdb_env_reader_list()/mdb_env_reader_check()
+	Add mdb_page_spill/unspill, remove hard txn size limit
+	Use shorter names for semaphores (ITS#7615)
+	Build
+		Fix install target (ITS#7656)
+	Documentation
+		Misc updates for cursors, DB handles, data lifetime
+
+LMDB 0.9.6 Release (2013/02/25)
+	Many fixes/enhancements
+
+LMDB 0.9.5 Release (2012/11/30)
+	Renamed from libmdb to liblmdb
+	Many fixes/enhancements
