@@ -4,8 +4,11 @@ LMDB 0.9.8 Engineering
 	Allow mdb_env_set_mapsize() on an open environment
 	Fix mdb_dbi_flags() (ITS#7672)
 	Fix mdb_page_unspill() in nested txns
+	Fix mdb_cursor_get(CURRENT|NEXT) after a delete
 	Fix mdb_cursor_get(DUP) to always return key (ITS#7671)
 	Fix mdb_cursor_del() to always advance to next item (ITS#7670)
+	Fix mdb_cursor_set(SET_RANGE) for tree with single page (ITS#7681)
+	Fix mdb_env_copy() retry open if O_DIRECT fails (ITS#7682)
 	Tweak mdb_page_spill() to be less aggressive
 	Documentation
 		Update caveats since mdb_reader_check() added in 0.9.7
