@@ -5227,7 +5227,10 @@ mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 		if (!mc->mc_top) {
 			/* There are no other pages */
 			mc->mc_ki[mc->mc_top] = 0;
-			return MDB_NOTFOUND;
+			if (op == MDB_SET_RANGE)
+				goto set1;
+			else 
+				return MDB_NOTFOUND;
 		}
 	}
 
