@@ -4246,11 +4246,15 @@ mdb_env_copy(MDB_env *env, const char *path)
 	newfd = CreateFile(lpath, GENERIC_WRITE, 0, NULL, CREATE_NEW,
 				FILE_FLAG_NO_BUFFERING|FILE_FLAG_WRITE_THROUGH, NULL);
 #else
-	newfd = open(lpath, O_WRONLY|O_CREAT|O_EXCL
 #ifdef O_DIRECT
-		|O_DIRECT
+	/* The OS supports O_DIRECT, try with it */
+	newfd = open(lpath, O_WRONLY|O_CREAT|O_EXCL|O_DIRECT, 0666);
+	/* But open can fail if O_DIRECT isn't supported by the file system
+	 * so retry without the flag
+	 */
+	if (newfd == INVALID_HANDLE_VALUE && ErrCode() == EINVAL)
 #endif
-		, 0666);
+	newfd = open(lpath, O_WRONLY|O_CREAT|O_EXCL, 0666);
 #endif
 	if (newfd == INVALID_HANDLE_VALUE) {
 		rc = ErrCode();
