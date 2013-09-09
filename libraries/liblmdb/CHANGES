@@ -1,6 +1,6 @@
 LMDB 0.9 Change Log
 
-LMDB 0.9.8 Engineering
+LMDB 0.9.8 Release (2013/09/09)
 	Allow mdb_env_set_mapsize() on an open environment
 	Fix mdb_dbi_flags() (ITS#7672)
 	Fix mdb_page_unspill() in nested txns

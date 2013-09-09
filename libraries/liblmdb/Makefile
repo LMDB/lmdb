@@ -51,6 +51,7 @@ liblmdb.a:	mdb.o midl.o
 	ar rs $@ mdb.o midl.o
 
 liblmdb.so:	mdb.o midl.o
+#	$(CC) $(LDFLAGS) -pthread -shared -Wl,-Bsymbolic -o $@ mdb.o midl.o $(SOLIBS)
 	$(CC) $(LDFLAGS) -pthread -shared -o $@ mdb.o midl.o $(SOLIBS)
 
 mdb_stat: mdb_stat.o liblmdb.a
