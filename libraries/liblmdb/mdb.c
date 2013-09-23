@@ -4649,7 +4649,7 @@ mdb_page_search_root(MDB_cursor *mc, MDB_val *key, int modify)
 	}
 
 	DPRINTF(("found leaf page %"Z"u for key [%s]", mp->mp_pgno,
-	    key ? DKEY(key) : NULL));
+	    key ? DKEY(key) : "null"));
 	mc->mc_flags |= C_INITIALIZED;
 	mc->mc_flags &= ~C_EOF;
 
@@ -6245,7 +6245,7 @@ mdb_node_add(MDB_cursor *mc, indx_t indx,
 	    IS_LEAF(mp) ? "leaf" : "branch",
 		IS_SUBP(mp) ? "sub-" : "",
 	    mp->mp_pgno, indx, data ? data->mv_size : 0,
-		key ? key->mv_size : 0, key ? DKEY(key) : NULL));
+		key ? key->mv_size : 0, key ? DKEY(key) : "null"));
 
 	if (IS_LEAF2(mp)) {
 		/* Move higher keys up one slot. */
@@ -8323,6 +8323,8 @@ int mdb_reader_check(MDB_env *env, int *dead)
 					if (!mdb_reader_pid(env, Pidcheck, pid)) {
 						for (j=i; j<rdrs; j++)
 							if (mr[j].mr_pid == pid) {
+								DPRINTF(("clear stale reader pid %u txn %"Z"d",
+									(unsigned) pid, mr[j].mr_txnid));
 								mr[j].mr_pid = 0;
 								count++;
 							}
