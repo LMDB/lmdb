@@ -1818,7 +1818,7 @@ mdb_page_unspill(MDB_txn *tx0, MDB_page *mp, MDB_page **ret)
 			if (env->me_flags & MDB_WRITEMAP) {
 				np = mp;
 			} else {
-				np = mdb_page_malloc(txn, num);
+				np = mdb_page_malloc(tx0, num);
 				if (!np)
 					return ENOMEM;
 				if (num > 1)
