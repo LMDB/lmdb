@@ -4246,14 +4246,6 @@ mdb_env_copy(MDB_env *env, const char *path)
 	newfd = CreateFile(lpath, GENERIC_WRITE, 0, NULL, CREATE_NEW,
 				FILE_FLAG_NO_BUFFERING|FILE_FLAG_WRITE_THROUGH, NULL);
 #else
-#ifdef O_DIRECT
-	/* The OS supports O_DIRECT, try with it */
-	newfd = open(lpath, O_WRONLY|O_CREAT|O_EXCL|O_DIRECT, 0666);
-	/* But open can fail if O_DIRECT isn't supported by the file system
-	 * so retry without the flag
-	 */
-	if (newfd == INVALID_HANDLE_VALUE && ErrCode() == EINVAL)
-#endif
 	newfd = open(lpath, O_WRONLY|O_CREAT|O_EXCL, 0666);
 #endif
 	if (newfd == INVALID_HANDLE_VALUE) {
@@ -4261,6 +4253,11 @@ mdb_env_copy(MDB_env *env, const char *path)
 		goto leave;
 	}
 
+#ifdef O_DIRECT
+	/* Set O_DIRECT if the file system supports it */
+	if ((rc = fcntl(newfd, F_GETFL)) != -1)
+		(void) fcntl(newfd, F_SETFL, rc | O_DIRECT);
+#endif
 #ifdef F_NOCACHE	/* __APPLE__ */
 	rc = fcntl(newfd, F_NOCACHE, 1);
 	if (rc) {
