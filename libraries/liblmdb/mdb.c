@@ -1789,24 +1789,24 @@ mdb_page_copy(MDB_page *dst, MDB_page *src, unsigned int psize)
 /** Pull a page off the txn's spill list, if present.
  * If a page being referenced was spilled to disk in this txn, bring
  * it back and make it dirty/writable again.
- * @param[in] tx0 the transaction handle.
+ * @param[in] txn the transaction handle.
  * @param[in] mp the page being referenced.
  * @param[out] ret the writable page, if any. ret is unchanged if
  * mp wasn't spilled.
  */
 static int
-mdb_page_unspill(MDB_txn *tx0, MDB_page *mp, MDB_page **ret)
+mdb_page_unspill(MDB_txn *txn, MDB_page *mp, MDB_page **ret)
 {
-	MDB_env *env = tx0->mt_env;
-	MDB_txn *txn;
+	MDB_env *env = txn->mt_env;
+	const MDB_txn *tx2;
 	unsigned x;
 	pgno_t pgno = mp->mp_pgno, pn = pgno << 1;
 
-	for (txn = tx0; txn; txn=txn->mt_parent) {
-		if (!txn->mt_spill_pgs)
+	for (tx2 = txn; tx2; tx2=tx2->mt_parent) {
+		if (!tx2->mt_spill_pgs)
 			continue;
-		x = mdb_midl_search(txn->mt_spill_pgs, pn);
-		if (x <= txn->mt_spill_pgs[0] && txn->mt_spill_pgs[x] == pn) {
+		x = mdb_midl_search(tx2->mt_spill_pgs, pn);
+		if (x <= tx2->mt_spill_pgs[0] && tx2->mt_spill_pgs[x] == pn) {
 			MDB_page *np;
 			int num;
 			if (txn->mt_dirty_room == 0)
@@ -1818,7 +1818,7 @@ mdb_page_unspill(MDB_txn *tx0, MDB_page *mp, MDB_page **ret)
 			if (env->me_flags & MDB_WRITEMAP) {
 				np = mp;
 			} else {
-				np = mdb_page_malloc(tx0, num);
+				np = mdb_page_malloc(txn, num);
 				if (!np)
 					return ENOMEM;
 				if (num > 1)
@@ -1826,7 +1826,7 @@ mdb_page_unspill(MDB_txn *tx0, MDB_page *mp, MDB_page **ret)
 				else
 					mdb_page_copy(np, mp, env->me_psize);
 			}
-			if (txn == tx0) {
+			if (tx2 == txn) {
 				/* If in current txn, this page is no longer spilled.
 				 * If it happens to be the last page, truncate the spill list.
 				 * Otherwise mark it as deleted by setting the LSB.
@@ -1839,7 +1839,7 @@ mdb_page_unspill(MDB_txn *tx0, MDB_page *mp, MDB_page **ret)
 				 * page remains spilled until child commits
 				 */
 
-			mdb_page_dirty(tx0, np);
+			mdb_page_dirty(txn, np);
 			np->mp_flags |= P_DIRTY;
 			*ret = np;
 			break;
