@@ -1376,10 +1376,11 @@ mdb_dlist_free(MDB_txn *txn)
 static int
 mdb_pages_xkeep(MDB_cursor *mc, unsigned pflags, int all)
 {
+	enum { Mask = P_SUBP|P_DIRTY|P_KEEP };
 	MDB_txn *txn = mc->mc_txn;
 	MDB_cursor *m3;
 	MDB_xcursor *mx;
-	MDB_page *dp;
+	MDB_page *dp, *mp;
 	unsigned i, j;
 	int rc = MDB_SUCCESS, level;
 
@@ -1389,13 +1390,14 @@ mdb_pages_xkeep(MDB_cursor *mc, unsigned pflags, int all)
 	for (i = txn->mt_numdbs;; mc = txn->mt_cursors[--i]) {
 		for (; mc; mc=mc->mc_next) {
 			for (m3 = mc; m3->mc_flags & C_INITIALIZED; m3 = &mx->mx_cursor) {
-					for (j=0; j<m3->mc_snum; j++)
-						if ((m3->mc_pg[j]->mp_flags & (P_SUBP|P_DIRTY|P_KEEP))
-								== pflags)
-							m3->mc_pg[j]->mp_flags ^= P_KEEP;
-					mx = m3->mc_xcursor;
-					if (mx == NULL)
-						break;
+				for (j=0; j<m3->mc_snum; j++) {
+					mp = m3->mc_pg[j];
+					if ((mp->mp_flags & Mask) == pflags)
+						mp->mp_flags ^= P_KEEP;
+				}
+				mx = m3->mc_xcursor;
+				if (mx == NULL)
+					break;
 			}
 		}
 		if (i == 0)
@@ -1411,7 +1413,7 @@ mdb_pages_xkeep(MDB_cursor *mc, unsigned pflags, int all)
 					continue;
 				if ((rc = mdb_page_get(txn, pgno, &dp, &level)) != MDB_SUCCESS)
 					break;
-				if ((dp->mp_flags & (P_DIRTY|P_KEEP)) == pflags && level <= 1)
+				if ((dp->mp_flags & Mask) == pflags && level <= 1)
 					dp->mp_flags ^= P_KEEP;
 			}
 		}
