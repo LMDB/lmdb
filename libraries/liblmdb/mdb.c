@@ -171,7 +171,7 @@
 #define	Z	"I"
 #else
 
-#define	Z	"z"
+#define	Z	"z"			/**< printf format modifier for size_t */
 
 	/** For MDB_LOCK_FORMAT: True if readers take a pid lock in the lockfile */
 #define MDB_PIDLOCK			1
@@ -600,7 +600,7 @@ typedef struct MDB_page {
 #define	P_LEAF		 0x02		/**< leaf page */
 #define	P_OVERFLOW	 0x04		/**< overflow page */
 #define	P_META		 0x08		/**< meta page */
-#define	P_DIRTY		 0x10		/**< dirty page */
+#define	P_DIRTY		 0x10		/**< dirty page, also set for #P_SUBP pages */
 #define	P_LEAF2		 0x20		/**< for #MDB_DUPFIXED records */
 #define	P_SUBP		 0x40		/**< for #MDB_DUPSORT sub-pages */
 #define	P_KEEP		 0x8000		/**< leave this page alone during spill */
@@ -786,7 +786,10 @@ typedef struct MDB_db {
 	/** Handle for the default DB. */
 #define	MAIN_DBI	1
 
-	/** Meta page content. */
+	/** Meta page content.
+	 *	A meta page is the start point for accessing a database snapshot.
+	 *	Pages 0-1 are meta pages. Transaction N writes meta page #(N % 2).
+	 */
 typedef struct MDB_meta {
 		/** Stamp identifying this as an MDB file. It must be set
 		 *	to #MDB_MAGIC. */
@@ -905,7 +908,14 @@ struct MDB_txn {
 
 struct MDB_xcursor;
 
-	/** Cursors are used for all DB operations */
+	/** Cursors are used for all DB operations.
+	 *	A cursor holds a path of (page pointer, key index) from the DB
+	 *	root to a position in the DB, plus other state. #MDB_DUPSORT
+	 *	cursors include an xcursor to the current data item. Write txns
+	 *	track their cursors and keep them up to date when data moves.
+	 *	Exception: An xcursor's pointer to a #P_SUBP page can be stale.
+	 *	(A node with #F_DUPDATA but no #F_SUBDATA contains a subpage).
+	 */
 struct MDB_cursor {
 	/** Next cursor on this DB in this txn */
 	MDB_cursor	*mc_next;
@@ -1019,8 +1029,8 @@ struct MDB_env {
 
 	/** Nested transaction */
 typedef struct MDB_ntxn {
-	MDB_txn		mnt_txn;		/* the transaction */
-	MDB_pgstate	mnt_pgstate;	/* parent transaction's saved freestate */
+	MDB_txn		mnt_txn;		/**< the transaction */
+	MDB_pgstate	mnt_pgstate;	/**< parent transaction's saved freestate */
 } MDB_ntxn;
 
 	/** max number of pages to commit in one writev() call */
@@ -1329,7 +1339,7 @@ mdb_page_free(MDB_env *env, MDB_page *mp)
 	env->me_dpages = mp;
 }
 
-/* Free a dirty page */
+/** Free a dirty page */
 static void
 mdb_dpage_free(MDB_env *env, MDB_page *dp)
 {
@@ -1356,7 +1366,7 @@ mdb_dlist_free(MDB_txn *txn)
 	dl[0].mid = 0;
 }
 
-/* Set or clear P_KEEP in dirty, non-overflow, non-sub pages watched by txn.
+/** Set or clear P_KEEP in dirty, non-overflow, non-sub pages watched by txn.
  * @param[in] mc A cursor handle for the current operation.
  * @param[in] pflags Flags of the pages to update:
  * P_DIRTY to set P_KEEP, P_DIRTY|P_KEEP to clear it.
@@ -1415,15 +1425,12 @@ static int mdb_page_flush(MDB_txn *txn, int keep);
 /**	Spill pages from the dirty list back to disk.
  * This is intended to prevent running into #MDB_TXN_FULL situations,
  * but note that they may still occur in a few cases:
- *	1) pages in #MDB_DUPSORT sub-DBs are never spilled, so if there
- *	 are too many of these dirtied in one txn, the txn may still get
- *	 too full.
+ *	1) our estimate of the txn size could be too small. Currently this
+ *	 seems unlikely, except with a large number of #MDB_MULTIPLE items.
  *	2) child txns may run out of space if their parents dirtied a
  *	 lot of pages and never spilled them. TODO: we probably should do
  *	 a preemptive spill during #mdb_txn_begin() of a child txn, if
  *	 the parent's dirty_room is below a given threshold.
- *	3) our estimate of the txn size could be too small. At the
- *	 moment this seems unlikely.
  *
  * Otherwise, if not using nested txns, it is expected that apps will
  * not run into #MDB_TXN_FULL any more. The pages are flushed to disk
@@ -2585,7 +2592,7 @@ mdb_freelist_save(MDB_txn *txn)
 		total_room += head_room;
 	}
 
-	/* Fill in the reserved, touched me_pghead records */
+	/* Fill in the reserved me_pghead records */
 	rc = MDB_SUCCESS;
 	if (mop_len) {
 		MDB_val key, data;
@@ -4305,7 +4312,7 @@ mdb_cmp_long(const MDB_val *a, const MDB_val *b)
 		*(size_t *)a->mv_data > *(size_t *)b->mv_data;
 }
 
-/** Compare two items pointing at aligned int's */
+/** Compare two items pointing at aligned unsigned int's */
 static int
 mdb_cmp_int(const MDB_val *a, const MDB_val *b)
 {
@@ -4313,7 +4320,7 @@ mdb_cmp_int(const MDB_val *a, const MDB_val *b)
 		*(unsigned int *)a->mv_data > *(unsigned int *)b->mv_data;
 }
 
-/** Compare two items pointing at ints of unknown alignment.
+/** Compare two items pointing at unsigned ints of unknown alignment.
  *	Nodes and keys are guaranteed to be 2-byte aligned.
  */
 static int
@@ -8270,7 +8277,7 @@ int mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx)
 	return 0;
 }
 
-/* insert pid into list if not already present.
+/** Insert pid into list if not already present.
  * return -1 if already present.
  */
 static int mdb_pid_insert(pid_t *ids, pid_t pid)

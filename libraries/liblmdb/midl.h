@@ -39,7 +39,7 @@ extern "C" {
 /** @defgroup idls	ID List Management
  *	@{
  */
-	/** A generic ID number. These were entryIDs in back-bdb.
+	/** A generic unsigned ID number. These were entryIDs in back-bdb.
 	 *	Preferably it should have the same size as a pointer.
 	 */
 typedef size_t MDB_ID;

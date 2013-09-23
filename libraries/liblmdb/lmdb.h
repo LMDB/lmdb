@@ -216,13 +216,13 @@ typedef struct MDB_cursor MDB_cursor;
 /** @brief Generic structure used for passing keys and data in and out
  * of the database.
  *
- * Key sizes must be between 1 and the liblmdb build-time constant
- * #MDB_MAXKEYSIZE inclusive. This currently defaults to 511. The
- * same applies to data sizes in databases with the #MDB_DUPSORT flag.
- * Other data items can in theory be from 0 to 0xffffffff bytes long.
- *
  * Values returned from the database are valid only until a subsequent
- * update operation, or the end of the transaction.
+ * update operation, or the end of the transaction. Do not modify or
+ * free them, they commonly point into the database itself.
+ *
+ * Key sizes must be between 1 and #mdb_env_get_maxkeysize() inclusive.
+ * The same applies to data sizes in databases with the #MDB_DUPSORT flag.
+ * Other data items can in theory be from 0 to 0xffffffff bytes long.
  */
 typedef struct MDB_val {
 	size_t		 mv_size;	/**< size of the data item */
@@ -486,6 +486,8 @@ int  mdb_env_create(MDB_env **env);
 	 *		and uses fewer mallocs, but loses protection from application bugs
 	 *		like wild pointer writes and other bad updates into the database.
 	 *		Incompatible with nested transactions.
+	 *		Processes with and without MDB_WRITEMAP on the same environment do
+	 *		not cooperate well. 
 	 *	<li>#MDB_NOMETASYNC
 	 *		Flush system buffers to disk only once per transaction, omit the
 	 *		metadata flush. Defer that until the system flushes files to disk,
@@ -733,8 +735,10 @@ int  mdb_env_set_maxdbs(MDB_env *env, MDB_dbi dbs);
 
 	/** @brief Get the maximum size of a key for the environment.
 	 *
+	 * This is the compile-time constant #MDB_MAXKEYSIZE, default 511.
+	 * See @ref MDB_val.
 	 * @param[in] env An environment handle returned by #mdb_env_create()
-	 * @return The maximum size of a key. (#MDB_MAXKEYSIZE)
+	 * @return The maximum size of a key
 	 */
 int  mdb_env_get_maxkeysize(MDB_env *env);
 
