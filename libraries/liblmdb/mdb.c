@@ -1381,6 +1381,7 @@ mdb_pages_xkeep(MDB_cursor *mc, unsigned pflags, int all)
 	MDB_cursor *m3;
 	MDB_xcursor *mx;
 	MDB_page *dp, *mp;
+	MDB_node *leaf;
 	unsigned i, j;
 	int rc = MDB_SUCCESS, level;
 
@@ -1389,14 +1390,23 @@ mdb_pages_xkeep(MDB_cursor *mc, unsigned pflags, int all)
 		mc = NULL;				/* will find mc in mt_cursors */
 	for (i = txn->mt_numdbs;; mc = txn->mt_cursors[--i]) {
 		for (; mc; mc=mc->mc_next) {
-			for (m3 = mc; m3->mc_flags & C_INITIALIZED; m3 = &mx->mx_cursor) {
+			if (!(mc->mc_flags & C_INITIALIZED))
+				continue;
+			for (m3 = mc;; m3 = &mx->mx_cursor) {
+				mp = NULL;
 				for (j=0; j<m3->mc_snum; j++) {
 					mp = m3->mc_pg[j];
 					if ((mp->mp_flags & Mask) == pflags)
 						mp->mp_flags ^= P_KEEP;
 				}
 				mx = m3->mc_xcursor;
-				if (mx == NULL)
+				/* Proceed to mx if it is at a sub-database */
+				if (! (mx && (mx->mx_cursor.mc_flags & C_INITIALIZED)))
+					break;
+				if (! (mp && (mp->mp_flags & P_LEAF)))
+					break;
+				leaf = NODEPTR(mp, m3->mc_ki[j-1]);
+				if (!(leaf->mn_flags & F_SUBDATA))
 					break;
 			}
 		}
