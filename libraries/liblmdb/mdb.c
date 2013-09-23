@@ -869,8 +869,8 @@ struct MDB_txn {
  * @{
  */
 #define DB_DIRTY	0x01		/**< DB was written in this txn */
-#define DB_STALE	0x02		/**< DB record is older than txnID */
-#define DB_NEW		0x04		/**< DB handle opened in this txn */
+#define DB_STALE	0x02		/**< Named-DB record is older than txnID */
+#define DB_NEW		0x04		/**< Named-DB handle opened in this txn */
 #define DB_VALID	0x08		/**< DB handle is valid, see also #MDB_VALID */
 /** @} */
 	/** In write txns, array of cursors for each DB */
@@ -1056,6 +1056,8 @@ static int  mdb_page_search_root(MDB_cursor *mc,
 			    MDB_val *key, int modify);
 #define MDB_PS_MODIFY	1
 #define MDB_PS_ROOTONLY	2
+#define MDB_PS_FIRST	4
+#define MDB_PS_LAST		8
 static int  mdb_page_search(MDB_cursor *mc,
 			    MDB_val *key, int flags);
 static int	mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst);
@@ -1269,7 +1271,7 @@ static void mdb_audit(MDB_txn *txn)
 			txn->mt_dbs[i].md_leaf_pages +
 			txn->mt_dbs[i].md_overflow_pages;
 		if (txn->mt_dbs[i].md_flags & MDB_DUPSORT) {
-			mdb_page_search(&mc, NULL, 0);
+			mdb_page_search(&mc, NULL, MDB_PS_FIRST);
 			do {
 				unsigned j;
 				MDB_page *mp;
@@ -2474,7 +2476,7 @@ mdb_freelist_save(MDB_txn *txn)
 
 	if (env->me_pghead) {
 		/* Make sure first page of freeDB is touched and on freelist */
-		rc = mdb_page_search(&mc, NULL, MDB_PS_MODIFY);
+		rc = mdb_page_search(&mc, NULL, MDB_PS_FIRST|MDB_PS_MODIFY);
 		if (rc && rc != MDB_NOTFOUND)
 			return rc;
 	}
@@ -2502,9 +2504,7 @@ mdb_freelist_save(MDB_txn *txn)
 		if (freecnt < txn->mt_free_pgs[0]) {
 			if (!freecnt) {
 				/* Make sure last page of freeDB is touched and on freelist */
-				key.mv_size = MDB_MAXKEYSIZE+1;
-				key.mv_data = NULL;
-				rc = mdb_page_search(&mc, &key, MDB_PS_MODIFY);
+				rc = mdb_page_search(&mc, NULL, MDB_PS_LAST|MDB_PS_MODIFY);
 				if (rc && rc != MDB_NOTFOUND)
 					return rc;
 			}
@@ -4579,18 +4579,11 @@ done:
 	return MDB_SUCCESS;
 }
 
-/** Search for the page a given key should be in.
- * Pushes parent pages on the cursor stack. This function continues a
- * search on a cursor that has already been initialized. (Usually by
- * #mdb_page_search() but also by #mdb_node_move().)
- * @param[in,out] mc the cursor for this operation.
- * @param[in] key the key to search for. If NULL, search for the lowest
- * page. (This is used by #mdb_cursor_first().)
- * @param[in] modify If true, visited pages are updated with new page numbers.
- * @return 0 on success, non-zero on failure.
+/** Finish #mdb_page_search() / #mdb_page_search_lowest().
+ *	The cursor is at the root page, set up the rest of it.
  */
 static int
-mdb_page_search_root(MDB_cursor *mc, MDB_val *key, int modify)
+mdb_page_search_root(MDB_cursor *mc, MDB_val *key, int flags)
 {
 	MDB_page	*mp = mc->mc_pg[mc->mc_top];
 	int rc;
@@ -4604,11 +4597,10 @@ mdb_page_search_root(MDB_cursor *mc, MDB_val *key, int modify)
 		assert(NUMKEYS(mp) > 1);
 		DPRINTF(("found index 0 to page %"Z"u", NODEPGNO(NODEPTR(mp, 0))));
 
-		if (key == NULL)	/* Initialize cursor to first page. */
+		if (flags & (MDB_PS_FIRST|MDB_PS_LAST)) {
 			i = 0;
-		else if (key->mv_size > MDB_MAXKEYSIZE && key->mv_data == NULL) {
-							/* cursor to last page */
-			i = NUMKEYS(mp)-1;
+			if (flags & MDB_PS_LAST)
+				i = NUMKEYS(mp) - 1;
 		} else {
 			int	 exact;
 			node = mdb_node_search(mc, key, &exact);
@@ -4621,10 +4613,9 @@ mdb_page_search_root(MDB_cursor *mc, MDB_val *key, int modify)
 					i--;
 				}
 			}
+			DPRINTF(("following index %u for key [%s]", i, DKEY(key)));
 		}
 
-		if (key)
-			DPRINTF(("following index %u for key [%s]", i, DKEY(key)));
 		assert(i < NUMKEYS(mp));
 		node = NODEPTR(mp, i);
 
@@ -4635,7 +4626,7 @@ mdb_page_search_root(MDB_cursor *mc, MDB_val *key, int modify)
 		if ((rc = mdb_cursor_push(mc, mp)))
 			return rc;
 
-		if (modify) {
+		if (flags & MDB_PS_MODIFY) {
 			if ((rc = mdb_page_touch(mc)) != 0)
 				return rc;
 			mp = mc->mc_pg[mc->mc_top];
@@ -4675,18 +4666,17 @@ mdb_page_search_lowest(MDB_cursor *mc)
 	mc->mc_ki[mc->mc_top] = 0;
 	if ((rc = mdb_cursor_push(mc, mp)))
 		return rc;
-	return mdb_page_search_root(mc, NULL, 0);
+	return mdb_page_search_root(mc, NULL, MDB_PS_FIRST);
 }
 
 /** Search for the page a given key should be in.
- * Pushes parent pages on the cursor stack. This function just sets up
- * the search; it finds the root page for \b mc's database and sets this
- * as the root of the cursor's stack. Then #mdb_page_search_root() is
- * called to complete the search.
+ * Push it and its parent pages on the cursor stack.
  * @param[in,out] mc the cursor for this operation.
- * @param[in] key the key to search for. If NULL, search for the lowest
- * page. (This is used by #mdb_cursor_first().)
- * @param[in] flags If MDB_PS_MODIFY set, visited pages are updated with new page numbers.
+ * @param[in] key the key to search for, or NULL for first/last page.
+ * @param[in] flags If MDB_PS_MODIFY is set, visited pages in the DB
+ *   are touched (updated with new page numbers).
+ *   If MDB_PS_FIRST or MDB_PS_LAST is set, find first or last leaf.
+ *   This is used by #mdb_cursor_first() and #mdb_cursor_last().
  *   If MDB_PS_ROOTONLY set, just fetch root node, no further lookups.
  * @return 0 on success, non-zero on failure.
  */
@@ -4697,23 +4687,20 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int flags)
 	pgno_t		 root;
 
 	/* Make sure the txn is still viable, then find the root from
-	 * the txn's db table.
+	 * the txn's db table and set it as the root of the cursor's stack.
 	 */
 	if (F_ISSET(mc->mc_txn->mt_flags, MDB_TXN_ERROR)) {
 		DPUTS("transaction has failed, must abort");
 		return MDB_BAD_TXN;
 	} else {
 		/* Make sure we're using an up-to-date root */
-		if (mc->mc_dbi > MAIN_DBI) {
-			if ((*mc->mc_dbflag & DB_STALE) ||
-			((flags & MDB_PS_MODIFY) && !(*mc->mc_dbflag & DB_DIRTY))) {
+		if (*mc->mc_dbflag & DB_STALE) {
 				MDB_cursor mc2;
-				unsigned char dbflag = 0;
 				mdb_cursor_init(&mc2, mc->mc_txn, MAIN_DBI, NULL);
-				rc = mdb_page_search(&mc2, &mc->mc_dbx->md_name, flags & MDB_PS_MODIFY);
+				rc = mdb_page_search(&mc2, &mc->mc_dbx->md_name, 0);
 				if (rc)
 					return rc;
-				if (*mc->mc_dbflag & DB_STALE) {
+				{
 					MDB_val data;
 					int exact = 0;
 					uint16_t flags;
@@ -4733,11 +4720,7 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int flags)
 						return MDB_INCOMPATIBLE;
 					memcpy(mc->mc_db, data.mv_data, sizeof(MDB_db));
 				}
-				if (flags & MDB_PS_MODIFY)
-					dbflag = DB_DIRTY;
 				*mc->mc_dbflag &= ~DB_STALE;
-				*mc->mc_dbflag |= dbflag;
-			}
 		}
 		root = mc->mc_db->md_root;
 
@@ -5310,7 +5293,7 @@ mdb_cursor_first(MDB_cursor *mc, MDB_val *key, MDB_val *data)
 		mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
 
 	if (!(mc->mc_flags & C_INITIALIZED) || mc->mc_top) {
-		rc = mdb_page_search(mc, NULL, 0);
+		rc = mdb_page_search(mc, NULL, MDB_PS_FIRST);
 		if (rc != MDB_SUCCESS)
 			return rc;
 	}
@@ -5356,11 +5339,7 @@ mdb_cursor_last(MDB_cursor *mc, MDB_val *key, MDB_val *data)
 	if (!(mc->mc_flags & C_EOF)) {
 
 		if (!(mc->mc_flags & C_INITIALIZED) || mc->mc_top) {
-			MDB_val	lkey;
-
-			lkey.mv_size = MDB_MAXKEYSIZE+1;
-			lkey.mv_data = NULL;
-			rc = mdb_page_search(mc, &lkey, 0);
+			rc = mdb_page_search(mc, NULL, MDB_PS_LAST);
 			if (rc != MDB_SUCCESS)
 				return rc;
 		}
@@ -8056,7 +8035,7 @@ mdb_drop0(MDB_cursor *mc, int subs)
 {
 	int rc;
 
-	rc = mdb_page_search(mc, NULL, 0);
+	rc = mdb_page_search(mc, NULL, MDB_PS_FIRST);
 	if (rc == MDB_SUCCESS) {
 		MDB_txn *txn = mc->mc_txn;
 		MDB_node *ni;
