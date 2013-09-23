@@ -2779,14 +2779,18 @@ mdb_txn_commit(MDB_txn *txn)
 
 	if (txn->mt_parent) {
 		MDB_txn *parent = txn->mt_parent;
-		unsigned x, y, len;
 		MDB_ID2L dst, src;
+		MDB_IDL pspill;
+		unsigned x, y, len, ps_len;
 
 		/* Append our free list to parent's */
 		rc = mdb_midl_append_list(&parent->mt_free_pgs, txn->mt_free_pgs);
 		if (rc)
 			goto fail;
 		mdb_midl_free(txn->mt_free_pgs);
+		/* Failures after this must either undo the changes
+		 * to the parent or set MDB_TXN_ERROR in the parent.
+		 */
 
 		parent->mt_next_pgno = txn->mt_next_pgno;
 		parent->mt_flags = txn->mt_flags;
@@ -2808,37 +2812,26 @@ mdb_txn_commit(MDB_txn *txn)
 		dst = parent->mt_u.dirty_list;
 		src = txn->mt_u.dirty_list;
 		/* Remove anything in our dirty list from parent's spill list */
-		if (parent->mt_spill_pgs) {
-			x = parent->mt_spill_pgs[0];
-			len = x;
-			/* zero out our dirty pages in parent spill list */
-			for (i=1; i<=src[0].mid; i++) {
+		if ((pspill = parent->mt_spill_pgs) && (ps_len = pspill[0])) {
+			x = y = ps_len;
+			pspill[0] = (pgno_t)-1;
+			/* Mark our dirty pages as deleted in parent spill list */
+			for (i=0, len=src[0].mid; ++i <= len; ) {
 				MDB_ID pn = src[i].mid << 1;
-				if (pn < parent->mt_spill_pgs[x])
-					continue;
-				if (pn > parent->mt_spill_pgs[x]) {
-					if (x <= 1)
-						break;
+				while (pn > pspill[x])
 					x--;
-					continue;
+				if (pn == pspill[x]) {
+					pspill[x] = 1;
+					y = --x;
 				}
-				parent->mt_spill_pgs[x] = 0;
-				len--;
 			}
-			/* OK, we had a few hits, squash zeros from the spill list */
-			if (len < parent->mt_spill_pgs[0]) {
-				x=1;
-				for (y=1; y<=parent->mt_spill_pgs[0]; y++) {
-					if (parent->mt_spill_pgs[y]) {
-						if (y != x) {
-							parent->mt_spill_pgs[x] = parent->mt_spill_pgs[y];
-						}
-						x++;
-					}
-				}
-				parent->mt_spill_pgs[0] = len;
-			}
+			/* Squash deleted pagenums if we deleted any */
+			for (x=y; ++x <= ps_len; )
+				if (!(pspill[x] & 1))
+					pspill[++y] = pspill[x];
+			pspill[0] = y;
 		}
+
 		/* Find len = length of merging our dirty list with parent's */
 		x = dst[0].mid;
 		dst[0].mid = 0;		/* simplify loops */
@@ -2872,7 +2865,10 @@ mdb_txn_commit(MDB_txn *txn)
 		parent->mt_dirty_room = txn->mt_dirty_room;
 		if (txn->mt_spill_pgs) {
 			if (parent->mt_spill_pgs) {
-				mdb_midl_append_list(&parent->mt_spill_pgs, txn->mt_spill_pgs);
+				/* TODO: Prevent failure here, so parent does not fail */
+				rc = mdb_midl_append_list(&parent->mt_spill_pgs, txn->mt_spill_pgs);
+				if (rc)
+					parent->mt_flags |= MDB_TXN_ERROR;
 				mdb_midl_free(txn->mt_spill_pgs);
 				mdb_midl_sort(parent->mt_spill_pgs);
 			} else {
@@ -2883,7 +2879,7 @@ mdb_txn_commit(MDB_txn *txn)
 		parent->mt_child = NULL;
 		mdb_midl_free(((MDB_ntxn *)txn)->mnt_pgstate.mf_pghead);
 		free(txn);
-		return MDB_SUCCESS;
+		return rc;
 	}
 
 	if (txn != env->me_txn) {
