@@ -898,10 +898,6 @@ struct MDB_txn {
 	 *	dirty_list into mt_parent after freeing hidden mt_parent pages.
 	 */
 	unsigned int	mt_dirty_room;
-	/** Tracks which of the two meta pages was used at the start
-	 * 	of this transaction.
-	 */
-	unsigned int	mt_toggle;
 };
 
 /** Enough space for 2^32 nodes with minimum of 2 keys per node. I.e., plenty.
@@ -2118,6 +2114,7 @@ static int
 mdb_txn_renew0(MDB_txn *txn)
 {
 	MDB_env *env = txn->mt_env;
+	MDB_meta *meta;
 	unsigned int i;
 	uint16_t x;
 	int rc, new_notls = 0;
@@ -2128,8 +2125,8 @@ mdb_txn_renew0(MDB_txn *txn)
 
 	if (txn->mt_flags & MDB_TXN_RDONLY) {
 		if (!env->me_txns) {
-			i = mdb_env_pick_meta(env);
-			txn->mt_txnid = env->me_metas[i]->mm_txnid;
+			meta = env->me_metas[ mdb_env_pick_meta(env) ];
+			txn->mt_txnid = meta->mm_txnid;
 			txn->mt_u.reader = NULL;
 		} else {
 			MDB_reader *r = (env->me_flags & MDB_NOTLS) ? txn->mt_u.reader :
@@ -2174,13 +2171,13 @@ mdb_txn_renew0(MDB_txn *txn)
 			}
 			txn->mt_txnid = r->mr_txnid = env->me_txns->mti_txnid;
 			txn->mt_u.reader = r;
+			meta = env->me_metas[txn->mt_txnid & 1];
 		}
-		txn->mt_toggle = txn->mt_txnid & 1;
 	} else {
 		LOCK_MUTEX_W(env);
 
 		txn->mt_txnid = env->me_txns->mti_txnid;
-		txn->mt_toggle = txn->mt_txnid & 1;
+		meta = env->me_metas[txn->mt_txnid & 1];
 		txn->mt_txnid++;
 #if MDB_DEBUG
 		if (txn->mt_txnid == mdb_debug_start)
@@ -2196,10 +2193,10 @@ mdb_txn_renew0(MDB_txn *txn)
 	}
 
 	/* Copy the DB info and flags */
-	memcpy(txn->mt_dbs, env->me_metas[txn->mt_toggle]->mm_dbs, 2 * sizeof(MDB_db));
+	memcpy(txn->mt_dbs, meta->mm_dbs, 2 * sizeof(MDB_db));
 
 	/* Moved to here to avoid a data race in read TXNs */
-	txn->mt_next_pgno = env->me_metas[txn->mt_toggle]->mm_last_pg+1;
+	txn->mt_next_pgno = meta->mm_last_pg+1;
 
 	for (i=2; i<txn->mt_numdbs; i++) {
 		x = env->me_dbflags[i];
@@ -2295,7 +2292,6 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 			return ENOMEM;
 		}
 		txn->mt_txnid = parent->mt_txnid;
-		txn->mt_toggle = parent->mt_toggle;
 		txn->mt_dirty_room = parent->mt_dirty_room;
 		txn->mt_u.dirty_list[0].mid = 0;
 		txn->mt_spill_pgs = NULL;
@@ -3093,7 +3089,7 @@ mdb_env_write_meta(MDB_txn *txn)
 	assert(txn != NULL);
 	assert(txn->mt_env != NULL);
 
-	toggle = !txn->mt_toggle;
+	toggle = txn->mt_txnid & 1;
 	DPRINTF(("writing meta page %d for root page %"Z"u",
 		toggle, txn->mt_dbs[MAIN_DBI].md_root));
 
@@ -4878,7 +4874,7 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 	if (txn->mt_flags & MDB_TXN_ERROR)
 		return MDB_BAD_TXN;
 
-	if (key->mv_size == 0 || key->mv_size > MDB_MAXKEYSIZE) {
+	if (key->mv_size > MDB_MAXKEYSIZE) {
 		return MDB_BAD_VALSIZE;
 	}
 
@@ -5107,7 +5103,8 @@ mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 
 	assert(mc);
 	assert(key);
-	assert(key->mv_size > 0);
+	if (key->mv_size == 0)
+		return MDB_BAD_VALSIZE;
 
 	if (mc->mc_xcursor)
 		mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
@@ -5431,7 +5428,7 @@ mdb_cursor_get(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	case MDB_SET_RANGE:
 		if (key == NULL) {
 			rc = EINVAL;
-		} else if (key->mv_size == 0 || key->mv_size > MDB_MAXKEYSIZE) {
+		} else if (key->mv_size > MDB_MAXKEYSIZE) {
 			rc = MDB_BAD_VALSIZE;
 		} else if (op == MDB_SET_RANGE)
 			rc = mdb_cursor_set(mc, key, data, op, NULL);
@@ -6051,7 +6048,6 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 
 	if (!(flags & MDB_NOSPILL) && (rc = mdb_page_spill(mc, NULL, NULL)))
 		return rc;
-	flags &= ~MDB_NOSPILL; /* TODO: Or change (flags != MDB_NODUPDATA) to ~(flags & MDB_NODUPDATA), not looking at the logic of that code just now */
 
 	rc = mdb_cursor_touch(mc);
 	if (rc)
@@ -7301,7 +7297,7 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 	if (txn->mt_flags & (MDB_TXN_RDONLY|MDB_TXN_ERROR))
 		return (txn->mt_flags & MDB_TXN_RDONLY) ? EACCES : MDB_BAD_TXN;
 
-	if (key->mv_size == 0 || key->mv_size > MDB_MAXKEYSIZE) {
+	if (key->mv_size > MDB_MAXKEYSIZE) {
 		return MDB_BAD_VALSIZE;
 	}
 
@@ -7764,13 +7760,6 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 
 	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
 		return EINVAL;
-
-	if (txn->mt_flags & (MDB_TXN_RDONLY|MDB_TXN_ERROR))
-		return (txn->mt_flags & MDB_TXN_RDONLY) ? EACCES : MDB_BAD_TXN;
-
-	if (key->mv_size == 0 || key->mv_size > MDB_MAXKEYSIZE) {
-		return MDB_BAD_VALSIZE;
-	}
 
 	if ((flags & (MDB_NOOVERWRITE|MDB_NODUPDATA|MDB_RESERVE|MDB_APPEND|MDB_APPENDDUP)) != flags)
 		return EINVAL;
