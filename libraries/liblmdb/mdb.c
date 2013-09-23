@@ -892,7 +892,11 @@ struct MDB_txn {
 #define MDB_TXN_SPILLS		0x08		/**< txn or a parent has spilled pages */
 /** @} */
 	unsigned int	mt_flags;		/**< @ref mdb_txn */
-	/** dirty_list maxsize - # of allocated pages allowed, including in parent txns */
+	/** dirty_list room: Array size - #dirty pages visible to this txn.
+	 *	Includes ancestor txns' dirty pages not hidden by other txns'
+	 *	dirty/spilled pages. Thus commit(nested txn) has room to merge
+	 *	dirty_list into mt_parent after freeing hidden mt_parent pages.
+	 */
 	unsigned int	mt_dirty_room;
 	/** Tracks which of the two meta pages was used at the start
 	 * 	of this transaction.
@@ -1560,31 +1564,7 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 	rc = mdb_pages_xkeep(m0, P_DIRTY|P_KEEP, i);
 
 done:
-	if (rc == 0) {
-		if (txn->mt_parent) {
-			txn->mt_dirty_room = txn->mt_parent->mt_dirty_room - dl[0].mid;
-			/* dirty pages that are dirty in an ancestor don't
-			 * count against this txn's dirty_room.
-			 */
-			for (i=1; i<=dl[0].mid; i++) {
-				pgno_t pgno = dl[i].mid;
-				MDB_txn *tx2;
-				for (tx2 = txn->mt_parent; tx2; tx2 = tx2->mt_parent) {
-					j = mdb_mid2l_search(tx2->mt_u.dirty_list, pgno);
-					if (j <= tx2->mt_u.dirty_list[0].mid &&
-						tx2->mt_u.dirty_list[j].mid == pgno) {
-						txn->mt_dirty_room++;
-						break;
-					}
-				}
-			}
-		} else {
-			txn->mt_dirty_room = MDB_IDL_UM_MAX - dl[0].mid;
-		}
-		txn->mt_flags |= MDB_TXN_SPILLS;
-	} else {
-		txn->mt_flags |= MDB_TXN_ERROR;
-	}
+	txn->mt_flags |= rc ? MDB_TXN_ERROR : MDB_TXN_SPILLS;
 	return rc;
 }
 
@@ -1829,6 +1809,8 @@ mdb_page_unspill(MDB_txn *tx0, MDB_page *mp, MDB_page **ret)
 		if (x <= txn->mt_spill_pgs[0] && txn->mt_spill_pgs[x] == pn) {
 			MDB_page *np;
 			int num;
+			if (txn->mt_dirty_room == 0)
+				return MDB_TXN_FULL;
 			if (IS_OVERFLOW(mp))
 				num = mp->mp_pages;
 			else
@@ -1857,21 +1839,6 @@ mdb_page_unspill(MDB_txn *tx0, MDB_page *mp, MDB_page **ret)
 				 * page remains spilled until child commits
 				 */
 
-			if (txn->mt_parent) {
-				MDB_txn *tx2;
-				/* If this page is also in a parent's dirty list, then
-				 * it's already accounted in dirty_room, and we need to
-				 * cancel out the decrement that mdb_page_dirty does.
-				 */
-				for (tx2 = txn->mt_parent; tx2; tx2 = tx2->mt_parent) {
-					x = mdb_mid2l_search(tx2->mt_u.dirty_list, pgno);
-					if (x <= tx2->mt_u.dirty_list[0].mid &&
-						tx2->mt_u.dirty_list[x].mid == pgno) {
-						tx0->mt_dirty_room++;
-						break;
-					}
-				}
-			}
 			mdb_page_dirty(tx0, np);
 			np->mp_flags |= P_DIRTY;
 			*ret = np;
@@ -2674,8 +2641,7 @@ mdb_page_flush(MDB_txn *txn, int keep)
 			}
 			dp->mp_flags &= ~P_DIRTY;
 		}
-		dl[0].mid = j;
-		return MDB_SUCCESS;
+		goto done;
 	}
 
 	/* Write the pages */
@@ -2769,8 +2735,11 @@ mdb_page_flush(MDB_txn *txn, int keep)
 		}
 		mdb_dpage_free(env, dp);
 	}
-	dl[0].mid = j;
 
+done:
+	i--;
+	txn->mt_dirty_room += i - j;
+	dl[0].mid = j;
 	return MDB_SUCCESS;
 }
 
