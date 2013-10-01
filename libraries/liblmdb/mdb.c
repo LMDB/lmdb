@@ -3983,7 +3983,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 		goto leave;
 	}
 
-	if (F_ISSET(flags, MDB_RDONLY)) {
+	if ((flags & (MDB_RDONLY|MDB_NORDLOCK)) == MDB_RDONLY) {
 		rc = mdb_env_setup_locks(env, lpath, mode, &excl);
 		if (rc)
 			goto leave;

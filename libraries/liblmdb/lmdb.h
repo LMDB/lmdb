@@ -269,6 +269,8 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
 #define MDB_MAPASYNC		0x100000
 	/** tie reader locktable slots to #MDB_txn objects instead of to threads */
 #define MDB_NOTLS		0x200000
+	/** don't use reader locktable at all, caller must manage read/write concurrency */
+#define MDB_NORDLOCK		0x400000
 /** @} */
 
 /**	@defgroup	mdb_dbi_open	Database Flags
