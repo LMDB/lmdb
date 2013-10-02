@@ -265,11 +265,11 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
 #define MDB_NOMETASYNC		0x40000
 	/** use writable mmap */
 #define MDB_WRITEMAP		0x80000
-	/** use asynchronous msync when MDB_WRITEMAP is used */
+	/** use asynchronous msync when #MDB_WRITEMAP is used */
 #define MDB_MAPASYNC		0x100000
 	/** tie reader locktable slots to #MDB_txn objects instead of to threads */
 #define MDB_NOTLS		0x200000
-	/** don't use reader locktable at all, caller must manage read/write concurrency */
+	/** for #MDB_RDONLY env, don't use reader locktable, caller must manage read/write concurrency */
 #define MDB_NORDLOCK		0x400000
 /** @} */
 
@@ -527,6 +527,11 @@ int  mdb_env_create(MDB_env **env);
 	 *		user threads over individual OS threads need this option. Such an
 	 *		application must also serialize the write transactions in an OS
 	 *		thread, since MDB's write locking is unaware of the user threads.
+	 *	<li>#MDB_NORDLOCK
+	 *		Don't use the reader locktable at all. This flag is only valid
+	 *		with #MDB_RDONLY. MDB will use no read locks. If other processes
+	 *		may be opening the environment with write access, the callers
+	 *		must manage read/write locks themselves.
 	 * </ul>
 	 * @param[in] mode The UNIX permissions to set on created files. This parameter
 	 * is ignored on Windows.
