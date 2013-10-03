@@ -8258,7 +8258,7 @@ static int mdb_pid_insert(pid_t *ids, pid_t pid)
 			return -1;
 		}
 	}
-	
+
 	if( val > 0 ) {
 		++cursor;
 	}

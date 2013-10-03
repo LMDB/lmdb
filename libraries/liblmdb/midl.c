@@ -59,7 +59,7 @@ unsigned mdb_midl_search( MDB_IDL ids, MDB_ID id )
 			return cursor;
 		}
 	}
-	
+
 	if( val > 0 ) {
 		++cursor;
 	}
@@ -89,7 +89,7 @@ int mdb_midl_insert( MDB_IDL ids, MDB_ID id )
 		/* no room */
 		--ids[0];
 		return -2;
-	
+
 	} else {
 		/* insert id */
 		for (i=ids[0]; i>x; i--)

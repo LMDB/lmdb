@@ -199,7 +199,7 @@ int main(int argc, char *argv[])
 		printf("mdb_open failed, error %d %s\n", rc, mdb_strerror(rc));
 		goto txn_abort;
 	}
-   
+
 	rc = mdb_stat(txn, dbi, &mst);
 	if (rc) {
 		printf("mdb_stat failed, error %d %s\n", rc, mdb_strerror(rc));

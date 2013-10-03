@@ -66,6 +66,10 @@
  *	  BSD systems or when otherwise configured with MDB_USE_POSIX_SEM.
  *	  Multiple users can cause startup to fail later, as noted above.
  *
+ *	- There is normally no pure read-only mode, since readers need write
+ *	  access to locks and lock file. Exceptions: On read-only filesystems
+ *	  or with the #MDB_NOLOCK flag described under #mdb_env_open().
+ *
  *	- A thread can only use one transaction at a time, plus any child
  *	  transactions.  Each transaction belongs to one thread.  See below.
  *	  The #MDB_NOTLS flag changes this for read-only transactions.
@@ -489,7 +493,7 @@ int  mdb_env_create(MDB_env **env);
 	 *		like wild pointer writes and other bad updates into the database.
 	 *		Incompatible with nested transactions.
 	 *		Processes with and without MDB_WRITEMAP on the same environment do
-	 *		not cooperate well. 
+	 *		not cooperate well.
 	 *	<li>#MDB_NOMETASYNC
 	 *		Flush system buffers to disk only once per transaction, omit the
 	 *		metadata flush. Defer that until the system flushes files to disk,
