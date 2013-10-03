@@ -872,7 +872,7 @@ struct MDB_txn {
  *	@ingroup internal
  * @{
  */
-#define DB_DIRTY	0x01		/**< DB was written in this txn */
+#define DB_DIRTY	0x01		/**< DB was modified or is DUPSORT data */
 #define DB_STALE	0x02		/**< Named-DB record is older than txnID */
 #define DB_NEW		0x04		/**< Named-DB handle opened in this txn */
 #define DB_VALID	0x08		/**< DB handle is valid, see also #MDB_VALID */
@@ -6466,6 +6466,8 @@ mdb_xcursor_init0(MDB_cursor *mc)
 	mx->mx_cursor.mc_snum = 0;
 	mx->mx_cursor.mc_top = 0;
 	mx->mx_cursor.mc_flags = C_SUB;
+	mx->mx_dbx.md_name.mv_size = 0;
+	mx->mx_dbx.md_name.mv_data = NULL;
 	mx->mx_dbx.md_cmp = mc->mc_dbx->md_dcmp;
 	mx->mx_dbx.md_dcmp = NULL;
 	mx->mx_dbx.md_rel = mc->mc_dbx->md_rel;
@@ -6511,10 +6513,7 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
 	}
 	DPRINTF(("Sub-db -%u root page %"Z"u", mx->mx_cursor.mc_dbi,
 		mx->mx_db.md_root));
-	mx->mx_dbflag = DB_VALID | (F_ISSET(mc->mc_pg[mc->mc_top]->mp_flags, P_DIRTY) ?
-		DB_DIRTY : 0);
-	mx->mx_dbx.md_name.mv_data = NODEKEY(node);
-	mx->mx_dbx.md_name.mv_size = node->mn_ksize;
+	mx->mx_dbflag = DB_VALID|DB_DIRTY; /* DB_DIRTY guides mdb_cursor_touch */
 #if UINT_MAX < SIZE_MAX
 	if (mx->mx_dbx.md_cmp == mdb_cmp_int && mx->mx_db.md_pad == sizeof(size_t))
 #ifdef MISALIGNED_OK
