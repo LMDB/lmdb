@@ -317,6 +317,9 @@ static txnid_t mdb_debug_start;
 	 *	The string is printed literally, with no format processing.
 	 */
 #define DPUTS(arg)	DPRINTF(("%s", arg))
+	/** Debuging output value of a cursor DBI: Negative in a sub-cursor. */
+#define DDBI(mc) \
+	(((mc)->mc_flags & C_SUB) ? -(int)(mc)->mc_dbi : (int)(mc)->mc_dbi)
 /** @} */
 
 	/** A default memory page size.
@@ -1859,7 +1862,6 @@ mdb_page_touch(MDB_cursor *mc)
 	MDB_page *mp = mc->mc_pg[mc->mc_top], *np;
 	MDB_txn *txn = mc->mc_txn;
 	MDB_cursor *m2, *m3;
-	MDB_dbi dbi;
 	pgno_t	pgno;
 	int rc;
 
@@ -1876,7 +1878,8 @@ mdb_page_touch(MDB_cursor *mc)
 			(rc = mdb_page_alloc(mc, 1, &np)))
 			return rc;
 		pgno = np->mp_pgno;
-		DPRINTF(("touched db %u page %"Z"u -> %"Z"u", mc->mc_dbi,mp->mp_pgno,pgno));
+		DPRINTF(("touched db %d page %"Z"u -> %"Z"u", DDBI(mc),
+			mp->mp_pgno, pgno));
 		assert(mp->mp_pgno != pgno);
 		mdb_midl_xappend(txn->mt_free_pgs, mp->mp_pgno);
 		/* Update the parent page, if any, to point to the new page */
@@ -1922,17 +1925,16 @@ mdb_page_touch(MDB_cursor *mc)
 done:
 	/* Adjust cursors pointing to mp */
 	mc->mc_pg[mc->mc_top] = np;
-	dbi = mc->mc_dbi;
+	m2 = txn->mt_cursors[mc->mc_dbi];
 	if (mc->mc_flags & C_SUB) {
-		dbi--;
-		for (m2 = txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
+		for (; m2; m2=m2->mc_next) {
 			m3 = &m2->mc_xcursor->mx_cursor;
 			if (m3->mc_snum < mc->mc_snum) continue;
 			if (m3->mc_pg[mc->mc_top] == mp)
 				m3->mc_pg[mc->mc_top] = np;
 		}
 	} else {
-		for (m2 = txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
+		for (; m2; m2=m2->mc_next) {
 			if (m2->mc_snum < mc->mc_snum) continue;
 			if (m2->mc_pg[mc->mc_top] == mp) {
 				m2->mc_pg[mc->mc_top] = np;
@@ -4502,8 +4504,8 @@ mdb_cursor_pop(MDB_cursor *mc)
 		if (mc->mc_snum)
 			mc->mc_top--;
 
-		DPRINTF(("popped page %"Z"u off db %u cursor %p", top->mp_pgno,
-			mc->mc_dbi, (void *) mc));
+		DPRINTF(("popped page %"Z"u off db %d cursor %p", top->mp_pgno,
+			DDBI(mc), (void *) mc));
 	}
 }
 
@@ -4511,8 +4513,8 @@ mdb_cursor_pop(MDB_cursor *mc)
 static int
 mdb_cursor_push(MDB_cursor *mc, MDB_page *mp)
 {
-	DPRINTF(("pushing page %"Z"u on db %u cursor %p", mp->mp_pgno,
-		mc->mc_dbi, (void *) mc));
+	DPRINTF(("pushing page %"Z"u on db %d cursor %p", mp->mp_pgno,
+		DDBI(mc), (void *) mc));
 
 	if (mc->mc_snum >= CURSOR_STACK) {
 		assert(mc->mc_snum < CURSOR_STACK);
@@ -4745,8 +4747,8 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int flags)
 	mc->mc_snum = 1;
 	mc->mc_top = 0;
 
-	DPRINTF(("db %u root page %"Z"u has flags 0x%X",
-		mc->mc_dbi, root, mc->mc_pg[0]->mp_flags));
+	DPRINTF(("db %d root page %"Z"u has flags 0x%X",
+		DDBI(mc), root, mc->mc_pg[0]->mp_flags));
 
 	if (flags & MDB_PS_MODIFY) {
 		if ((rc = mdb_page_touch(mc)))
@@ -5620,8 +5622,8 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 		return MDB_BAD_VALSIZE;
 #endif
 
-	DPRINTF(("==> put db %u key [%s], size %"Z"u, data size %"Z"u",
-		mc->mc_dbi, DKEY(key), key ? key->mv_size:0, data->mv_size));
+	DPRINTF(("==> put db %d key [%s], size %"Z"u, data size %"Z"u",
+		DDBI(mc), DKEY(key), key ? key->mv_size : 0, data->mv_size));
 
 	dkey.mv_size = 0;
 
@@ -5949,9 +5951,6 @@ new_sub:
 			MDB_dbi dbi = mc->mc_dbi;
 			unsigned i = mc->mc_top;
 			MDB_page *mp = mc->mc_pg[i];
-
-			if (mc->mc_flags & C_SUB)
-				dbi--;
 
 			for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
 				if (mc->mc_flags & C_SUB)
@@ -6462,7 +6461,7 @@ mdb_xcursor_init0(MDB_cursor *mc)
 	mx->mx_cursor.mc_txn = mc->mc_txn;
 	mx->mx_cursor.mc_db = &mx->mx_db;
 	mx->mx_cursor.mc_dbx = &mx->mx_dbx;
-	mx->mx_cursor.mc_dbi = mc->mc_dbi+1;
+	mx->mx_cursor.mc_dbi = mc->mc_dbi;
 	mx->mx_cursor.mc_dbflag = &mx->mx_dbflag;
 	mx->mx_cursor.mc_snum = 0;
 	mx->mx_cursor.mc_top = 0;
@@ -6510,7 +6509,7 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
 				mx->mx_db.md_flags |= MDB_INTEGERKEY;
 		}
 	}
-	DPRINTF(("Sub-db %u for db %u root page %"Z"u", mx->mx_cursor.mc_dbi, mc->mc_dbi,
+	DPRINTF(("Sub-db -%u root page %"Z"u", mx->mx_cursor.mc_dbi,
 		mx->mx_db.md_root));
 	mx->mx_dbflag = DB_VALID | (F_ISSET(mc->mc_pg[mc->mc_top]->mp_flags, P_DIRTY) ?
 		DB_DIRTY : 0);
@@ -6831,9 +6830,6 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 		MDB_dbi dbi = csrc->mc_dbi;
 		MDB_page *mp = csrc->mc_pg[csrc->mc_top];
 
-		if (csrc->mc_flags & C_SUB)
-			dbi--;
-
 		for (m2 = csrc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
 			if (csrc->mc_flags & C_SUB)
 				m3 = &m2->mc_xcursor->mx_cursor;
@@ -7008,9 +7004,6 @@ mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst)
 		MDB_dbi dbi = csrc->mc_dbi;
 		MDB_page *mp = cdst->mc_pg[cdst->mc_top];
 
-		if (csrc->mc_flags & C_SUB)
-			dbi--;
-
 		for (m2 = csrc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
 			if (csrc->mc_flags & C_SUB)
 				m3 = &m2->mc_xcursor->mx_cursor;
@@ -7109,9 +7102,6 @@ mdb_rebalance(MDB_cursor *mc)
 				MDB_cursor *m2, *m3;
 				MDB_dbi dbi = mc->mc_dbi;
 
-				if (mc->mc_flags & C_SUB)
-					dbi--;
-
 				for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
 					if (mc->mc_flags & C_SUB)
 						m3 = &m2->mc_xcursor->mx_cursor;
@@ -7140,9 +7130,6 @@ mdb_rebalance(MDB_cursor *mc)
 				/* Adjust other cursors pointing to mp */
 				MDB_cursor *m2, *m3;
 				MDB_dbi dbi = mc->mc_dbi;
-
-				if (mc->mc_flags & C_SUB)
-					dbi--;
 
 				for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
 					if (mc->mc_flags & C_SUB)
@@ -7711,9 +7698,6 @@ done:
 		MDB_cursor *m2, *m3;
 		MDB_dbi dbi = mc->mc_dbi;
 		int fixup = NUMKEYS(mp);
-
-		if (mc->mc_flags & C_SUB)
-			dbi--;
 
 		for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
 			if (mc->mc_flags & C_SUB)
