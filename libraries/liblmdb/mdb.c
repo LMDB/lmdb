@@ -425,7 +425,8 @@ typedef uint16_t	 indx_t;
  *
  *	If #MDB_NOTLS is set, the slot address is not saved in thread-specific data.
  *
- *	No reader table is used if the database is on a read-only filesystem.
+ *	No reader table is used if the database is on a read-only filesystem, or
+ *	if #MDB_NOLOCK is set.
  *
  *	Since the database uses multi-version concurrency control, readers don't
  *	actually need any locking. This table is used to keep track of which
@@ -1572,12 +1573,14 @@ mdb_find_oldest(MDB_txn *txn)
 {
 	int i;
 	txnid_t mr, oldest = txn->mt_txnid - 1;
-	MDB_reader *r = txn->mt_env->me_txns->mti_readers;
-	for (i = txn->mt_env->me_txns->mti_numreaders; --i >= 0; ) {
-		if (r[i].mr_pid) {
-			mr = r[i].mr_txnid;
-			if (oldest > mr)
-				oldest = mr;
+	if (txn->mt_env->me_txns) {
+		MDB_reader *r = txn->mt_env->me_txns->mti_readers;
+		for (i = txn->mt_env->me_txns->mti_numreaders; --i >= 0; ) {
+			if (r[i].mr_pid) {
+				mr = r[i].mr_txnid;
+				if (oldest > mr)
+					oldest = mr;
+			}
 		}
 	}
 	return oldest;
@@ -2174,10 +2177,15 @@ mdb_txn_renew0(MDB_txn *txn)
 			meta = env->me_metas[txn->mt_txnid & 1];
 		}
 	} else {
-		LOCK_MUTEX_W(env);
+		if (env->me_txns) {
+			LOCK_MUTEX_W(env);
 
-		txn->mt_txnid = env->me_txns->mti_txnid;
-		meta = env->me_metas[txn->mt_txnid & 1];
+			txn->mt_txnid = env->me_txns->mti_txnid;
+			meta = env->me_metas[txn->mt_txnid & 1];
+		} else {
+			meta = env->me_metas[ mdb_env_pick_meta(env) ];
+			txn->mt_txnid = meta->mm_txnid;
+		}
 		txn->mt_txnid++;
 #if MDB_DEBUG
 		if (txn->mt_txnid == mdb_debug_start)
@@ -2417,7 +2425,8 @@ mdb_txn_reset0(MDB_txn *txn, const char *act)
 
 		env->me_txn = NULL;
 		/* The writer mutex was locked in mdb_txn_begin. */
-		UNLOCK_MUTEX_W(env);
+		if (env->me_txns)
+			UNLOCK_MUTEX_W(env);
 	}
 }
 
@@ -2934,7 +2943,8 @@ done:
 	env->me_txn = NULL;
 	mdb_dbis_update(txn, 1);
 
-	UNLOCK_MUTEX_W(env);
+	if (env->me_txns)
+		UNLOCK_MUTEX_W(env);
 	free(txn);
 
 	return MDB_SUCCESS;
@@ -3180,7 +3190,8 @@ done:
 	 * readers will get consistent data regardless of how fresh or
 	 * how stale their view of these values is.
 	 */
-	env->me_txns->mti_txnid = txn->mt_txnid;
+	if (env->me_txns)
+		env->me_txns->mti_txnid = txn->mt_txnid;
 
 	return MDB_SUCCESS;
 }
@@ -3900,7 +3911,7 @@ fail:
 	 *	environment and re-opening it with the new flags.
 	 */
 #define	CHANGEABLE	(MDB_NOSYNC|MDB_NOMETASYNC|MDB_MAPASYNC)
-#define	CHANGELESS	(MDB_FIXEDMAP|MDB_NOSUBDIR|MDB_RDONLY|MDB_WRITEMAP|MDB_NOTLS|MDB_NORDLOCK)
+#define	CHANGELESS	(MDB_FIXEDMAP|MDB_NOSUBDIR|MDB_RDONLY|MDB_WRITEMAP|MDB_NOTLS|MDB_NOLOCK)
 
 int
 mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode)
@@ -3953,7 +3964,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 	}
 
 	/* For RDONLY, get lockfile after we know datafile exists */
-	if (!F_ISSET(flags, MDB_RDONLY)) {
+	if (!(flags & (MDB_RDONLY|MDB_NOLOCK))) {
 		rc = mdb_env_setup_locks(env, lpath, mode, &excl);
 		if (rc)
 			goto leave;
@@ -3983,7 +3994,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 		goto leave;
 	}
 
-	if ((flags & (MDB_RDONLY|MDB_NORDLOCK)) == MDB_RDONLY) {
+	if ((flags & (MDB_RDONLY|MDB_NOLOCK)) == MDB_RDONLY) {
 		rc = mdb_env_setup_locks(env, lpath, mode, &excl);
 		if (rc)
 			goto leave;

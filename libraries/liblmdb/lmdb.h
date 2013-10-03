@@ -269,8 +269,8 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
 #define MDB_MAPASYNC		0x100000
 	/** tie reader locktable slots to #MDB_txn objects instead of to threads */
 #define MDB_NOTLS		0x200000
-	/** for #MDB_RDONLY env, don't use reader locktable, caller must manage read/write concurrency */
-#define MDB_NORDLOCK		0x400000
+	/** don't do any locking, caller must manage their own locks */
+#define MDB_NOLOCK		0x400000
 /** @} */
 
 /**	@defgroup	mdb_dbi_open	Database Flags
@@ -527,11 +527,13 @@ int  mdb_env_create(MDB_env **env);
 	 *		user threads over individual OS threads need this option. Such an
 	 *		application must also serialize the write transactions in an OS
 	 *		thread, since MDB's write locking is unaware of the user threads.
-	 *	<li>#MDB_NORDLOCK
-	 *		Don't use the reader locktable at all. This flag is only valid
-	 *		with #MDB_RDONLY. MDB will use no read locks. If other processes
-	 *		may be opening the environment with write access, the callers
-	 *		must manage read/write locks themselves.
+	 *	<li>#MDB_NOLOCK
+	 *		Don't do any locking. If concurrent access is anticipated, the
+	 *		caller must manage all concurrency itself. For proper operation
+	 *		the caller must enforce single-writer semantics, and must ensure
+	 *		that no readers are using old transactions while a writer is
+	 *		active. The simplest approach is to use an exclusive lock so that
+	 *		no readers may be active at all when a writer begins.
 	 * </ul>
 	 * @param[in] mode The UNIX permissions to set on created files. This parameter
 	 * is ignored on Windows.
