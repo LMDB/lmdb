@@ -5553,14 +5553,14 @@ fetchm:
 	return rc;
 }
 
-/** Touch all the pages in the cursor stack.
+/** Touch all the pages in the cursor stack. Set mc_top.
  *	Makes sure all the pages are writable, before attempting a write operation.
  * @param[in] mc The cursor to operate on.
  */
 static int
 mdb_cursor_touch(MDB_cursor *mc)
 {
-	int rc;
+	int rc = MDB_SUCCESS;
 
 	if (mc->mc_dbi > MAIN_DBI && !(*mc->mc_dbflag & DB_DIRTY)) {
 		MDB_cursor mc2;
@@ -5571,13 +5571,14 @@ mdb_cursor_touch(MDB_cursor *mc)
 			 return rc;
 		*mc->mc_dbflag |= DB_DIRTY;
 	}
-	for (mc->mc_top = 0; mc->mc_top < mc->mc_snum; mc->mc_top++) {
-		rc = mdb_page_touch(mc);
-		if (rc)
-			return rc;
+	mc->mc_top = 0;
+	if (mc->mc_snum) {
+		do {
+			rc = mdb_page_touch(mc);
+		} while (!rc && ++(mc->mc_top) < mc->mc_snum);
+		mc->mc_top = mc->mc_snum-1;
 	}
-	mc->mc_top = mc->mc_snum-1;
-	return MDB_SUCCESS;
+	return rc;
 }
 
 /** Do not spill pages to disk if txn is getting full, may fail instead */
@@ -5640,6 +5641,7 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	} else if (mc->mc_db->md_root == P_INVALID) {
 		/* new database, cursor has nothing to point to */
 		mc->mc_snum = 0;
+		mc->mc_top = 0;
 		mc->mc_flags &= ~C_INITIALIZED;
 		rc = MDB_NO_ROOT;
 	} else {
@@ -6499,6 +6501,7 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
 		memcpy(&mx->mx_db, NODEDATA(node), sizeof(MDB_db));
 		mx->mx_cursor.mc_pg[0] = 0;
 		mx->mx_cursor.mc_snum = 0;
+		mx->mx_cursor.mc_top = 0;
 		mx->mx_cursor.mc_flags = C_SUB;
 	} else {
 		MDB_page *fp = NODEDATA(node);
@@ -6511,8 +6514,8 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
 		mx->mx_db.md_entries = NUMKEYS(fp);
 		COPY_PGNO(mx->mx_db.md_root, fp->mp_pgno);
 		mx->mx_cursor.mc_snum = 1;
-		mx->mx_cursor.mc_flags = C_INITIALIZED|C_SUB;
 		mx->mx_cursor.mc_top = 0;
+		mx->mx_cursor.mc_flags = C_INITIALIZED|C_SUB;
 		mx->mx_cursor.mc_pg[0] = fp;
 		mx->mx_cursor.mc_ki[0] = 0;
 		if (mc->mc_db->md_flags & MDB_DUPFIXED) {
