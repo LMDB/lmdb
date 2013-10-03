@@ -6221,6 +6221,7 @@ mdb_node_add(MDB_cursor *mc, indx_t indx,
 {
 	unsigned int	 i;
 	size_t		 node_size = NODESIZE;
+	ssize_t		 room;
 	indx_t		 ofs;
 	MDB_node	*node;
 	MDB_page	*mp = mc->mc_pg[mc->mc_top];
@@ -6251,9 +6252,9 @@ mdb_node_add(MDB_cursor *mc, indx_t indx,
 		return MDB_SUCCESS;
 	}
 
+	room = (ssize_t)SIZELEFT(mp) - (ssize_t)sizeof(indx_t);
 	if (key != NULL)
 		node_size += key->mv_size;
-
 	if (IS_LEAF(mp)) {
 		assert(data);
 		if (F_ISSET(flags, F_BIGDATA)) {
@@ -6265,26 +6266,23 @@ mdb_node_add(MDB_cursor *mc, indx_t indx,
 			/* Put data on overflow page. */
 			DPRINTF(("data size is %"Z"u, node would be %"Z"u, put data on overflow page",
 			    data->mv_size, node_size+data->mv_size));
-			node_size += sizeof(pgno_t);
+			node_size += sizeof(pgno_t) + (node_size & 1);
+			if ((ssize_t)node_size > room)
+				goto full;
 			if ((rc = mdb_page_new(mc, P_OVERFLOW, ovpages, &ofp)))
 				return rc;
 			DPRINTF(("allocated overflow page %"Z"u", ofp->mp_pgno));
 			flags |= F_BIGDATA;
+			goto update;
 		} else {
 			node_size += data->mv_size;
 		}
 	}
 	node_size += node_size & 1;
+	if ((ssize_t)node_size > room)
+		goto full;
 
-	if (node_size + sizeof(indx_t) > SIZELEFT(mp)) {
-		DPRINTF(("not enough room in page %"Z"u, got %u ptrs",
-		    mp->mp_pgno, NUMKEYS(mp)));
-		DPRINTF(("upper - lower = %u - %u = %u", mp->mp_upper, mp->mp_lower,
-		    mp->mp_upper - mp->mp_lower));
-		DPRINTF(("node size = %"Z"u", node_size));
-		return MDB_PAGE_FULL;
-	}
-
+update:
 	/* Move higher pointers up one slot. */
 	for (i = NUMKEYS(mp); i > indx; i--)
 		mp->mp_ptrs[i] = mp->mp_ptrs[i - 1];
@@ -6330,6 +6328,13 @@ mdb_node_add(MDB_cursor *mc, indx_t indx,
 	}
 
 	return MDB_SUCCESS;
+
+full:
+	DPRINTF(("not enough room in page %"Z"u, got %u ptrs",
+		mp->mp_pgno, NUMKEYS(mp)));
+	DPRINTF(("upper-lower = %u - %u = %"Z"d", mp->mp_upper,mp->mp_lower,room));
+	DPRINTF(("node size = %"Z"u", node_size));
+	return MDB_PAGE_FULL;
 }
 
 /** Delete the specified node from a page.
