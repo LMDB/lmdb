@@ -4942,8 +4942,11 @@ mdb_cursor_sibling(MDB_cursor *mc, int move_right)
 	assert(IS_BRANCH(mc->mc_pg[mc->mc_top]));
 
 	indx = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
-	if ((rc = mdb_page_get(mc->mc_txn, NODEPGNO(indx), &mp, NULL) != 0))
+	if ((rc = mdb_page_get(mc->mc_txn, NODEPGNO(indx), &mp, NULL)) != 0) {
+		/* mc will be inconsistent if caller does mc_snum++ as above */
+		mc->mc_flags &= ~(C_INITIALIZED|C_EOF);
 		return rc;
+	}
 
 	mdb_cursor_push(mc, mp);
 	if (!move_right)
