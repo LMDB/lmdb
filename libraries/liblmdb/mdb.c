@@ -2119,8 +2119,9 @@ static int
 mdb_txn_renew0(MDB_txn *txn)
 {
 	MDB_env *env = txn->mt_env;
+	MDB_txninfo *ti = env->me_txns;
 	MDB_meta *meta;
-	unsigned int i;
+	unsigned int i, nr;
 	uint16_t x;
 	int rc, new_notls = 0;
 
@@ -2129,7 +2130,7 @@ mdb_txn_renew0(MDB_txn *txn)
 	txn->mt_dbxs = env->me_dbxs;	/* mostly static anyway */
 
 	if (txn->mt_flags & MDB_TXN_RDONLY) {
-		if (!env->me_txns) {
+		if (!ti) {
 			meta = env->me_metas[ mdb_env_pick_meta(env) ];
 			txn->mt_txnid = meta->mm_txnid;
 			txn->mt_u.reader = NULL;
@@ -2153,36 +2154,38 @@ mdb_txn_renew0(MDB_txn *txn)
 				}
 
 				LOCK_MUTEX_R(env);
-				for (i=0; i<env->me_txns->mti_numreaders; i++)
-					if (env->me_txns->mti_readers[i].mr_pid == 0)
+				nr = ti->mti_numreaders;
+				for (i=0; i<nr; i++)
+					if (ti->mti_readers[i].mr_pid == 0)
 						break;
 				if (i == env->me_maxreaders) {
 					UNLOCK_MUTEX_R(env);
 					return MDB_READERS_FULL;
 				}
-				env->me_txns->mti_readers[i].mr_pid = pid;
-				env->me_txns->mti_readers[i].mr_tid = tid;
-				if (i >= env->me_txns->mti_numreaders)
-					env->me_txns->mti_numreaders = i+1;
+				ti->mti_readers[i].mr_pid = pid;
+				ti->mti_readers[i].mr_tid = tid;
+				if (i == nr)
+					ti->mti_numreaders = ++nr;
 				/* Save numreaders for un-mutexed mdb_env_close() */
-				env->me_numreaders = env->me_txns->mti_numreaders;
+				env->me_numreaders = nr;
 				UNLOCK_MUTEX_R(env);
-				r = &env->me_txns->mti_readers[i];
+
+				r = &ti->mti_readers[i];
 				new_notls = (env->me_flags & MDB_NOTLS);
 				if (!new_notls && (rc=pthread_setspecific(env->me_txkey, r))) {
 					r->mr_pid = 0;
 					return rc;
 				}
 			}
-			txn->mt_txnid = r->mr_txnid = env->me_txns->mti_txnid;
+			txn->mt_txnid = r->mr_txnid = ti->mti_txnid;
 			txn->mt_u.reader = r;
 			meta = env->me_metas[txn->mt_txnid & 1];
 		}
 	} else {
-		if (env->me_txns) {
+		if (ti) {
 			LOCK_MUTEX_W(env);
 
-			txn->mt_txnid = env->me_txns->mti_txnid;
+			txn->mt_txnid = ti->mti_txnid;
 			meta = env->me_metas[txn->mt_txnid & 1];
 		} else {
 			meta = env->me_metas[ mdb_env_pick_meta(env) ];
