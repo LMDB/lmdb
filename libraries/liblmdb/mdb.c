@@ -3319,6 +3319,14 @@ mdb_env_set_mapsize(MDB_env *env, size_t size)
 			return EINVAL;
 		if (!size)
 			size = env->me_metas[mdb_env_pick_meta(env)]->mm_mapsize;
+		else if (size < env->me_mapsize) {
+			/* If the configured size is smaller, make sure it's
+			 * still big enough. Silently round up to minimum if not.
+			 */
+			size_t minsize = (env->me_metas[mdb_env_pick_meta(env)]->mm_last_pg + 1) * env->me_psize;
+			if (size < minsize)
+				size = minsize;
+		}
 		munmap(env->me_map, env->me_mapsize);
 		env->me_mapsize = size;
 		old = (env->me_flags & MDB_FIXEDMAP) ? env->me_map : NULL;
