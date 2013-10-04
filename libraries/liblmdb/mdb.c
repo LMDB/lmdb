@@ -3272,7 +3272,7 @@ mdb_env_map(MDB_env *env, void *addr, int newsize)
 	int prot = PROT_READ;
 	if (flags & MDB_WRITEMAP) {
 		prot |= PROT_WRITE;
-		if (newsize && ftruncate(env->me_fd, env->me_mapsize) < 0)
+		if (ftruncate(env->me_fd, env->me_mapsize) < 0)
 			return ErrCode();
 	}
 	env->me_map = mmap(addr, env->me_mapsize, prot, MAP_SHARED,
