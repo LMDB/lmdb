@@ -67,6 +67,7 @@
 
 #if defined(__APPLE__) || defined (BSD)
 # define MDB_USE_POSIX_SEM	1
+# define MDB_USE_HASH		1
 # define MDB_FDATASYNC		fsync
 #elif defined(ANDROID)
 # define MDB_FDATASYNC		fsync
@@ -140,6 +141,7 @@
  *	@{
  */
 #ifdef _WIN32
+#define MDB_USE_HASH	1
 #define MDB_PIDLOCK	0
 #define pthread_t	DWORD
 #define pthread_mutex_t	HANDLE
@@ -3601,7 +3603,7 @@ mdb_env_excl_lock(MDB_env *env, int *excl)
 	return rc;
 }
 
-#if defined(_WIN32) || defined(MDB_USE_POSIX_SEM)
+#ifdef MDB_USE_HASH
 /*
  * hash_64 - 64 bit Fowler/Noll/Vo-0 FNV-1a hash code
  *
