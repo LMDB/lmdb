@@ -7119,6 +7119,7 @@ mdb_rebalance(MDB_cursor *mc)
 			/* Adjust cursors pointing to mp */
 			mc->mc_snum = 0;
 			mc->mc_top = 0;
+			mc->mc_flags &= ~C_INITIALIZED;
 			{
 				MDB_cursor *m2, *m3;
 				MDB_dbi dbi = mc->mc_dbi;
@@ -7132,6 +7133,7 @@ mdb_rebalance(MDB_cursor *mc)
 					if (m3->mc_pg[0] == mp) {
 						m3->mc_snum = 0;
 						m3->mc_top = 0;
+						m3->mc_flags &= ~C_INITIALIZED;
 					}
 				}
 			}
