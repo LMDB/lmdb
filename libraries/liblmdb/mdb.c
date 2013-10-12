@@ -7379,13 +7379,13 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 	int		 rc = MDB_SUCCESS, new_root = 0, did_split = 0;
 	indx_t		 newindx;
 	pgno_t		 pgno = 0;
-	unsigned int	 i, j, split_indx, nkeys, pmax;
+	int	 i, j, split_indx, nkeys, pmax;
 	MDB_env 	*env = mc->mc_txn->mt_env;
 	MDB_node	*node;
 	MDB_val	 sepkey, rkey, xdata, *rdata = &xdata;
-	MDB_page	*copy;
+	MDB_page	*copy = NULL;
 	MDB_page	*mp, *rp, *pp;
-	unsigned int ptop;
+	int ptop;
 	MDB_cursor	mn;
 	DKBUF;
 
@@ -7487,8 +7487,7 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 				mc->mc_pg[mc->mc_top] = rp;
 			}
 		} else {
-			unsigned int psize, nsize;
-			int k;
+			int psize, nsize, k;
 			/* Maximum free space in an empty page */
 			pmax = env->me_psize - PAGEHDRSZ;
 			if (IS_LEAF(mp))
