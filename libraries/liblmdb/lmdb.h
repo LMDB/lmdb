@@ -275,6 +275,8 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
 #define MDB_NOTLS		0x200000
 	/** don't do any locking, caller must manage their own locks */
 #define MDB_NOLOCK		0x400000
+	/** don't do readahead (no effect on Windows) */
+#define MDB_NORDAHEAD	0x800000
 /** @} */
 
 /**	@defgroup	mdb_dbi_open	Database Flags
@@ -538,6 +540,12 @@ int  mdb_env_create(MDB_env **env);
 	 *		that no readers are using old transactions while a writer is
 	 *		active. The simplest approach is to use an exclusive lock so that
 	 *		no readers may be active at all when a writer begins.
+	 *	<li>#MDB_NORDAHEAD
+	 *		Turn off readahead. Most operating systems perform readahead on
+	 *		read requests by default. This option turns it off if the OS
+	 *		supports it. Turning it off may help random read performance
+	 *		when the DB is larger than RAM and system RAM is full.
+	 *		The option is not implemented on Windows.
 	 * </ul>
 	 * @param[in] mode The UNIX permissions to set on created files. This parameter
 	 * is ignored on Windows.
