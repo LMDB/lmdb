@@ -7487,7 +7487,7 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 				mc->mc_pg[mc->mc_top] = rp;
 			}
 		} else {
-			unsigned int psize, nsize, tsize;
+			unsigned int psize, nsize;
 			int k;
 			/* Maximum free space in an empty page */
 			pmax = env->me_psize - PAGEHDRSZ;
@@ -7541,24 +7541,23 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 				}
 				for (; i!=k; i+=j) {
 					if (i == newindx) {
-						tsize = nsize;
+						psize += nsize;
 						node = NULL;
 					} else {
 						node = (MDB_node *)((char *)mp + copy->mp_ptrs[i]);
-						tsize = NODESIZE + NODEKSZ(node) + sizeof(indx_t);
+						psize = NODESIZE + NODEKSZ(node) + sizeof(indx_t);
 						if (IS_LEAF(mp)) {
 							if (F_ISSET(node->mn_flags, F_BIGDATA))
-								tsize += sizeof(pgno_t);
+								psize += sizeof(pgno_t);
 							else
-								tsize += NODEDSZ(node);
+								psize += NODEDSZ(node);
 						}
-						tsize += tsize & 1;
+						psize += psize & 1;
 					}
-					if (psize + tsize > pmax) {
+					if (psize > pmax) {
 						split_indx = i + (j<0);
 						break;
 					}
-					psize += tsize;
 				}
 				/* special case: when the new node was on the last
 				 * slot we may not have tripped the break inside the loop.
