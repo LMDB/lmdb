@@ -7545,7 +7545,7 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 						node = NULL;
 					} else {
 						node = (MDB_node *)((char *)mp + copy->mp_ptrs[i]);
-						psize = NODESIZE + NODEKSZ(node) + sizeof(indx_t);
+						psize += NODESIZE + NODEKSZ(node) + sizeof(indx_t);
 						if (IS_LEAF(mp)) {
 							if (F_ISSET(node->mn_flags, F_BIGDATA))
 								psize += sizeof(pgno_t);
