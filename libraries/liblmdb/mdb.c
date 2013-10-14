@@ -67,7 +67,6 @@
 
 #if defined(__APPLE__) || defined (BSD)
 # define MDB_USE_POSIX_SEM	1
-# define MDB_USE_HASH		1
 # define MDB_FDATASYNC		fsync
 #elif defined(ANDROID)
 # define MDB_FDATASYNC		fsync
@@ -76,6 +75,7 @@
 #ifndef _WIN32
 #include <pthread.h>
 #ifdef MDB_USE_POSIX_SEM
+# define MDB_USE_HASH		1
 #include <semaphore.h>
 #endif
 #endif
