@@ -679,6 +679,18 @@ int  mdb_env_get_flags(MDB_env *env, unsigned int *flags);
 	 */
 int  mdb_env_get_path(MDB_env *env, const char **path);
 
+	/** @brief Return the filedescriptor for the given environment.
+	 *
+	 * @param[in] env An environment handle returned by #mdb_env_create()
+	 * @param[out] fd Address of a mdb_filehandle_t to contain the descriptor.
+	 * @return A non-zero error value on failure and 0 on success. Some possible
+	 * errors are:
+	 * <ul>
+	 *	<li>EINVAL - an invalid parameter was specified.
+	 * </ul>
+	 */
+int  mdb_env_get_fd(MDB_env *env, mdb_filehandle_t *fd);
+
 	/** @brief Set the size of the memory map to use for this environment.
 	 *
 	 * The size should be a multiple of the OS page size. The default is

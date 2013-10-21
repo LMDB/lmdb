@@ -7817,6 +7817,16 @@ mdb_env_get_path(MDB_env *env, const char **arg)
 	return MDB_SUCCESS;
 }
 
+int
+mdb_env_get_fd(MDB_env *env, mdb_filehandle_t *arg)
+{
+	if (!env || !arg)
+		return EINVAL;
+
+	*arg = env->me_fd;
+	return MDB_SUCCESS;
+}
+
 /** Common code for #mdb_stat() and #mdb_env_stat().
  * @param[in] env the environment to operate in.
  * @param[in] db the #MDB_db record containing the stats to return.
