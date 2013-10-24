@@ -1,5 +1,22 @@
 LMDB 0.9 Change Log
 
+LMDB 0.9.9 Release (2013/10/24)
+	Add mdb_env_get_fd()
+	Add MDB_NORDAHEAD option
+	Add MDB_NOLOCK option
+	Avoid wasting space in mdb_page_split() (ITS#7589)
+	Fix mdb_page_merge() cursor fixup (ITS#7722)
+	Fix mdb_cursor_del() on last delete (ITS#7718)
+	Fix adding WRITEMAP on existing env (ITS#7715)
+	Fixes for nested txns (ITS#7515)
+	Fix mdb_env_copy() O_DIRECT bug (ITS#7682)
+	Fix mdb_cursor_set(SET_RANGE) return code (ITS#7681)
+	Fix mdb_rebalance() cursor fixup (ITS#7701)
+	Misc code cleanup
+	Documentation
+		Note that by default, readers need write access
+
+
 LMDB 0.9.8 Release (2013/09/09)
 	Allow mdb_env_set_mapsize() on an open environment
 	Fix mdb_dbi_flags() (ITS#7672)
