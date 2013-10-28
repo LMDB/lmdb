@@ -5420,8 +5420,9 @@ mdb_cursor_get(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 			rc = EINVAL;
 		} else {
 			MDB_page *mp = mc->mc_pg[mc->mc_top];
-			if (!NUMKEYS(mp)) {
-				mc->mc_ki[mc->mc_top] = 0;
+			int nkeys = NUMKEYS(mp);
+			if (!nkeys || mc->mc_ki[mc->mc_top] >= nkeys) {
+				mc->mc_ki[mc->mc_top] = nkeys;
 				rc = MDB_NOTFOUND;
 				break;
 			}
@@ -6069,6 +6070,7 @@ int
 mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 {
 	MDB_node	*leaf;
+	MDB_page	*mp;
 	int rc;
 
 	if (mc->mc_txn->mt_flags & (MDB_TXN_RDONLY|MDB_TXN_ERROR))
@@ -6077,6 +6079,10 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 	if (!(mc->mc_flags & C_INITIALIZED))
 		return EINVAL;
 
+	mp = mc->mc_pg[mc->mc_top];
+	if (mc->mc_ki[mc->mc_top] >= NUMKEYS(mp))
+		return MDB_NOTFOUND;
+
 	if (!(flags & MDB_NOSPILL) && (rc = mdb_page_spill(mc, NULL, NULL)))
 		return rc;
 
@@ -6084,9 +6090,9 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 	if (rc)
 		return rc;
 
-	leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
+	leaf = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
 
-	if (!IS_LEAF2(mc->mc_pg[mc->mc_top]) && F_ISSET(leaf->mn_flags, F_DUPDATA)) {
+	if (!IS_LEAF2(mp) && F_ISSET(leaf->mn_flags, F_DUPDATA)) {
 		if (!(flags & MDB_NODUPDATA)) {
 			if (!F_ISSET(leaf->mn_flags, F_SUBDATA)) {
 				mc->mc_xcursor->mx_cursor.mc_pg[0] = NODEDATA(leaf);
