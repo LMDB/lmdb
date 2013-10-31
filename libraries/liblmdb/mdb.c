@@ -6079,8 +6079,7 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 	if (!(mc->mc_flags & C_INITIALIZED))
 		return EINVAL;
 
-	mp = mc->mc_pg[mc->mc_top];
-	if (mc->mc_ki[mc->mc_top] >= NUMKEYS(mp))
+	if (mc->mc_ki[mc->mc_top] >= NUMKEYS(mc->mc_pg[mc->mc_top]))
 		return MDB_NOTFOUND;
 
 	if (!(flags & MDB_NOSPILL) && (rc = mdb_page_spill(mc, NULL, NULL)))
@@ -6090,6 +6089,7 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 	if (rc)
 		return rc;
 
+	mp = mc->mc_pg[mc->mc_top];
 	leaf = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
 
 	if (!IS_LEAF2(mp) && F_ISSET(leaf->mn_flags, F_DUPDATA)) {
@@ -6107,13 +6107,13 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 				} else {
 					MDB_cursor *m2;
 					/* shrink fake page */
-					mdb_node_shrink(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
-					leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
+					mdb_node_shrink(mp, mc->mc_ki[mc->mc_top]);
+					leaf = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
 					mc->mc_xcursor->mx_cursor.mc_pg[0] = NODEDATA(leaf);
 					/* fix other sub-DB cursors pointed at this fake page */
 					for (m2 = mc->mc_txn->mt_cursors[mc->mc_dbi]; m2; m2=m2->mc_next) {
 						if (m2 == mc || m2->mc_snum < mc->mc_snum) continue;
-						if (m2->mc_pg[mc->mc_top] == mc->mc_pg[mc->mc_top] &&
+						if (m2->mc_pg[mc->mc_top] == mp &&
 							m2->mc_ki[mc->mc_top] == mc->mc_ki[mc->mc_top])
 							m2->mc_xcursor->mx_cursor.mc_pg[0] = NODEDATA(leaf);
 					}
