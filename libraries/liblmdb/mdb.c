@@ -7562,18 +7562,11 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 						}
 						psize += psize & 1;
 					}
-					if (psize > pmax) {
+					if (psize > pmax || i == k-j) {
 						split_indx = i + (j<0);
 						break;
 					}
 				}
-				/* special case: when the new node was on the last
-				 * slot we may not have tripped the break inside the loop.
-				 * In all other cases we either hit the break condition,
-				 * or the original split_indx was already safe.
-				 */
-				if (newindx >= nkeys && i == k)
-					split_indx = nkeys-1;
 			}
 			if (split_indx == newindx) {
 				sepkey.mv_size = newkey->mv_size;
