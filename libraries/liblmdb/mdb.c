@@ -7291,11 +7291,9 @@ mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
 
 		/* Adjust other cursors pointing to mp */
 		for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
-			if (m2 == mc)
+			if (m2 == mc || m2->mc_snum < mc->mc_snum)
 				continue;
 			if (!(m2->mc_flags & C_INITIALIZED))
-				continue;
-			if (m2->mc_top < mc->mc_top)
 				continue;
 			if (m2->mc_pg[mc->mc_top] == mp) {
 				if (m2->mc_ki[mc->mc_top] >= ki) {
