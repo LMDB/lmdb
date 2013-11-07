@@ -28,7 +28,7 @@ int main(int argc,char * argv[])
 	MDB_cursor *cursor, *cur2;
 	int count;
 	int *values;
-	char sval[32];
+	char sval[32] = "";
 
 	srandom(time(NULL));
 

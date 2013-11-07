@@ -70,6 +70,12 @@
  *	  access to locks and lock file. Exceptions: On read-only filesystems
  *	  or with the #MDB_NOLOCK flag described under #mdb_env_open().
  *
+ *	- By default, unused portions of the datafile may receive garbage data
+ *	  from memory freed by other code. (This does not happen when using
+ *	  the #MDB_WRITEMAP flag.) Applications handling sensitive data
+ *	  which must not be written, and which don't use #MDB_WRITEMAP,
+ *	  need to prevent this with the #MDB_CLEANMEM flag.
+ *
  *	- A thread can only use one transaction at a time, plus any child
  *	  transactions.  Each transaction belongs to one thread.  See below.
  *	  The #MDB_NOTLS flag changes this for read-only transactions.
@@ -277,6 +283,8 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
 #define MDB_NOLOCK		0x400000
 	/** don't do readahead (no effect on Windows) */
 #define MDB_NORDAHEAD	0x800000
+	/** don't write uninitialized malloc'd memory to datafile */
+#define MDB_CLEANMEM	0x1000000
 /** @} */
 
 /**	@defgroup	mdb_dbi_open	Database Flags
@@ -546,6 +554,22 @@ int  mdb_env_create(MDB_env **env);
 	 *		supports it. Turning it off may help random read performance
 	 *		when the DB is larger than RAM and system RAM is full.
 	 *		The option is not implemented on Windows.
+	 *	<li>#MDB_CLEANMEM
+	 *		Don't write uninitialized memory to unused spaces in the datafile.
+	 *		By default, memory for pages written to the datafile is obtained
+	 *		using malloc, and only the portions that LMDB uses are modified.
+	 *		Unused portions of a page may contain leftover data from other
+	 *		code that used the heap and subsequently freed that memory.
+	 *		That can be a problem for applications which handle sensitive data
+	 *		like passwords, and it makes memory checkers like Valgrind noisy.
+	 *		With this flag, unused portions of pages will be initialized to
+	 *		zero. This flag is not needed with #MDB_WRITEMAP, which writes
+	 *		directly to the mmap instead of using malloc for pages. The
+	 *		initialization is also skipped if #MDB_RESERVE is used; the
+	 *		caller is expected to overwrite all of the memory that was
+	 *		reserved in that case.
+	 *		This flag may be changed at any time using #mdb_env_set_flags().
+	 *		It comes at some performance cost.
 	 * </ul>
 	 * @param[in] mode The UNIX permissions to set on created files. This parameter
 	 * is ignored on Windows.
@@ -1131,6 +1155,8 @@ int  mdb_get(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data);
 	 *		reserved space, which the caller can fill in later - before
 	 *		the next update operation or the transaction ends. This saves
 	 *		an extra memcpy if the data is being generated later.
+	 *		MDB does nothing else with this memory, even if #MDB_CLEANMEM is
+	 *		set - the caller is expected to modify all of the space requested.
 	 *	<li>#MDB_APPEND - append the given key/data pair to the end of the
 	 *		database. No key comparisons are performed. This option allows
 	 *		fast bulk loading when keys are already known to be in the

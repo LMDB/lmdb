@@ -1322,7 +1322,12 @@ mdb_page_malloc(MDB_txn *txn, unsigned num)
 {
 	MDB_env *env = txn->mt_env;
 	MDB_page *ret = env->me_dpages;
-	size_t sz = env->me_psize;
+	size_t psize = env->me_psize, sz = psize, off;
+	/* For #MDB_CLEANMEM, psize counts how much to init.
+	 * For a single page alloc, we init everything after the page header.
+	 * For multi-page, we init the final page; if the caller needed that
+	 * many pages they will be filling in at least up to the last page.
+	 */
 	if (num == 1) {
 		if (ret) {
 			VGMEMP_ALLOC(env, ret, sz);
@@ -1330,10 +1335,16 @@ mdb_page_malloc(MDB_txn *txn, unsigned num)
 			env->me_dpages = ret->mp_next;
 			return ret;
 		}
+		psize -= off = PAGEHDRSZ;
 	} else {
 		sz *= num;
+		off = sz - psize;
 	}
 	if ((ret = malloc(sz)) != NULL) {
+		if (env->me_flags & MDB_CLEANMEM) {
+			memset((char *)ret + off, 0, psize);
+			ret->mp_pad = 0;
+		}
 		VGMEMP_ALLOC(env, ret, sz);
 	}
 	return ret;
@@ -2486,7 +2497,7 @@ mdb_freelist_save(MDB_txn *txn)
 	int rc, maxfree_1pg = env->me_maxfree_1pg, more = 1;
 	txnid_t	pglast = 0, head_id = 0;
 	pgno_t	freecnt = 0, *free_pgs, *mop;
-	ssize_t	head_room = 0, total_room = 0, mop_len;
+	ssize_t	head_room = 0, total_room = 0, mop_len, clean_limit;
 
 	mdb_cursor_init(&mc, txn, FREE_DBI, NULL);
 
@@ -2497,9 +2508,15 @@ mdb_freelist_save(MDB_txn *txn)
 			return rc;
 	}
 
+	/* MDB_RESERVE cancels CLEANMEM in ovpage malloc (when no WRITEMAP) */
+	clean_limit = (env->me_flags & (MDB_CLEANMEM|MDB_WRITEMAP)) == MDB_CLEANMEM
+		? maxfree_1pg : SSIZE_MAX;
+
 	for (;;) {
 		/* Come back here after each Put() in case freelist changed */
 		MDB_val key, data;
+		pgno_t *pgs;
+		ssize_t j;
 
 		/* If using records from freeDB which we have not yet
 		 * deleted, delete them and any we reserved for me_pghead.
@@ -2583,7 +2600,12 @@ mdb_freelist_save(MDB_txn *txn)
 		rc = mdb_cursor_put(&mc, &key, &data, MDB_RESERVE);
 		if (rc)
 			return rc;
-		*(MDB_ID *)data.mv_data = 0; /* IDL is initially empty */
+		/* IDL is initially empty, zero out at least the length */
+		pgs = (pgno_t *)data.mv_data;
+		j = head_room > clean_limit ? head_room : 0;
+		do {
+			pgs[j] = 0;
+		} while (--j >= 0);
 		total_room += head_room;
 	}
 
@@ -3943,8 +3965,9 @@ fail:
 	 *	at runtime. Changing other flags requires closing the
 	 *	environment and re-opening it with the new flags.
 	 */
-#define	CHANGEABLE	(MDB_NOSYNC|MDB_NOMETASYNC|MDB_MAPASYNC)
-#define	CHANGELESS	(MDB_FIXEDMAP|MDB_NOSUBDIR|MDB_RDONLY|MDB_WRITEMAP|MDB_NOTLS|MDB_NOLOCK|MDB_NORDAHEAD)
+#define	CHANGEABLE	(MDB_NOSYNC|MDB_NOMETASYNC|MDB_MAPASYNC|MDB_CLEANMEM)
+#define	CHANGELESS	(MDB_FIXEDMAP|MDB_NOSUBDIR|MDB_RDONLY|MDB_WRITEMAP| \
+	MDB_NOTLS|MDB_NOLOCK|MDB_NORDAHEAD)
 
 int
 mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode)
@@ -5847,12 +5870,14 @@ more:
 				if (NODESIZE + sizeof(indx_t) + NODEKSZ(leaf) + xdata.mv_size
 					>= env->me_nodemax) {
 					/* yes, convert it */
-					dummy.md_flags = 0;
 					if (mc->mc_db->md_flags & MDB_DUPFIXED) {
 						dummy.md_pad = fp->mp_pad;
 						dummy.md_flags = MDB_DUPFIXED;
 						if (mc->mc_db->md_flags & MDB_INTEGERDUP)
 							dummy.md_flags |= MDB_INTEGERKEY;
+					} else {
+						dummy.md_pad = 0;
+						dummy.md_flags = 0;
 					}
 					dummy.md_depth = 1;
 					dummy.md_branch_pages = 0;
