@@ -373,7 +373,7 @@ static txnid_t mdb_debug_start;
 	 *
 	 *	We require that keys all fit onto a regular page. This limit
 	 *	could be raised a bit further if needed; to something just
-	 *	under (page size / #MDB_MINKEYS).
+	 *	under (page size / #MDB_MINKEYS / 3).
 	 *
 	 *	Note that data items in an #MDB_DUPSORT database are actually keys
 	 *	of a subDB, so they're also limited to this size.
