@@ -324,10 +324,13 @@ static txnid_t mdb_debug_start;
 	(((mc)->mc_flags & C_SUB) ? -(int)(mc)->mc_dbi : (int)(mc)->mc_dbi)
 /** @} */
 
-	/** A default memory page size.
-	 *	The actual size is platform-dependent, but we use this for
-	 *	boot-strapping. We probably should not be using this any more.
-	 *	The #GET_PAGESIZE() macro is used to get the actual size.
+	/**	@brief The maximum size of a database page.
+	 *
+	 *	This is 32k, since it must fit in #MDB_page.#mp_upper.
+	 *
+	 *	LMDB will use database pages < OS pages if needed.
+	 *	That causes more I/O in write transactions: The OS must
+	 *	know (read) the whole page before writing a partial page.
 	 *
 	 *	Note that we don't currently support Huge pages. On Linux,
 	 *	regular data files cannot use Huge pages, and in general
@@ -336,7 +339,7 @@ static txnid_t mdb_debug_start;
 	 *	pressure from other processes is high. So until OSs have
 	 *	actual paging support for Huge pages, they're not viable.
 	 */
-#define MDB_PAGESIZE	 4096
+#define MAX_PAGESIZE	 0x8000
 
 	/** The minimum number of keys required in a database page.
 	 *	Setting this to a larger value will place a smaller bound on the
@@ -370,7 +373,7 @@ static txnid_t mdb_debug_start;
 	 *
 	 *	We require that keys all fit onto a regular page. This limit
 	 *	could be raised a bit further if needed; to something just
-	 *	under #MDB_PAGESIZE / #MDB_MINKEYS.
+	 *	under (page size / #MDB_MINKEYS).
 	 *
 	 *	Note that data items in an #MDB_DUPSORT database are actually keys
 	 *	of a subDB, so they're also limited to this size.
@@ -813,19 +816,18 @@ typedef struct MDB_meta {
 	txnid_t		mm_txnid;			/**< txnid that committed this page */
 } MDB_meta;
 
-	/** Buffer for a stack-allocated dirty page.
+	/** Buffer for a stack-allocated meta page.
 	 *	The members define size and alignment, and silence type
 	 *	aliasing warnings.  They are not used directly; that could
 	 *	mean incorrectly using several union members in parallel.
 	 */
-typedef union MDB_pagebuf {
-	char		mb_raw[MDB_PAGESIZE];
+typedef union MDB_metabuf {
 	MDB_page	mb_page;
 	struct {
 		char		mm_pad[PAGEHDRSZ];
 		MDB_meta	mm_meta;
 	} mb_metabuf;
-} MDB_pagebuf;
+} MDB_metabuf;
 
 	/** Auxiliary DB info.
 	 *	The information here is mostly static/read-only. There is
@@ -994,7 +996,8 @@ struct MDB_env {
 	/** Have liveness lock in reader table */
 #define	MDB_LIVE_READER	0x08000000U
 	uint32_t 	me_flags;		/**< @ref mdb_env */
-	unsigned int	me_psize;	/**< size of a page, from #GET_PAGESIZE */
+	unsigned int	me_psize;	/**< DB page size, inited from me_os_psize */
+	unsigned int	me_os_psize;	/**< OS page size, from #GET_PAGESIZE */
 	unsigned int	me_maxreaders;	/**< size of the reader table */
 	unsigned int	me_numreaders;	/**< max numreaders set by this env */
 	MDB_dbi		me_numdbs;		/**< number of DBs opened */
@@ -1004,6 +1007,7 @@ struct MDB_env {
 	char		*me_map;		/**< the memory map of the data file */
 	MDB_txninfo	*me_txns;		/**< the memory map of the lock file or NULL */
 	MDB_meta	*me_metas[2];	/**< pointers to the two meta pages */
+	void		*me_pbuf;		/**< scratch area for DUPSORT put() */
 	MDB_txn		*me_txn;		/**< current write transaction */
 	size_t		me_mapsize;		/**< size of the data memory map */
 	off_t		me_size;		/**< current file size */
@@ -2970,10 +2974,11 @@ fail:
 static int
 mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 {
-	MDB_pagebuf	pbuf;
+	MDB_metabuf	pbuf;
 	MDB_page	*p;
 	MDB_meta	*m;
 	int			i, rc, off;
+	enum { Size = sizeof(pbuf) };
 
 	/* We don't know the page size yet, so use a minimum value.
 	 * Read both meta pages so we can use the latest one.
@@ -2985,13 +2990,13 @@ mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 		OVERLAPPED ov;
 		memset(&ov, 0, sizeof(ov));
 		ov.Offset = off;
-		rc = ReadFile(env->me_fd,&pbuf,MDB_PAGESIZE,&len,&ov) ? (int)len : -1;
+		rc = ReadFile(env->me_fd, &pbuf, Size, &len, &ov) ? (int)len : -1;
 		if (rc == -1 && ErrCode() == ERROR_HANDLE_EOF)
 			rc = 0;
 #else
-		rc = pread(env->me_fd, &pbuf, MDB_PAGESIZE, off);
+		rc = pread(env->me_fd, &pbuf, Size, off);
 #endif
-		if (rc != MDB_PAGESIZE) {
+		if (rc != Size) {
 			if (rc == 0 && off == 0)
 				return ENOENT;
 			rc = rc < 0 ? (int) ErrCode() : MDB_INVALID;
@@ -3122,11 +3127,18 @@ mdb_env_write_meta(MDB_txn *txn)
 		mp->mm_last_pg = txn->mt_next_pgno - 1;
 		mp->mm_txnid = txn->mt_txnid;
 		if (!(env->me_flags & (MDB_NOMETASYNC|MDB_NOSYNC))) {
+			unsigned meta_size = env->me_psize;
 			rc = (env->me_flags & MDB_MAPASYNC) ? MS_ASYNC : MS_SYNC;
 			ptr = env->me_map;
-			if (toggle)
-				ptr += env->me_psize;
-			if (MDB_MSYNC(ptr, env->me_psize, rc)) {
+			if (toggle) {
+#ifndef _WIN32	/* POSIX msync() requires ptr = start of OS page */
+				if (meta_size < env->me_os_psize)
+					meta_size += meta_size;
+				else
+#endif
+					ptr += meta_size;
+			}
+			if (MDB_MSYNC(ptr, meta_size, rc)) {
 				rc = ErrCode();
 				goto fail;
 			}
@@ -3232,6 +3244,7 @@ mdb_env_create(MDB_env **env)
 	e->me_wmutex = SEM_FAILED;
 #endif
 	e->me_pid = getpid();
+	GET_PAGESIZE(e->me_os_psize);
 	VGMEMP_CREATE(e,0,0);
 	*env = e;
 	return MDB_SUCCESS;
@@ -3397,7 +3410,9 @@ mdb_env_open2(MDB_env *env)
 			return i;
 		DPUTS("new mdbenv");
 		newenv = 1;
-		GET_PAGESIZE(env->me_psize);
+		env->me_psize = env->me_os_psize;
+		if (env->me_psize > MAX_PAGESIZE)
+			env->me_psize = MAX_PAGESIZE;
 	} else {
 		env->me_psize = meta.mm_psize;
 	}
@@ -4042,7 +4057,12 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 		DPRINTF(("opened dbenv %p", (void *) env));
 		if (excl > 0) {
 			rc = mdb_env_share_locks(env, &excl);
+			if (rc)
+				goto leave;
 		}
+		if (!((flags & MDB_RDONLY) ||
+			  (env->me_pbuf = calloc(1, env->me_psize))))
+			rc = ENOMEM;
 	}
 
 leave:
@@ -4066,6 +4086,7 @@ mdb_env_close0(MDB_env *env, int excl)
 	for (i = env->me_maxdbs; --i > MAIN_DBI; )
 		free(env->me_dbxs[i].md_name.mv_data);
 
+	free(env->me_pbuf);
 	free(env->me_dbflags);
 	free(env->me_dbxs);
 	free(env->me_path);
@@ -5611,7 +5632,6 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	unsigned int mcount = 0, dcount = 0, nospill;
 	size_t nsize;
 	int rc, rc2;
-	MDB_pagebuf pbuf;
 	char dbuf[MDB_MAXKEYSIZE+1];
 	unsigned int nflags;
 	DKBUF;
@@ -5747,7 +5767,7 @@ more:
 
 		/* DB has dups? */
 		if (F_ISSET(mc->mc_db->md_flags, MDB_DUPSORT)) {
-			mp = fp = xdata.mv_data = &pbuf;
+			mp = fp = xdata.mv_data = env->me_pbuf;
 			mp->mp_pgno = mc->mc_pg[mc->mc_top]->mp_pgno;
 
 			/* Was a single item before, must convert now */
@@ -5781,16 +5801,16 @@ more:
 				dkey.mv_data = dbuf;
 				fp->mp_flags = P_LEAF|P_DIRTY|P_SUBP;
 				fp->mp_lower = PAGEHDRSZ;
-				fp->mp_upper = PAGEHDRSZ + dkey.mv_size + data->mv_size;
+				xdata.mv_size = PAGEHDRSZ + dkey.mv_size + data->mv_size;
 				if (mc->mc_db->md_flags & MDB_DUPFIXED) {
 					fp->mp_flags |= P_LEAF2;
 					fp->mp_pad = data->mv_size;
-					fp->mp_upper += 2 * data->mv_size;	/* leave space for 2 more */
+					xdata.mv_size += 2 * data->mv_size;	/* leave space for 2 more */
 				} else {
-					fp->mp_upper += 2 * sizeof(indx_t) + 2 * NODESIZE +
+					xdata.mv_size += 2 * (sizeof(indx_t) + NODESIZE) +
 						(dkey.mv_size & 1) + (data->mv_size & 1);
 				}
-				xdata.mv_size = fp->mp_upper;
+				fp->mp_upper = xdata.mv_size;
 			} else if (leaf->mn_flags & F_SUBDATA) {
 				/* Data is on sub-DB, just store it */
 				flags |= F_DUPDATA|F_SUBDATA;
