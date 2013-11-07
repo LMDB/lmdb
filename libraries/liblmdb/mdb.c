@@ -5603,9 +5603,9 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
     unsigned int flags)
 {
 	enum { MDB_NO_ROOT = MDB_LAST_ERRCODE+10 }; /* internal code */
+	MDB_env		*env = mc->mc_txn->mt_env;
 	MDB_node	*leaf = NULL;
 	MDB_val	xdata, *rdata, dkey;
-	MDB_page	*fp;
 	MDB_db dummy;
 	int do_sub = 0, insert = 0;
 	unsigned int mcount = 0, dcount = 0, nospill;
@@ -5725,6 +5725,9 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 
 	/* The key already exists */
 	if (rc == MDB_SUCCESS) {
+		MDB_page	*fp, *mp;
+		MDB_val		olddata;
+
 		/* there's only a key anyway, so this is a no-op */
 		if (IS_LEAF2(mc->mc_pg[mc->mc_top])) {
 			unsigned int ksize = mc->mc_db->md_pad;
@@ -5737,19 +5740,23 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 			return MDB_SUCCESS;
 		}
 
+more:
 		leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
+		olddata.mv_size = NODEDSZ(leaf);
+		olddata.mv_data = NODEDATA(leaf);
 
 		/* DB has dups? */
 		if (F_ISSET(mc->mc_db->md_flags, MDB_DUPSORT)) {
+			mp = fp = xdata.mv_data = &pbuf;
+			mp->mp_pgno = mc->mc_pg[mc->mc_top]->mp_pgno;
+
 			/* Was a single item before, must convert now */
-more:
 			if (!F_ISSET(leaf->mn_flags, F_DUPDATA)) {
 				/* Just overwrite the current item */
 				if (flags == MDB_CURRENT)
 					goto current;
 
-				dkey.mv_size = NODEDSZ(leaf);
-				dkey.mv_data = NODEDATA(leaf);
+				dkey = olddata;
 #if UINT_MAX < SIZE_MAX
 				if (mc->mc_dbx->md_dcmp == mdb_cmp_int && dkey.mv_size == sizeof(size_t))
 #ifdef MISALIGNED_OK
@@ -5772,8 +5779,6 @@ more:
 				/* create a fake page for the dup items */
 				memcpy(dbuf, dkey.mv_data, dkey.mv_size);
 				dkey.mv_data = dbuf;
-				fp = (MDB_page *)&pbuf;
-				fp->mp_pgno = mc->mc_pg[mc->mc_top]->mp_pgno;
 				fp->mp_flags = P_LEAF|P_DIRTY|P_SUBP;
 				fp->mp_lower = PAGEHDRSZ;
 				fp->mp_upper = PAGEHDRSZ + dkey.mv_size + data->mv_size;
@@ -5785,42 +5790,42 @@ more:
 					fp->mp_upper += 2 * sizeof(indx_t) + 2 * NODESIZE +
 						(dkey.mv_size & 1) + (data->mv_size & 1);
 				}
-				mdb_node_del(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], 0);
-				do_sub = 1;
-				rdata = &xdata;
 				xdata.mv_size = fp->mp_upper;
-				xdata.mv_data = fp;
-				flags |= F_DUPDATA;
-				goto new_sub;
-			}
-			if (!F_ISSET(leaf->mn_flags, F_SUBDATA)) {
+			} else if (leaf->mn_flags & F_SUBDATA) {
+				/* Data is on sub-DB, just store it */
+				flags |= F_DUPDATA|F_SUBDATA;
+				goto put_sub;
+			} else {
 				/* See if we need to convert from fake page to subDB */
-				MDB_page *mp;
 				unsigned int offset;
 				unsigned int i;
 				uint16_t fp_flags;
 
-				fp = NODEDATA(leaf);
-				if (flags == MDB_CURRENT) {
-reuse:
+				fp = olddata.mv_data;
+				switch (flags) {
+				default:
+					if (!(mc->mc_db->md_flags & MDB_DUPFIXED)) {
+						offset = NODESIZE + sizeof(indx_t) + data->mv_size;
+						offset += offset & 1;
+						break;
+					}
+					offset = fp->mp_pad;
+					if (SIZELEFT(fp) < offset) {
+						offset *= 4; /* space for 4 more */
+						break;
+					}
+					/* FALLTHRU: Big enough MDB_DUPFIXED sub-page */
+				case MDB_CURRENT:
 					fp->mp_flags |= P_DIRTY;
-					COPY_PGNO(fp->mp_pgno, mc->mc_pg[mc->mc_top]->mp_pgno);
+					COPY_PGNO(fp->mp_pgno, mp->mp_pgno);
 					mc->mc_xcursor->mx_cursor.mc_pg[0] = fp;
 					flags |= F_DUPDATA;
 					goto put_sub;
 				}
-				if (mc->mc_db->md_flags & MDB_DUPFIXED) {
-					offset = fp->mp_pad;
-					if (SIZELEFT(fp) >= offset)
-						goto reuse;
-					offset *= 4;	/* space for 4 more */
-				} else {
-					offset = NODESIZE + sizeof(indx_t) + data->mv_size;
-				}
-				offset += offset & 1;
 				fp_flags = fp->mp_flags;
-				if (NODESIZE + sizeof(indx_t) + NODEKSZ(leaf) + NODEDSZ(leaf) +
-					offset >= mc->mc_txn->mt_env->me_nodemax) {
+				xdata.mv_size = olddata.mv_size + offset;
+				if (NODESIZE + sizeof(indx_t) + NODEKSZ(leaf) + xdata.mv_size
+					>= env->me_nodemax) {
 					/* yes, convert it */
 					dummy.md_flags = 0;
 					if (mc->mc_db->md_flags & MDB_DUPFIXED) {
@@ -5834,23 +5839,14 @@ reuse:
 					dummy.md_leaf_pages = 1;
 					dummy.md_overflow_pages = 0;
 					dummy.md_entries = NUMKEYS(fp);
-					rdata = &xdata;
 					xdata.mv_size = sizeof(MDB_db);
 					xdata.mv_data = &dummy;
 					if ((rc = mdb_page_alloc(mc, 1, &mp)))
 						return rc;
-					offset = mc->mc_txn->mt_env->me_psize - NODEDSZ(leaf);
+					offset = env->me_psize - olddata.mv_size;
 					flags |= F_DUPDATA|F_SUBDATA;
 					dummy.md_root = mp->mp_pgno;
 					fp_flags &= ~P_SUBP;
-				} else {
-					/* no, just grow it */
-					rdata = &xdata;
-					xdata.mv_size = NODEDSZ(leaf) + offset;
-					xdata.mv_data = &pbuf;
-					mp = (MDB_page *)&pbuf;
-					mp->mp_pgno = mc->mc_pg[mc->mc_top]->mp_pgno;
-					flags |= F_DUPDATA;
 				}
 				mp->mp_flags = fp_flags | P_DIRTY;
 				mp->mp_pad   = fp->mp_pad;
@@ -5859,28 +5855,27 @@ reuse:
 				if (IS_LEAF2(fp)) {
 					memcpy(METADATA(mp), METADATA(fp), NUMKEYS(fp) * fp->mp_pad);
 				} else {
-					nsize = NODEDSZ(leaf) - fp->mp_upper;
-					memcpy((char *)mp + mp->mp_upper, (char *)fp + fp->mp_upper, nsize);
+					memcpy((char *)mp + mp->mp_upper, (char *)fp + fp->mp_upper,
+						olddata.mv_size - fp->mp_upper);
 					for (i=0; i<NUMKEYS(fp); i++)
 						mp->mp_ptrs[i] = fp->mp_ptrs[i] + offset;
 				}
-				mdb_node_del(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], 0);
-				do_sub = 1;
-				goto new_sub;
 			}
-			/* data is on sub-DB, just store it */
-			flags |= F_DUPDATA|F_SUBDATA;
-			goto put_sub;
+
+			rdata = &xdata;
+			flags |= F_DUPDATA;
+			do_sub = 1;
+			mdb_node_del(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], 0);
+			goto new_sub;
 		}
 current:
 		/* overflow page overwrites need special handling */
 		if (F_ISSET(leaf->mn_flags, F_BIGDATA)) {
 			MDB_page *omp;
 			pgno_t pg;
-			unsigned psize = mc->mc_txn->mt_env->me_psize;
-			int level, ovpages, dpages = OVPAGES(data->mv_size, psize);
+			int level, ovpages, dpages = OVPAGES(data->mv_size, env->me_psize);
 
-			memcpy(&pg, NODEDATA(leaf), sizeof(pg));
+			memcpy(&pg, olddata.mv_data, sizeof(pg));
 			if ((rc2 = mdb_page_get(mc->mc_txn, pg, &omp, &level)) != 0)
 				return rc2;
 			ovpages = omp->mp_pages;
@@ -5888,7 +5883,7 @@ current:
 			/* Is the ov page large enough? */
 			if (ovpages >= dpages) {
 			  if (!(omp->mp_flags & P_DIRTY) &&
-				  (level || (mc->mc_txn->mt_env->me_flags & MDB_WRITEMAP)))
+				  (level || (env->me_flags & MDB_WRITEMAP)))
 			  {
 				rc = mdb_page_unspill(mc->mc_txn, omp, &omp);
 				if (rc)
@@ -5903,7 +5898,7 @@ current:
 				 */
 				if (level > 1) {
 					/* It is writable only in a parent txn */
-					size_t sz = (size_t) psize * ovpages, off;
+					size_t sz = (size_t) env->me_psize * ovpages, off;
 					MDB_page *np = mdb_page_malloc(mc->mc_txn, ovpages);
 					MDB_ID2 id2;
 					if (!np)
@@ -5933,15 +5928,15 @@ current:
 			}
 			if ((rc2 = mdb_ovpage_free(mc, omp)) != MDB_SUCCESS)
 				return rc2;
-		} else if (NODEDSZ(leaf) == data->mv_size) {
+		} else if (data->mv_size == olddata.mv_size) {
 			/* same size, just replace it. Note that we could
 			 * also reuse this node if the new data is smaller,
 			 * but instead we opt to shrink the node in that case.
 			 */
 			if (F_ISSET(flags, MDB_RESERVE))
-				data->mv_data = NODEDATA(leaf);
+				data->mv_data = olddata.mv_data;
 			else if (data->mv_size)
-				memcpy(NODEDATA(leaf), data->mv_data, data->mv_size);
+				memcpy(olddata.mv_data, data->mv_data, data->mv_size);
 			else
 				memcpy(NODEKEY(leaf), key->mv_data, key->mv_size);
 			goto done;
@@ -5957,7 +5952,7 @@ current:
 
 new_sub:
 	nflags = flags & NODE_ADD_FLAGS;
-	nsize = IS_LEAF2(mc->mc_pg[mc->mc_top]) ? key->mv_size : mdb_leaf_size(mc->mc_txn->mt_env, key, rdata);
+	nsize = IS_LEAF2(mc->mc_pg[mc->mc_top]) ? key->mv_size : mdb_leaf_size(env, key, rdata);
 	if (SIZELEFT(mc->mc_pg[mc->mc_top]) < nsize) {
 		if (( flags & (F_DUPDATA|F_SUBDATA)) == F_DUPDATA )
 			nflags &= ~MDB_APPEND;
@@ -6051,7 +6046,6 @@ next_mult:
 				data[1].mv_size = mcount;
 				if (mcount < dcount) {
 					data[0].mv_data = (char *)data[0].mv_data + data[0].mv_size;
-					leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
 					goto more;
 				}
 			}
