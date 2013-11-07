@@ -7295,6 +7295,8 @@ mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
 				continue;
 			if (!(m2->mc_flags & C_INITIALIZED))
 				continue;
+			if (m2->mc_top < mc->mc_top)
+				continue;
 			if (m2->mc_pg[mc->mc_top] == mp) {
 				if (m2->mc_ki[mc->mc_top] >= ki) {
 					m2->mc_flags |= C_DEL;
