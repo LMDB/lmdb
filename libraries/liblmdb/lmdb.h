@@ -70,11 +70,15 @@
  *	  access to locks and lock file. Exceptions: On read-only filesystems
  *	  or with the #MDB_NOLOCK flag described under #mdb_env_open().
  *
- *	- By default, unused portions of the datafile may receive garbage data
- *	  from memory freed by other code. (This does not happen when using
- *	  the #MDB_WRITEMAP flag.) Applications handling sensitive data
+ *	- By default, in versions before 0.9.10, unused portions of the data
+ *	  file might receive garbage data from memory freed by other code.
+ *	  (This did not happen when using the #MDB_WRITEMAP flag.) As of
+ *	  0.9.10 the default behavior is to initialize such memory before
+ *	  writing to the data file. Since there may be a slight performance
+ *	  cost due to this initialization, applications may disable it using
+ *	  the #MDB_NOMEMINIT flag. Applications handling sensitive data
  *	  which must not be written, and which don't use #MDB_WRITEMAP,
- *	  need to prevent this with the #MDB_CLEANMEM flag.
+ *	  should not use this flag.
  *
  *	- A thread can only use one transaction at a time, plus any child
  *	  transactions.  Each transaction belongs to one thread.  See below.
@@ -180,7 +184,7 @@ typedef int mdb_filehandle_t;
 /** Library minor version */
 #define MDB_VERSION_MINOR	9
 /** Library patch version */
-#define MDB_VERSION_PATCH	9
+#define MDB_VERSION_PATCH	10
 
 /** Combine args a,b,c into a single integer for easy version comparisons */
 #define MDB_VERINT(a,b,c)	(((a) << 24) | ((b) << 16) | (c))
@@ -190,7 +194,7 @@ typedef int mdb_filehandle_t;
 	MDB_VERINT(MDB_VERSION_MAJOR,MDB_VERSION_MINOR,MDB_VERSION_PATCH)
 
 /** The release date of this library version */
-#define MDB_VERSION_DATE	"October 24, 2013"
+#define MDB_VERSION_DATE	"November 11, 2013"
 
 /** A stringifier for the version info */
 #define MDB_VERSTR(a,b,c,d)	"MDB " #a "." #b "." #c ": (" d ")"
@@ -283,8 +287,8 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
 #define MDB_NOLOCK		0x400000
 	/** don't do readahead (no effect on Windows) */
 #define MDB_NORDAHEAD	0x800000
-	/** don't write uninitialized malloc'd memory to datafile */
-#define MDB_CLEANMEM	0x1000000
+	/** don't initialize malloc'd memory before writing to datafile */
+#define MDB_NOMEMINIT	0x1000000
 /** @} */
 
 /**	@defgroup	mdb_dbi_open	Database Flags
@@ -554,22 +558,25 @@ int  mdb_env_create(MDB_env **env);
 	 *		supports it. Turning it off may help random read performance
 	 *		when the DB is larger than RAM and system RAM is full.
 	 *		The option is not implemented on Windows.
-	 *	<li>#MDB_CLEANMEM
-	 *		Don't write uninitialized memory to unused spaces in the datafile.
-	 *		By default, memory for pages written to the datafile is obtained
-	 *		using malloc, and only the portions that LMDB uses are modified.
-	 *		Unused portions of a page may contain leftover data from other
-	 *		code that used the heap and subsequently freed that memory.
-	 *		That can be a problem for applications which handle sensitive data
-	 *		like passwords, and it makes memory checkers like Valgrind noisy.
-	 *		With this flag, unused portions of pages will be initialized to
-	 *		zero. This flag is not needed with #MDB_WRITEMAP, which writes
-	 *		directly to the mmap instead of using malloc for pages. The
+	 *	<li>#MDB_NOMEMINIT
+	 *		Don't initialize malloc'd memory before writing to unused spaces
+	 *		in the data file. By default, memory for pages written to the data
+	 *		file is obtained using malloc. While these pages may be reused in
+	 *		subsequent transactions, freshly malloc'd pages will be initialized
+	 *		to zeroes before use. This avoids persisting leftover data from other
+	 *		code (that used the heap and subsequently freed the memory) into the
+	 *		data file. Note that many other system libraries may allocate
+	 *		and free memory from the heap for arbitrary uses. E.g., stdio may
+	 *		use the heap for file I/O buffers. This initialization step comes
+	 *		at some performance cost so some applications may want to disable
+	 *		it using this flag. This option can be a problem for applications
+	 *		which handle sensitive data like passwords, and it makes memory
+	 *		checkers like Valgrind noisy. This flag is not needed with #MDB_WRITEMAP,
+	 *		which writes directly to the mmap instead of using malloc for pages. The
 	 *		initialization is also skipped if #MDB_RESERVE is used; the
 	 *		caller is expected to overwrite all of the memory that was
 	 *		reserved in that case.
 	 *		This flag may be changed at any time using #mdb_env_set_flags().
-	 *		It comes at some performance cost.
 	 * </ul>
 	 * @param[in] mode The UNIX permissions to set on created files. This parameter
 	 * is ignored on Windows.
@@ -1155,8 +1162,8 @@ int  mdb_get(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data);
 	 *		reserved space, which the caller can fill in later - before
 	 *		the next update operation or the transaction ends. This saves
 	 *		an extra memcpy if the data is being generated later.
-	 *		MDB does nothing else with this memory, even if #MDB_CLEANMEM is
-	 *		set - the caller is expected to modify all of the space requested.
+	 *		MDB does nothing else with this memory, the caller is expected
+	 *		to modify all of the space requested.
 	 *	<li>#MDB_APPEND - append the given key/data pair to the end of the
 	 *		database. No key comparisons are performed. This option allows
 	 *		fast bulk loading when keys are already known to be in the

@@ -1323,7 +1323,7 @@ mdb_page_malloc(MDB_txn *txn, unsigned num)
 	MDB_env *env = txn->mt_env;
 	MDB_page *ret = env->me_dpages;
 	size_t psize = env->me_psize, sz = psize, off;
-	/* For #MDB_CLEANMEM, psize counts how much to init.
+	/* For ! #MDB_NOMEMINIT, psize counts how much to init.
 	 * For a single page alloc, we init everything after the page header.
 	 * For multi-page, we init the final page; if the caller needed that
 	 * many pages they will be filling in at least up to the last page.
@@ -1341,7 +1341,7 @@ mdb_page_malloc(MDB_txn *txn, unsigned num)
 		off = sz - psize;
 	}
 	if ((ret = malloc(sz)) != NULL) {
-		if (env->me_flags & MDB_CLEANMEM) {
+		if (!(env->me_flags & MDB_NOMEMINIT)) {
 			memset((char *)ret + off, 0, psize);
 			ret->mp_pad = 0;
 		}
@@ -2508,9 +2508,9 @@ mdb_freelist_save(MDB_txn *txn)
 			return rc;
 	}
 
-	/* MDB_RESERVE cancels CLEANMEM in ovpage malloc (when no WRITEMAP) */
-	clean_limit = (env->me_flags & (MDB_CLEANMEM|MDB_WRITEMAP)) == MDB_CLEANMEM
-		? maxfree_1pg : SSIZE_MAX;
+	/* MDB_RESERVE cancels meminit in ovpage malloc (when no WRITEMAP) */
+	clean_limit = (env->me_flags & (MDB_NOMEMINIT|MDB_WRITEMAP))
+		? SSIZE_MAX : maxfree_1pg;
 
 	for (;;) {
 		/* Come back here after each Put() in case freelist changed */
@@ -3965,7 +3965,7 @@ fail:
 	 *	at runtime. Changing other flags requires closing the
 	 *	environment and re-opening it with the new flags.
 	 */
-#define	CHANGEABLE	(MDB_NOSYNC|MDB_NOMETASYNC|MDB_MAPASYNC|MDB_CLEANMEM)
+#define	CHANGEABLE	(MDB_NOSYNC|MDB_NOMETASYNC|MDB_MAPASYNC|MDB_NOMEMINIT)
 #define	CHANGELESS	(MDB_FIXEDMAP|MDB_NOSUBDIR|MDB_RDONLY|MDB_WRITEMAP| \
 	MDB_NOTLS|MDB_NOLOCK|MDB_NORDAHEAD)
 
