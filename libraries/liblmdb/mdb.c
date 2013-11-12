@@ -37,10 +37,26 @@
 #endif
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/param.h>
 #ifdef _WIN32
 #include <windows.h>
+/** getpid() returns int; MinGW defines pid_t but MinGW64 typedefs it
+ *  as int64 which is wrong. MSVC doesn't define it at all, so just
+ *  don't use it.
+ */
+#define MDB_PID_T	int
+#ifdef __GNUC__
+# include <sys/param.h>
 #else
+# define LITTLE_ENDIAN	1234
+# define BIG_ENDIAN	4321
+# define BYTE_ORDER	LITTLE_ENDIAN
+# ifndef SSIZE_MAX
+#  define SSIZE_MAX	INT_MAX
+# endif
+#endif
+#else
+#define MDB_PID_T	pid_t
+#include <sys/param.h>
 #include <sys/uio.h>
 #include <sys/mman.h>
 #ifdef HAVE_SYS_FILE_H
@@ -497,7 +513,7 @@ typedef struct MDB_rxbody {
 	 */
 	txnid_t		mrb_txnid;
 	/** The process ID of the process owning this reader txn. */
-	pid_t		mrb_pid;
+	MDB_PID_T	mrb_pid;
 	/** The thread ID of the thread owning this txn. */
 	pthread_t	mrb_tid;
 } MDB_rxbody;
@@ -1002,7 +1018,7 @@ struct MDB_env {
 	unsigned int	me_numreaders;	/**< max numreaders set by this env */
 	MDB_dbi		me_numdbs;		/**< number of DBs opened */
 	MDB_dbi		me_maxdbs;		/**< size of the DB table */
-	pid_t		me_pid;		/**< process ID of this env */
+	MDB_PID_T	me_pid;		/**< process ID of this env */
 	char		*me_path;		/**< path to the DB files */
 	char		*me_map;		/**< the memory map of the data file */
 	MDB_txninfo	*me_txns;		/**< the memory map of the lock file or NULL */
@@ -2093,7 +2109,7 @@ enum Pidlock_op {
  * lock on the lockfile, set at an offset equal to the pid.
  */
 static int
-mdb_reader_pid(MDB_env *env, enum Pidlock_op op, pid_t pid)
+mdb_reader_pid(MDB_env *env, enum Pidlock_op op, MDB_PID_T pid)
 {
 #if !(MDB_PIDLOCK)		/* Currently the same as defined(_WIN32) */
 	int ret = 0;
@@ -2158,7 +2174,7 @@ mdb_txn_renew0(MDB_txn *txn)
 				if (r->mr_pid != env->me_pid || r->mr_txnid != (txnid_t)-1)
 					return MDB_BAD_RSLOT;
 			} else {
-				pid_t pid = env->me_pid;
+				MDB_PID_T pid = env->me_pid;
 				pthread_t tid = pthread_self();
 
 				if (!(env->me_flags & MDB_LIVE_READER)) {
@@ -3545,7 +3561,7 @@ PIMAGE_TLS_CALLBACK mdb_tls_cbp __attribute__((section (".CRT$XLB"))) = mdb_tls_
 #pragma comment(linker, "/INCLUDE:_tls_used")
 #pragma comment(linker, "/INCLUDE:mdb_tls_cbp")
 #pragma const_seg(".CRT$XLB")
-extern const PIMAGE_TLS_CALLBACK mdb_tls_callback;
+extern const PIMAGE_TLS_CALLBACK mdb_tls_cbp;
 const PIMAGE_TLS_CALLBACK mdb_tls_cbp = mdb_tls_callback;
 #pragma const_seg()
 #else	/* WIN32 */
@@ -3809,7 +3825,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 	rsize = (env->me_maxreaders-1) * sizeof(MDB_reader) + sizeof(MDB_txninfo);
 	if (size < rsize && *excl > 0) {
 #ifdef _WIN32
-		if (SetFilePointer(env->me_lfd, rsize, NULL, FILE_BEGIN) != rsize
+		if (SetFilePointer(env->me_lfd, rsize, NULL, FILE_BEGIN) != (DWORD)rsize
 			|| !SetEndOfFile(env->me_lfd))
 			goto fail_errno;
 #else
@@ -4137,7 +4153,7 @@ mdb_env_close0(MDB_env *env, int excl)
 	if (env->me_fd != INVALID_HANDLE_VALUE)
 		(void) close(env->me_fd);
 	if (env->me_txns) {
-		pid_t pid = env->me_pid;
+		MDB_PID_T pid = env->me_pid;
 		/* Clearing readers is done in this function because
 		 * me_txkey with its destructor must be disabled first.
 		 */
@@ -6830,7 +6846,7 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 		flags = 0;
 	} else {
 		srcnode = NODEPTR(csrc->mc_pg[csrc->mc_top], csrc->mc_ki[csrc->mc_top]);
-		assert(!((long)srcnode&1));
+		assert(!((size_t)srcnode&1));
 		srcpg = NODEPGNO(srcnode);
 		flags = srcnode->mn_flags;
 		if (csrc->mc_ki[csrc->mc_top] == 0 && IS_BRANCH(csrc->mc_pg[csrc->mc_top])) {
@@ -8290,7 +8306,7 @@ int mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx)
 /** Insert pid into list if not already present.
  * return -1 if already present.
  */
-static int mdb_pid_insert(pid_t *ids, pid_t pid)
+static int mdb_pid_insert(MDB_PID_T *ids, MDB_PID_T pid)
 {
 	/* binary search of pid in list */
 	unsigned base = 0;
@@ -8330,7 +8346,7 @@ int mdb_reader_check(MDB_env *env, int *dead)
 {
 	unsigned int i, j, rdrs;
 	MDB_reader *mr;
-	pid_t *pids, pid;
+	MDB_PID_T *pids, pid;
 	int count = 0;
 
 	if (!env)
@@ -8340,7 +8356,7 @@ int mdb_reader_check(MDB_env *env, int *dead)
 	if (!env->me_txns)
 		return MDB_SUCCESS;
 	rdrs = env->me_txns->mti_numreaders;
-	pids = malloc((rdrs+1) * sizeof(pid_t));
+	pids = malloc((rdrs+1) * sizeof(MDB_PID_T));
 	if (!pids)
 		return ENOMEM;
 	pids[0] = 0;
