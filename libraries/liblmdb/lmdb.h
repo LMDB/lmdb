@@ -72,13 +72,13 @@
  *
  *	- By default, in versions before 0.9.10, unused portions of the data
  *	  file might receive garbage data from memory freed by other code.
- *	  (This did not happen when using the #MDB_WRITEMAP flag.) As of
+ *	  (This does not happen when using the #MDB_WRITEMAP flag.) As of
  *	  0.9.10 the default behavior is to initialize such memory before
  *	  writing to the data file. Since there may be a slight performance
  *	  cost due to this initialization, applications may disable it using
  *	  the #MDB_NOMEMINIT flag. Applications handling sensitive data
- *	  which must not be written, and which don't use #MDB_WRITEMAP,
- *	  should not use this flag.
+ *	  which must not be written should not use this flag. This flag is
+ *	  irrelevant when using #MDB_WRITEMAP.
  *
  *	- A thread can only use one transaction at a time, plus any child
  *	  transactions.  Each transaction belongs to one thread.  See below.
