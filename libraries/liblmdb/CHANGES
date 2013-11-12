@@ -1,5 +1,13 @@
 LMDB 0.9 Change Log
 
+LMDB 0.9.10 Release (2013/11/12)
+	Add MDB_NOMEMINIT option
+	Fix mdb_page_split() again (ITS#7589)
+	Fix MDB_NORDAHEAD definition (ITS#7734)
+	Fix mdb_cursor_del() positioning (ITS#7733)
+	Partial fix for larger page sizes (ITS#7713)
+	Fix Windows64/MSVC build issues
+
 LMDB 0.9.9 Release (2013/10/24)
 	Add mdb_env_get_fd()
 	Add MDB_NORDAHEAD option
