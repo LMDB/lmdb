@@ -567,8 +567,8 @@ int  mdb_env_create(MDB_env **env);
 	 *		code (that used the heap and subsequently freed the memory) into the
 	 *		data file. Note that many other system libraries may allocate
 	 *		and free memory from the heap for arbitrary uses. E.g., stdio may
-	 *		use the heap for file I/O buffers. This initialization step comes
-	 *		at some performance cost so some applications may want to disable
+	 *		use the heap for file I/O buffers. This initialization step has a
+	 *		modest performance cost so some applications may want to disable
 	 *		it using this flag. This option can be a problem for applications
 	 *		which handle sensitive data like passwords, and it makes memory
 	 *		checkers like Valgrind noisy. This flag is not needed with #MDB_WRITEMAP,
