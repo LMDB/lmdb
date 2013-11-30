@@ -1222,7 +1222,7 @@ void
 mdb_page_list(MDB_page *mp)
 {
 	MDB_node *node;
-	unsigned int i, nkeys, nsize;
+	unsigned int i, nkeys, nsize, total = 0;
 	MDB_val key;
 	DKBUF;
 
@@ -1232,18 +1232,23 @@ mdb_page_list(MDB_page *mp)
 		node = NODEPTR(mp, i);
 		key.mv_size = node->mn_ksize;
 		key.mv_data = node->mn_data;
-		nsize = NODESIZE + NODEKSZ(node) + sizeof(indx_t);
+		nsize = NODESIZE + key.mv_size;
 		if (IS_BRANCH(mp)) {
 			fprintf(stderr, "key %d: page %"Z"u, %s\n", i, NODEPGNO(node),
 				DKEY(&key));
+			total += nsize;
 		} else {
 			if (F_ISSET(node->mn_flags, F_BIGDATA))
 				nsize += sizeof(pgno_t);
 			else
 				nsize += NODEDSZ(node);
+			total += nsize;
+			nsize += sizeof(indx_t);
 			fprintf(stderr, "key %d: nsize %d, %s\n", i, nsize, DKEY(&key));
 		}
+		total += (total & 1);
 	}
+	fprintf(stderr, "Total: %d\n", total);
 }
 
 void
@@ -6752,7 +6757,7 @@ mdb_update_key(MDB_cursor *mc, MDB_val *key)
 	MDB_node		*node;
 	char			*base;
 	size_t			 len;
-	int			 delta, delta0;
+	int				 delta, ksize, oksize;
 	indx_t			 ptr, i, numkeys, indx;
 	DKBUF;
 
@@ -6774,12 +6779,15 @@ mdb_update_key(MDB_cursor *mc, MDB_val *key)
 	}
 #endif
 
-	delta0 = delta = key->mv_size - node->mn_ksize;
+	ksize = key->mv_size;
+	ksize += (ksize & 1);
+	oksize = node->mn_ksize;
+	oksize += (oksize & 1);
+	delta = ksize - oksize;
 
 	/* Must be 2-byte aligned. If new key is
 	 * shorter by 1, the shift will be skipped.
 	 */
-	delta += (delta & 1);
 	if (delta) {
 		if (delta > 0 && SIZELEFT(mp) < delta) {
 			pgno_t pgno;
@@ -6805,7 +6813,7 @@ mdb_update_key(MDB_cursor *mc, MDB_val *key)
 	}
 
 	/* But even if no shift was needed, update ksize */
-	if (delta0)
+	if (node->mn_ksize != key->mv_size)
 		node->mn_ksize = key->mv_size;
 
 	if (key->mv_size)
