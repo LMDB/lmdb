@@ -5358,6 +5358,7 @@ set1:
 				if (op == MDB_GET_BOTH || rc > 0)
 					return MDB_NOTFOUND;
 				rc = 0;
+				*data = d2;
 			}
 
 		} else {
