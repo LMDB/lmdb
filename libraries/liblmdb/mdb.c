@@ -701,9 +701,11 @@ typedef struct MDB_node {
 	 * They are in host byte order in case that lets some
 	 * accesses be optimized into a 32-bit word access.
 	 */
-#define mn_lo mn_offset[BYTE_ORDER!=LITTLE_ENDIAN]
-#define mn_hi mn_offset[BYTE_ORDER==LITTLE_ENDIAN] /**< part of dsize or pgno */
-	unsigned short	mn_offset[2];	/**< storage for #mn_lo and #mn_hi */
+#if BYTE_ORDER == LITTLE_ENDIAN
+	unsigned short	mn_lo, mn_hi;	/**< part of data size or pgno */
+#else
+	unsigned short	mn_hi, mn_lo;
+#endif
 /** @defgroup mdb_node Node Flags
  *	@ingroup internal
  *	Flags for node headers.
