@@ -6497,21 +6497,19 @@ mdb_node_shrink(MDB_page *mp, indx_t indx)
 	MDB_node *node;
 	MDB_page *sp, *xp;
 	char *base;
-	int osize, nsize;
-	int delta;
+	int nsize, delta;
 	indx_t		 i, numkeys, ptr;
 
 	node = NODEPTR(mp, indx);
 	sp = (MDB_page *)NODEDATA(node);
-	osize = NODEDSZ(node);
-
-	delta = sp->mp_upper - sp->mp_lower;
-	SETDSZ(node, osize - delta);
+	delta = SIZELEFT(sp);
 	xp = (MDB_page *)((char *)sp + delta);
 
 	/* shift subpage upward */
 	if (IS_LEAF2(sp)) {
 		nsize = NUMKEYS(sp) * sp->mp_pad;
+		if (nsize & 1)
+			return;		/* do not make the node uneven-sized */
 		memmove(METADATA(xp), METADATA(sp), nsize);
 	} else {
 		int i;
@@ -6524,6 +6522,9 @@ mdb_node_shrink(MDB_page *mp, indx_t indx)
 	xp->mp_flags = sp->mp_flags;
 	xp->mp_pad = sp->mp_pad;
 	COPY_PGNO(xp->mp_pgno, mp->mp_pgno);
+
+	nsize = NODEDSZ(node) - delta;
+	SETDSZ(node, nsize);
 
 	/* shift lower nodes upward */
 	ptr = mp->mp_ptrs[indx];
