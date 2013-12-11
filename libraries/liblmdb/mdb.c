@@ -691,7 +691,8 @@ typedef struct MDB_page {
 #define OVPAGES(size, psize)	((PAGEHDRSZ-1 + (size)) / (psize) + 1)
 
 	/** Header for a single key/data pair within a page.
-	 * We guarantee 2-byte alignment for nodes.
+	 * Used in pages of type #P_BRANCH and #P_LEAF without #P_LEAF2.
+	 * We guarantee 2-byte alignment for 'MDB_node's.
 	 */
 typedef struct MDB_node {
 	/** lo and hi are used for data size on leaf nodes and for
@@ -1847,7 +1848,7 @@ mdb_page_copy(MDB_page *dst, MDB_page *src, unsigned int psize)
  * If a page being referenced was spilled to disk in this txn, bring
  * it back and make it dirty/writable again.
  * @param[in] txn the transaction handle.
- * @param[in] mp the page being referenced.
+ * @param[in] mp the page being referenced. It must not be dirty.
  * @param[out] ret the writable page, if any. ret is unchanged if
  * mp wasn't spilled.
  */
@@ -6775,7 +6776,7 @@ mdb_cursor_dbi(MDB_cursor *mc)
 	return mc->mc_dbi;
 }
 
-/** Replace the key for a node with a new key.
+/** Replace the key for a branch node with a new key.
  * @param[in] mc Cursor pointing to the node to operate on.
  * @param[in] key The new key to use.
  * @return 0 on success, non-zero on failure.
