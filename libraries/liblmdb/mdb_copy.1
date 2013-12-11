@@ -5,7 +5,11 @@
 mdb_copy \- LMDB environment copy tool
 .SH SYNOPSIS
 .B mdb_copy
-.I srcpath\ [dstpath]
+[\c
+.BR \-n ]
+.B srcpath
+[\c
+.BR dstpath ]
 .SH DESCRIPTION
 The
 .B mdb_copy
@@ -18,6 +22,10 @@ If
 is specified it must be the path of an empty directory
 for storing the backup. Otherwise, the backup will be
 written to stdout.
+
+.SH OPTIONS
+.BR \-n
+Open LDMB environment(s) which do not use subdirectories.
 
 .SH DIAGNOSTICS
 Exit status is zero if no errors occur.

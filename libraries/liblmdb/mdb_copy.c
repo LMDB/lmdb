@@ -31,10 +31,18 @@ int main(int argc,char * argv[])
 {
 	int rc;
 	MDB_env *env;
-	char *envname = argv[1];
+	const char *progname = argv[0], *act;
+	unsigned flags = MDB_RDONLY;
+
+	for (; argc > 1 && argv[1][0] == '-'; argc--, argv++) {
+		if (argv[1][1] == 'n' && argv[1][2] == '\0')
+			flags |= MDB_NOSUBDIR;
+		else
+			argc = 0;
+	}
 
 	if (argc<2 || argc>3) {
-		fprintf(stderr, "usage: %s srcpath [dstpath]\n", argv[0]);
+		fprintf(stderr, "usage: %s [-n] srcpath [dstpath]\n", progname);
 		exit(EXIT_FAILURE);
 	}
 
@@ -47,19 +55,21 @@ int main(int argc,char * argv[])
 	signal(SIGINT, sighandle);
 	signal(SIGTERM, sighandle);
 
+	act = "opening environment";
 	rc = mdb_env_create(&env);
-
-	rc = mdb_env_open(env, envname, MDB_RDONLY, 0);
-	if (rc) {
-		printf("mdb_env_open failed, error %d %s\n", rc, mdb_strerror(rc));
-	} else {
+	if (rc == MDB_SUCCESS) {
+		rc = mdb_env_open(env, argv[1], flags, 0);
+	}
+	if (rc == MDB_SUCCESS) {
+		act = "copying";
 		if (argc == 2)
 			rc = mdb_env_copyfd(env, MDB_STDOUT);
 		else
 			rc = mdb_env_copy(env, argv[2]);
-		if (rc)
-			printf("mdb_env_copy failed, error %d %s\n", rc, mdb_strerror(rc));
 	}
+	if (rc)
+		fprintf(stderr, "%s: %s failed, error %d (%s)\n",
+			progname, act, rc, mdb_strerror(rc));
 	mdb_env_close(env);
 
 	return rc ? EXIT_FAILURE : EXIT_SUCCESS;
