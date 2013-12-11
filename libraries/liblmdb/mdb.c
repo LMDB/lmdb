@@ -382,16 +382,25 @@ static txnid_t mdb_debug_start;
 	/**	The version number for a database's lockfile format. */
 #define MDB_LOCK_VERSION	 1
 
-	/**	@brief The maximum size of a key we can write to a database.
+	/**	@brief The max size of a key we can write, or 0 for dynamic max.
 	 *
-	 *	We require that keys all fit onto a regular page. This limit
-	 *	can be raised to page size / #MDB_MINKEYS - (64-bit ? 66 : 44).
+	 *	Define this as 0 to compute the max from the page size.  511
+	 *	is default for backwards compat: liblmdb <= 0.9.10 can break
+	 *	when modifying a DB with keys/dupsort data bigger than its max.
 	 *
-	 *	Note that data items in an #MDB_DUPSORT database are actually keys
-	 *	of a subDB, so they're also limited to this size.
+	 *	Data items in an #MDB_DUPSORT database are also limited to
+	 *	this size, since they're actually keys of a sub-DB.  Keys and
+	 *	#MDB_DUPSORT data items must fit on a node in a regular page.
 	 */
 #ifndef MDB_MAXKEYSIZE
 #define MDB_MAXKEYSIZE	 511
+#endif
+
+	/**	The maximum size of a key we can write to the environment. */
+#if MDB_MAXKEYSIZE
+#define ENV_MAXKEY(env)	(MDB_MAXKEYSIZE)
+#else
+#define ENV_MAXKEY(env)	((env)->me_maxkey)
 #endif
 
 	/**	@brief The maximum size of a data item.
@@ -401,11 +410,15 @@ static txnid_t mdb_debug_start;
 #define MAXDATASIZE	0xffffffffUL
 
 #if MDB_DEBUG
+	/**	Key size which fits in a #DKBUF.
+	 *	@ingroup debug
+	 */
+#define DKBUF_MAXKEYSIZE ((MDB_MAXKEYSIZE) > 0 ? (MDB_MAXKEYSIZE) : 511)
 	/**	A key buffer.
 	 *	@ingroup debug
 	 *	This is used for printing a hex dump of a key's contents.
 	 */
-#define DKBUF	char kbuf[(MDB_MAXKEYSIZE*2+1)]
+#define DKBUF	char kbuf[DKBUF_MAXKEYSIZE*2+1]
 	/**	Display a key in hex.
 	 *	@ingroup debug
 	 *	Invoke a function to display a key in hex.
@@ -1042,6 +1055,9 @@ struct MDB_env {
 	int			me_maxfree_1pg;
 	/** Max size of a node on a page */
 	unsigned int	me_nodemax;
+#if !(MDB_MAXKEYSIZE)
+	unsigned int	me_maxkey;	/**< max size of a key */
+#endif
 #ifdef _WIN32
 	int		me_pidquery;		/**< Used in OpenProcess */
 	HANDLE		me_rmutex;		/* Windows mutexes don't reside in shared mem */
@@ -1201,7 +1217,7 @@ mdb_dkey(MDB_val *key, char *buf)
 	if (!key)
 		return "";
 
-	if (key->mv_size > MDB_MAXKEYSIZE)
+	if (key->mv_size > DKBUF_MAXKEYSIZE)
 		return "MDB_MAXKEYSIZE";
 	/* may want to make this a dynamic check: if the key is mostly
 	 * printable characters, print it as-is instead of converting to hex.
@@ -3486,11 +3502,15 @@ mdb_env_open2(MDB_env *env)
 			return i;
 		}
 	}
+
 	env->me_maxfree_1pg = (env->me_psize - PAGEHDRSZ) / sizeof(pgno_t) - 1;
 	env->me_nodemax = (((env->me_psize - PAGEHDRSZ) / MDB_MINKEYS) & -2)
 		- sizeof(indx_t);
-
+#if !(MDB_MAXKEYSIZE)
+	env->me_maxkey = env->me_nodemax - (NODESIZE + sizeof(MDB_db));
+#endif
 	env->me_maxpg = env->me_mapsize / env->me_psize;
+
 #if MDB_DEBUG
 	{
 		int toggle = mdb_env_pick_meta(env);
@@ -5692,14 +5712,14 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	if (mc->mc_txn->mt_flags & (MDB_TXN_RDONLY|MDB_TXN_ERROR))
 		return (mc->mc_txn->mt_flags & MDB_TXN_RDONLY) ? EACCES : MDB_BAD_TXN;
 
-	if (flags != MDB_CURRENT && (key->mv_size == 0 || key->mv_size > MDB_MAXKEYSIZE))
-		return MDB_BAD_VALSIZE;
-
-	if (F_ISSET(mc->mc_db->md_flags, MDB_DUPSORT) && data->mv_size > MDB_MAXKEYSIZE)
+	if (flags != MDB_CURRENT && key->mv_size-1 >= ENV_MAXKEY(env))
 		return MDB_BAD_VALSIZE;
 
 #if SIZE_MAX > MAXDATASIZE
-	if (data->mv_size > MAXDATASIZE)
+	if (data->mv_size > ((mc->mc_db->md_flags & MDB_DUPSORT) ? ENV_MAXKEY(env) : MAXDATASIZE))
+		return MDB_BAD_VALSIZE;
+#else
+	if ((mc->mc_db->md_flags & MDB_DUPSORT) && data->mv_size > ENV_MAXKEY(env))
 		return MDB_BAD_VALSIZE;
 #endif
 
@@ -6778,7 +6798,7 @@ mdb_update_key(MDB_cursor *mc, MDB_val *key)
 #if MDB_DEBUG
 	{
 		MDB_val	k2;
-		char kbuf2[(MDB_MAXKEYSIZE*2+1)];
+		char kbuf2[DKBUF_MAXKEYSIZE*2+1];
 		k2.mv_data = NODEKEY(node);
 		k2.mv_size = node->mn_ksize;
 		DPRINTF(("update key %u (ofs %u) [%s] to [%s] on page %"Z"u",
@@ -8271,7 +8291,7 @@ int mdb_set_relctx(MDB_txn *txn, MDB_dbi dbi, void *ctx)
 
 int mdb_env_get_maxkeysize(MDB_env *env)
 {
-	return MDB_MAXKEYSIZE;
+	return ENV_MAXKEY(env);
 }
 
 int mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx)
