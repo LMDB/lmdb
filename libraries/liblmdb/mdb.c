@@ -8299,7 +8299,7 @@ int mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx)
 	unsigned int i, rdrs;
 	MDB_reader *mr;
 	char buf[64];
-	int first = 1;
+	int rc = 0, first = 1;
 
 	if (!env || !func)
 		return -1;
@@ -8311,7 +8311,6 @@ int mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx)
 	for (i=0; i<rdrs; i++) {
 		if (mr[i].mr_pid) {
 			size_t tid;
-			int rc;
 			tid = mr[i].mr_tid;
 			if (mr[i].mr_txnid == (txnid_t)-1) {
 				sprintf(buf, "%10d %"Z"x -\n", mr[i].mr_pid, tid);
@@ -8320,17 +8319,19 @@ int mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx)
 			}
 			if (first) {
 				first = 0;
-				func("    pid     thread     txnid\n", ctx);
+				rc = func("    pid     thread     txnid\n", ctx);
+				if (rc < 0)
+					break;
 			}
 			rc = func(buf, ctx);
 			if (rc < 0)
-				return rc;
+				break;
 		}
 	}
 	if (first) {
-		func("(no active readers)\n", ctx);
+		rc = func("(no active readers)\n", ctx);
 	}
-	return 0;
+	return rc;
 }
 
 /** Insert pid into list if not already present.
