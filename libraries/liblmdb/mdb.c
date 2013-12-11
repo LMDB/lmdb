@@ -382,10 +382,7 @@ static txnid_t mdb_debug_start;
 	/**	The version number for a database's lockfile format. */
 #define MDB_LOCK_VERSION	 1
 
-	/**	@brief The maximum size of a key in the database.
-	 *
-	 *	The library rejects bigger keys, and cannot deal with records
-	 *	with bigger keys stored by a library with bigger max keysize.
+	/**	@brief The maximum size of a key we can write to a database.
 	 *
 	 *	We require that keys all fit onto a regular page. This limit
 	 *	could be raised a bit further if needed; to something just
@@ -4972,10 +4969,6 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 	if (txn->mt_flags & MDB_TXN_ERROR)
 		return MDB_BAD_TXN;
 
-	if (key->mv_size > MDB_MAXKEYSIZE) {
-		return MDB_BAD_VALSIZE;
-	}
-
 	mdb_cursor_init(&mc, txn, dbi, &mx);
 	return mdb_cursor_set(&mc, key, data, MDB_SET, &exact);
 }
@@ -5531,12 +5524,10 @@ mdb_cursor_get(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	case MDB_SET_RANGE:
 		if (key == NULL) {
 			rc = EINVAL;
-		} else if (key->mv_size > MDB_MAXKEYSIZE) {
-			rc = MDB_BAD_VALSIZE;
-		} else if (op == MDB_SET_RANGE)
-			rc = mdb_cursor_set(mc, key, data, op, NULL);
-		else
-			rc = mdb_cursor_set(mc, key, data, op, &exact);
+		} else {
+			rc = mdb_cursor_set(mc, key, data, op,
+				op == MDB_SET_RANGE ? NULL : &exact);
+		}
 		break;
 	case MDB_GET_MULTIPLE:
 		if (data == NULL || !(mc->mc_flags & C_INITIALIZED)) {
@@ -5681,7 +5672,6 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	unsigned int mcount = 0, dcount = 0, nospill;
 	size_t nsize;
 	int rc, rc2;
-	char dbuf[MDB_MAXKEYSIZE+1];
 	unsigned int nflags;
 	DKBUF;
 
@@ -5846,9 +5836,9 @@ more:
 
 				/* Back up original data item */
 				dkey.mv_size = olddata.mv_size;
-				dkey.mv_data = memcpy(dbuf, olddata.mv_data, olddata.mv_size);
+				dkey.mv_data = memcpy(fp+1, olddata.mv_data, olddata.mv_size);
 
-				/* create a fake page for the dup items */
+				/* Make sub-page header for the dup items, with dummy body */
 				fp->mp_flags = P_LEAF|P_DIRTY|P_SUBP;
 				fp->mp_lower = PAGEHDRSZ;
 				xdata.mv_size = PAGEHDRSZ + dkey.mv_size + data->mv_size;
@@ -7394,10 +7384,6 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 
 	if (txn->mt_flags & (MDB_TXN_RDONLY|MDB_TXN_ERROR))
 		return (txn->mt_flags & MDB_TXN_RDONLY) ? EACCES : MDB_BAD_TXN;
-
-	if (key->mv_size > MDB_MAXKEYSIZE) {
-		return MDB_BAD_VALSIZE;
-	}
 
 	mdb_cursor_init(&mc, txn, dbi, &mx);
 

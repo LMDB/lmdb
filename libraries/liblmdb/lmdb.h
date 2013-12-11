@@ -797,12 +797,12 @@ int  mdb_env_get_maxreaders(MDB_env *env, unsigned int *readers);
 	 */
 int  mdb_env_set_maxdbs(MDB_env *env, MDB_dbi dbs);
 
-	/** @brief Get the maximum size of a key for the environment.
+	/** @brief Get the maximum size of keys and #MDB_DUPSORT data we can write.
 	 *
 	 * This is the compile-time constant #MDB_MAXKEYSIZE, default 511.
 	 * See @ref MDB_val.
 	 * @param[in] env An environment handle returned by #mdb_env_create()
-	 * @return The maximum size of a key
+	 * @return The maximum size of a key we can write
 	 */
 int  mdb_env_get_maxkeysize(MDB_env *env);
 
