@@ -428,6 +428,9 @@ static txnid_t mdb_debug_start;
 	/** Test if the flags \b f are set in a flag word \b w. */
 #define F_ISSET(w, f)	 (((w) & (f)) == (f))
 
+	/** Round \b n up to an even number. */
+#define EVEN(n)		(((n) + 1U) & -2) /* sign-extending -2 to match n+1U */
+
 	/**	Used for offsets within a single page.
 	 *	Since memory pages are typically 4 or 8KB in size, 12-13 bits,
 	 *	this is plenty.
@@ -1246,7 +1249,7 @@ mdb_page_list(MDB_page *mp)
 			nsize += sizeof(indx_t);
 			fprintf(stderr, "key %d: nsize %d, %s\n", i, nsize, DKEY(&key));
 		}
-		total += (total & 1);
+		total = EVEN(total);
 	}
 	fprintf(stderr, "Total: %d\n", total);
 }
@@ -5870,8 +5873,8 @@ more:
 				switch (flags) {
 				default:
 					if (!(mc->mc_db->md_flags & MDB_DUPFIXED)) {
-						offset = NODESIZE + sizeof(indx_t) + data->mv_size;
-						offset += offset & 1;
+						offset = EVEN(NODESIZE + sizeof(indx_t) +
+							data->mv_size);
 						break;
 					}
 					offset = fp->mp_pad;
@@ -6255,9 +6258,8 @@ mdb_leaf_size(MDB_env *env, MDB_val *key, MDB_val *data)
 		/* put on overflow page */
 		sz -= data->mv_size - sizeof(pgno_t);
 	}
-	sz += sz & 1;
 
-	return sz + sizeof(indx_t);
+	return EVEN(sz + sizeof(indx_t));
 }
 
 /** Calculate the size of a branch node.
@@ -6351,7 +6353,7 @@ mdb_node_add(MDB_cursor *mc, indx_t indx,
 			/* Put data on overflow page. */
 			DPRINTF(("data size is %"Z"u, node would be %"Z"u, put data on overflow page",
 			    data->mv_size, node_size+data->mv_size));
-			node_size += sizeof(pgno_t) + (node_size & 1);
+			node_size = EVEN(node_size + sizeof(pgno_t));
 			if ((ssize_t)node_size > room)
 				goto full;
 			if ((rc = mdb_page_new(mc, P_OVERFLOW, ovpages, &ofp)))
@@ -6363,7 +6365,7 @@ mdb_node_add(MDB_cursor *mc, indx_t indx,
 			node_size += data->mv_size;
 		}
 	}
-	node_size += node_size & 1;
+	node_size = EVEN(node_size);
 	if ((ssize_t)node_size > room)
 		goto full;
 
@@ -6464,7 +6466,7 @@ mdb_node_del(MDB_page *mp, indx_t indx, int ksize)
 		else
 			sz += NODEDSZ(node);
 	}
-	sz += sz & 1;
+	sz = EVEN(sz);
 
 	ptr = mp->mp_ptrs[indx];
 	numkeys = NUMKEYS(mp);
@@ -6779,15 +6781,12 @@ mdb_update_key(MDB_cursor *mc, MDB_val *key)
 	}
 #endif
 
-	ksize = key->mv_size;
-	ksize += (ksize & 1);
-	oksize = node->mn_ksize;
-	oksize += (oksize & 1);
+	/* Sizes must be 2-byte aligned. */
+	ksize = EVEN(key->mv_size);
+	oksize = EVEN(node->mn_ksize);
 	delta = ksize - oksize;
 
-	/* Must be 2-byte aligned. If new key is
-	 * shorter by 1, the shift will be skipped.
-	 */
+	/* Shift node contents if EVEN(key length) changed. */
 	if (delta) {
 		if (delta > 0 && SIZELEFT(mp) < delta) {
 			pgno_t pgno;
@@ -7565,7 +7564,7 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 				nsize = mdb_leaf_size(env, newkey, newdata);
 			else
 				nsize = mdb_branch_size(env, newkey);
-			nsize += nsize & 1;
+			nsize = EVEN(nsize);
 
 			/* grab a page to hold a temporary copy */
 			copy = mdb_page_malloc(mc->mc_txn, 1);
@@ -7622,7 +7621,7 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 							else
 								psize += NODEDSZ(node);
 						}
-						psize += psize & 1;
+						psize = EVEN(psize);
 					}
 					if (psize > pmax || i == k-j) {
 						split_indx = i + (j<0);
