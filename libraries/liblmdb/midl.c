@@ -150,7 +150,7 @@ int mdb_midl_need( MDB_IDL *idp, unsigned num )
 		num = (num + num/4 + (256 + 2)) & -256;
 		if (!(ids = realloc(ids-1, num * sizeof(MDB_ID))))
 			return ENOMEM;
-		*ids++ = num -= 2;
+		*ids++ = num - 2;
 		*idp = ids;
 	}
 	return 0;

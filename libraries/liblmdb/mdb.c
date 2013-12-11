@@ -1674,11 +1674,11 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 #else
 	enum { Paranoid = 0, Max_retries = INT_MAX /*infinite*/ };
 #endif
-	int rc, n2 = num-1, retry = Max_retries;
+	int rc, retry = Max_retries;
 	MDB_txn *txn = mc->mc_txn;
 	MDB_env *env = txn->mt_env;
 	pgno_t pgno, *mop = env->me_pghead;
-	unsigned i, j, k, mop_len = mop ? mop[0] : 0;
+	unsigned i, j, k, mop_len = mop ? mop[0] : 0, n2 = num-1;
 	MDB_page *np;
 	txnid_t oldest = 0, last;
 	MDB_cursor_op op;
@@ -1698,13 +1698,13 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 		/* Seek a big enough contiguous page range. Prefer
 		 * pages at the tail, just truncating the list.
 		 */
-		if (mop_len >= (unsigned)num) {
+		if (mop_len > n2) {
 			i = mop_len;
 			do {
 				pgno = mop[i];
 				if (mop[i-n2] == pgno+n2)
 					goto search_done;
-			} while (--i >= (unsigned)num);
+			} while (--i > n2);
 			if (Max_retries < INT_MAX && --retry < 0)
 				break;
 		}
@@ -6512,7 +6512,6 @@ mdb_node_shrink(MDB_page *mp, indx_t indx)
 		memmove(METADATA(xp), METADATA(sp), nsize);
 	} else {
 		int i;
-		nsize = osize - sp->mp_upper;
 		numkeys = NUMKEYS(sp);
 		for (i=numkeys-1; i>=0; i--)
 			xp->mp_ptrs[i] = sp->mp_ptrs[i] - delta;
@@ -6846,7 +6845,6 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 		return rc;
 
 	if (IS_LEAF2(csrc->mc_pg[csrc->mc_top])) {
-		srcnode = NODEPTR(csrc->mc_pg[csrc->mc_top], 0);	/* fake */
 		key.mv_size = csrc->mc_db->md_pad;
 		key.mv_data = LEAF2KEY(csrc->mc_pg[csrc->mc_top], csrc->mc_ki[csrc->mc_top], key.mv_size);
 		data.mv_size = 0;
@@ -8370,7 +8368,6 @@ int mdb_reader_check(MDB_env *env, int *dead)
 		return ENOMEM;
 	pids[0] = 0;
 	mr = env->me_txns->mti_readers;
-	j = 0;
 	for (i=0; i<rdrs; i++) {
 		if (mr[i].mr_pid && mr[i].mr_pid != env->me_pid) {
 			pid = mr[i].mr_pid;
