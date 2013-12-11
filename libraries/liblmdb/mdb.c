@@ -3491,7 +3491,8 @@ mdb_env_open2(MDB_env *env)
 		}
 	}
 	env->me_maxfree_1pg = (env->me_psize - PAGEHDRSZ) / sizeof(pgno_t) - 1;
-	env->me_nodemax = (env->me_psize - PAGEHDRSZ) / MDB_MINKEYS;
+	env->me_nodemax = (((env->me_psize - PAGEHDRSZ) / MDB_MINKEYS) & -2)
+		- sizeof(indx_t);
 
 	env->me_maxpg = env->me_mapsize / env->me_psize;
 #if MDB_DEBUG
@@ -5893,8 +5894,7 @@ more:
 				}
 				fp_flags = fp->mp_flags;
 				xdata.mv_size = olddata.mv_size + offset;
-				if (NODESIZE + sizeof(indx_t) + NODEKSZ(leaf) + xdata.mv_size
-					>= env->me_nodemax) {
+				if (NODESIZE+NODEKSZ(leaf)+xdata.mv_size > env->me_nodemax) {
 					/* yes, convert it */
 					if (mc->mc_db->md_flags & MDB_DUPFIXED) {
 						dummy.md_pad = fp->mp_pad;
@@ -6255,7 +6255,7 @@ mdb_leaf_size(MDB_env *env, MDB_val *key, MDB_val *data)
 	size_t		 sz;
 
 	sz = LEAFSIZE(key, data);
-	if (sz >= env->me_nodemax) {
+	if (sz > env->me_nodemax) {
 		/* put on overflow page */
 		sz -= data->mv_size - sizeof(pgno_t);
 	}
@@ -6279,7 +6279,7 @@ mdb_branch_size(MDB_env *env, MDB_val *key)
 	size_t		 sz;
 
 	sz = INDXSIZE(key);
-	if (sz >= env->me_nodemax) {
+	if (sz > env->me_nodemax) {
 		/* put on overflow page */
 		/* not implemented */
 		/* sz -= key->size - sizeof(pgno_t); */
@@ -6348,7 +6348,7 @@ mdb_node_add(MDB_cursor *mc, indx_t indx,
 		if (F_ISSET(flags, F_BIGDATA)) {
 			/* Data already on overflow page. */
 			node_size += sizeof(pgno_t);
-		} else if (node_size + data->mv_size >= mc->mc_txn->mt_env->me_nodemax) {
+		} else if (node_size + data->mv_size > mc->mc_txn->mt_env->me_nodemax) {
 			int ovpages = OVPAGES(data->mv_size, mc->mc_txn->mt_env->me_psize);
 			int rc;
 			/* Put data on overflow page. */
