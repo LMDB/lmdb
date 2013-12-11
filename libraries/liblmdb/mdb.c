@@ -5824,9 +5824,8 @@ more:
 				if (flags == MDB_CURRENT)
 					goto current;
 
-				dkey = olddata;
 #if UINT_MAX < SIZE_MAX
-				if (mc->mc_dbx->md_dcmp == mdb_cmp_int && dkey.mv_size == sizeof(size_t))
+				if (mc->mc_dbx->md_dcmp == mdb_cmp_int && olddata.mv_size == sizeof(size_t))
 #ifdef MISALIGNED_OK
 					mc->mc_dbx->md_dcmp = mdb_cmp_long;
 #else
@@ -5834,7 +5833,7 @@ more:
 #endif
 #endif
 				/* if data matches, skip it */
-				if (!mc->mc_dbx->md_dcmp(data, &dkey)) {
+				if (!mc->mc_dbx->md_dcmp(data, &olddata)) {
 					if (flags & MDB_NODUPDATA)
 						rc = MDB_KEYEXIST;
 					else if (flags & MDB_MULTIPLE)
@@ -5844,9 +5843,11 @@ more:
 					return rc;
 				}
 
+				/* Back up original data item */
+				dkey.mv_size = olddata.mv_size;
+				dkey.mv_data = memcpy(dbuf, olddata.mv_data, olddata.mv_size);
+
 				/* create a fake page for the dup items */
-				memcpy(dbuf, dkey.mv_data, dkey.mv_size);
-				dkey.mv_data = dbuf;
 				fp->mp_flags = P_LEAF|P_DIRTY|P_SUBP;
 				fp->mp_lower = PAGEHDRSZ;
 				xdata.mv_size = PAGEHDRSZ + dkey.mv_size + data->mv_size;
