@@ -4507,8 +4507,6 @@ mdb_node_search(MDB_cursor *mc, MDB_val *key, int *exactp)
 	}
 #endif
 
-	assert(nkeys > 0);
-
 	low = IS_LEAF(mp) ? 0 : 1;
 	high = nkeys - 1;
 	cmp = mc->mc_dbx->md_cmp;
@@ -4571,7 +4569,7 @@ mdb_node_search(MDB_cursor *mc, MDB_val *key, int *exactp)
 			node = NODEPTR(mp, i);
 	}
 	if (exactp)
-		*exactp = (rc == 0);
+		*exactp = (rc == 0 && nkeys > 0);
 	/* store the key index */
 	mc->mc_ki[mc->mc_top] = i;
 	if (i >= nkeys)
@@ -5968,7 +5966,8 @@ prep_subDB:
 			rdata = &xdata;
 			flags |= F_DUPDATA;
 			do_sub = 1;
-			mdb_node_del(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], 0);
+			if (!insert)
+				mdb_node_del(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], 0);
 			goto new_sub;
 		}
 current:
