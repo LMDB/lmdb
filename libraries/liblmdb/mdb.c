@@ -5845,7 +5845,7 @@ more:
 			 * it.  mp: new (sub-)page.  offset: growth in page
 			 * size.  xdata: node data with new page or DB.
 			 */
-			unsigned	i, offset = 0;
+			ssize_t		i, offset = 0;
 			mp = fp = xdata.mv_data = env->me_pbuf;
 			mp->mp_pgno = mc->mc_pg[mc->mc_top]->mp_pgno;
 
@@ -5901,17 +5901,17 @@ more:
 				fp = olddata.mv_data;
 				switch (flags) {
 				default:
+					i = -(ssize_t)SIZELEFT(fp);
 					if (!(mc->mc_db->md_flags & MDB_DUPFIXED)) {
-						offset = EVEN(NODESIZE + sizeof(indx_t) +
-							data->mv_size);
-						break;
-					}
-					offset = fp->mp_pad;
-					if (SIZELEFT(fp) < offset) {
+						offset = i += (ssize_t) EVEN(
+							sizeof(indx_t) + NODESIZE + data->mv_size);
+					} else {
+						i += offset = fp->mp_pad;
 						offset *= 4; /* space for 4 more */
-						break;
 					}
-					/* FALLTHRU: Big enough MDB_DUPFIXED sub-page */
+					if (i > 0)
+						break;
+					/* FALLTHRU: Sub-page is big enough */
 				case MDB_CURRENT:
 					fp->mp_flags |= P_DIRTY;
 					COPY_PGNO(fp->mp_pgno, mp->mp_pgno);
@@ -5960,7 +5960,7 @@ prep_subDB:
 				} else {
 					memcpy((char *)mp + mp->mp_upper, (char *)fp + fp->mp_upper,
 						olddata.mv_size - fp->mp_upper);
-					for (i=0; i<NUMKEYS(fp); i++)
+					for (i = NUMKEYS(fp); --i >= 0; )
 						mp->mp_ptrs[i] = fp->mp_ptrs[i] + offset;
 				}
 			}
