@@ -2202,10 +2202,8 @@ mdb_txn_renew0(MDB_txn *txn)
 
 				if (!(env->me_flags & MDB_LIVE_READER)) {
 					rc = mdb_reader_pid(env, Pidset, pid);
-					if (rc) {
-						UNLOCK_MUTEX_R(env);
+					if (rc)
 						return rc;
-					}
 					env->me_flags |= MDB_LIVE_READER;
 				}
 
