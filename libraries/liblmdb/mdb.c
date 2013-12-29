@@ -1205,6 +1205,15 @@ mdb_strerror(int err)
 }
 
 #if MDB_DEBUG
+/** Return the page number of \b mp which may be sub-page, for debug output */
+static pgno_t
+mdb_dbg_pgno(MDB_page *mp)
+{
+	pgno_t ret;
+	COPY_PGNO(ret, mp->mp_pgno);
+	return ret;
+}
+
 /** Display a key in hexadecimal and return the address of the result.
  * @param[in] key the key to display
  * @param[in] buf the buffer to write into. Should always be #DKBUF.
@@ -1245,7 +1254,7 @@ mdb_page_list(MDB_page *mp)
 	DKBUF;
 
 	nkeys = NUMKEYS(mp);
-	fprintf(stderr, "Page %"Z"u numkeys %d\n", mp->mp_pgno, nkeys);
+	fprintf(stderr, "Page %"Z"u numkeys %d\n", mdb_dbg_pgno(mp), nkeys);
 	for (i=0; i<nkeys; i++) {
 		node = NODEPTR(mp, i);
 		key.mv_size = node->mn_ksize;
@@ -4499,15 +4508,9 @@ mdb_node_search(MDB_cursor *mc, MDB_val *key, int *exactp)
 
 	nkeys = NUMKEYS(mp);
 
-#if MDB_DEBUG
-	{
-	pgno_t pgno;
-	COPY_PGNO(pgno, mp->mp_pgno);
 	DPRINTF(("searching %u keys in %s %spage %"Z"u",
 	    nkeys, IS_LEAF(mp) ? "leaf" : "branch", IS_SUBP(mp) ? "sub-" : "",
-	    pgno));
-	}
-#endif
+	    mdb_dbg_pgno(mp)));
 
 	low = IS_LEAF(mp) ? 0 : 1;
 	high = nkeys - 1;
@@ -5086,7 +5089,8 @@ mdb_cursor_next(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 		}
 	}
 
-	DPRINTF(("cursor_next: top page is %"Z"u in cursor %p", mp->mp_pgno, (void *) mc));
+	DPRINTF(("cursor_next: top page is %"Z"u in cursor %p",
+		mdb_dbg_pgno(mp), (void *) mc));
 	if (mc->mc_flags & C_DEL)
 		goto skip;
 
@@ -5103,7 +5107,7 @@ mdb_cursor_next(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 
 skip:
 	DPRINTF(("==> cursor points to page %"Z"u with %u keys, key index %u",
-	    mp->mp_pgno, NUMKEYS(mp), mc->mc_ki[mc->mc_top]));
+	    mdb_dbg_pgno(mp), NUMKEYS(mp), mc->mc_ki[mc->mc_top]));
 
 	if (IS_LEAF2(mp)) {
 		key->mv_size = mc->mc_db->md_pad;
@@ -5162,7 +5166,8 @@ mdb_cursor_prev(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 		}
 	}
 
-	DPRINTF(("cursor_prev: top page is %"Z"u in cursor %p", mp->mp_pgno, (void *) mc));
+	DPRINTF(("cursor_prev: top page is %"Z"u in cursor %p",
+		mdb_dbg_pgno(mp), (void *) mc));
 
 	if (mc->mc_ki[mc->mc_top] == 0)  {
 		DPUTS("=====> move to prev sibling page");
@@ -5178,7 +5183,7 @@ mdb_cursor_prev(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 	mc->mc_flags &= ~C_EOF;
 
 	DPRINTF(("==> cursor points to page %"Z"u with %u keys, key index %u",
-	    mp->mp_pgno, NUMKEYS(mp), mc->mc_ki[mc->mc_top]));
+	    mdb_dbg_pgno(mp), NUMKEYS(mp), mc->mc_ki[mc->mc_top]));
 
 	if (IS_LEAF2(mp)) {
 		key->mv_size = mc->mc_db->md_pad;
@@ -6351,7 +6356,7 @@ mdb_node_add(MDB_cursor *mc, indx_t indx,
 	DPRINTF(("add to %s %spage %"Z"u index %i, data size %"Z"u key size %"Z"u [%s]",
 	    IS_LEAF(mp) ? "leaf" : "branch",
 		IS_SUBP(mp) ? "sub-" : "",
-	    mp->mp_pgno, indx, data ? data->mv_size : 0,
+		mdb_dbg_pgno(mp), indx, data ? data->mv_size : 0,
 		key ? key->mv_size : 0, key ? DKEY(key) : "null"));
 
 	if (IS_LEAF2(mp)) {
@@ -6449,7 +6454,7 @@ update:
 
 full:
 	DPRINTF(("not enough room in page %"Z"u, got %u ptrs",
-		mp->mp_pgno, NUMKEYS(mp)));
+		mdb_dbg_pgno(mp), NUMKEYS(mp)));
 	DPRINTF(("upper-lower = %u - %u = %"Z"d", mp->mp_upper,mp->mp_lower,room));
 	DPRINTF(("node size = %"Z"u", node_size));
 	return MDB_PAGE_FULL;
@@ -6469,14 +6474,8 @@ mdb_node_del(MDB_page *mp, indx_t indx, int ksize)
 	MDB_node	*node;
 	char		*base;
 
-#if MDB_DEBUG
-	{
-	pgno_t pgno;
-	COPY_PGNO(pgno, mp->mp_pgno);
 	DPRINTF(("delete node %u on %s page %"Z"u", indx,
-	    IS_LEAF(mp) ? "leaf" : "branch", pgno));
-	}
-#endif
+	    IS_LEAF(mp) ? "leaf" : "branch", mdb_dbg_pgno(mp)));
 	assert(indx < NUMKEYS(mp));
 
 	if (IS_LEAF2(mp)) {
@@ -7184,25 +7183,15 @@ mdb_rebalance(MDB_cursor *mc)
 	MDB_cursor	mn;
 
 	minkeys = 1 + (IS_BRANCH(mc->mc_pg[mc->mc_top]));
-#if MDB_DEBUG
-	{
-	pgno_t pgno;
-	COPY_PGNO(pgno, mc->mc_pg[mc->mc_top]->mp_pgno);
 	DPRINTF(("rebalancing %s page %"Z"u (has %u keys, %.1f%% full)",
 	    IS_LEAF(mc->mc_pg[mc->mc_top]) ? "leaf" : "branch",
-	    pgno, NUMKEYS(mc->mc_pg[mc->mc_top]),
+	    mdb_dbg_pgno(mc->mc_pg[mc->mc_top]), NUMKEYS(mc->mc_pg[mc->mc_top]),
 		(float)PAGEFILL(mc->mc_txn->mt_env, mc->mc_pg[mc->mc_top]) / 10));
-	}
-#endif
 
 	if (PAGEFILL(mc->mc_txn->mt_env, mc->mc_pg[mc->mc_top]) >= FILL_THRESHOLD &&
 		NUMKEYS(mc->mc_pg[mc->mc_top]) >= minkeys) {
-#if MDB_DEBUG
-		pgno_t pgno;
-		COPY_PGNO(pgno, mc->mc_pg[mc->mc_top]->mp_pgno);
 		DPRINTF(("no need to rebalance page %"Z"u, above fill threshold",
-		    pgno));
-#endif
+		    mdb_dbg_pgno(mc->mc_pg[mc->mc_top])));
 		return MDB_SUCCESS;
 	}
 
