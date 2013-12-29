@@ -263,8 +263,6 @@ typedef int  (MDB_cmp_func)(const MDB_val *a, const MDB_val *b);
 typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *relctx);
 
 /** @defgroup	mdb_env	Environment Flags
- *
- *	Values do not overlap Database Flags.
  *	@{
  */
 	/** mmap at a fixed address (experimental) */
@@ -292,8 +290,6 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
 /** @} */
 
 /**	@defgroup	mdb_dbi_open	Database Flags
- *
- *	Values do not overlap Environment Flags.
  *	@{
  */
 	/** use reverse string keys */

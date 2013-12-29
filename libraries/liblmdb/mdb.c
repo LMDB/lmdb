@@ -4011,6 +4011,10 @@ fail:
 #define	CHANGELESS	(MDB_FIXEDMAP|MDB_NOSUBDIR|MDB_RDONLY|MDB_WRITEMAP| \
 	MDB_NOTLS|MDB_NOLOCK|MDB_NORDAHEAD)
 
+#if VALID_FLAGS & PERSISTENT_FLAGS & (CHANGEABLE|CHANGELESS)
+# error "Persistent DB flags & env flags overlap, but both go in mm_flags"
+#endif
+
 int
 mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode)
 {
