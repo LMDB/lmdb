@@ -7361,7 +7361,7 @@ mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
 	if (rc != MDB_SUCCESS)
 		mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
 	else {
-		MDB_cursor *m2;
+		MDB_cursor *m2, *m3;
 		MDB_dbi dbi = mc->mc_dbi;
 
 		mp = mc->mc_pg[mc->mc_top];
@@ -7373,18 +7373,19 @@ mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
 
 		/* Adjust other cursors pointing to mp */
 		for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
-			if (m2 == mc || m2->mc_snum < mc->mc_snum)
+			m3 = (mc->mc_flags & C_SUB) ? &m2->mc_xcursor->mx_cursor : m2;
+			if (! (m2->mc_flags & m3->mc_flags & C_INITIALIZED))
 				continue;
-			if (!(m2->mc_flags & C_INITIALIZED))
+			if (m3 == mc || m3->mc_snum < mc->mc_snum)
 				continue;
-			if (m2->mc_pg[mc->mc_top] == mp) {
-				if (m2->mc_ki[mc->mc_top] >= ki) {
-					m2->mc_flags |= C_DEL;
-					if (m2->mc_ki[mc->mc_top] > ki)
-						m2->mc_ki[mc->mc_top]--;
+			if (m3->mc_pg[mc->mc_top] == mp) {
+				if (m3->mc_ki[mc->mc_top] >= ki) {
+					m3->mc_flags |= C_DEL;
+					if (m3->mc_ki[mc->mc_top] > ki)
+						m3->mc_ki[mc->mc_top]--;
 				}
-				if (m2->mc_ki[mc->mc_top] >= nkeys)
-					mdb_cursor_sibling(m2, 1);
+				if (m3->mc_ki[mc->mc_top] >= nkeys)
+					mdb_cursor_sibling(m3, 1);
 			}
 		}
 		mc->mc_flags |= C_DEL;
