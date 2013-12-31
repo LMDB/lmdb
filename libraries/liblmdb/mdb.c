@@ -1389,11 +1389,11 @@ mdb_page_malloc(MDB_txn *txn, unsigned num)
 		off = sz - psize;
 	}
 	if ((ret = malloc(sz)) != NULL) {
+		VGMEMP_ALLOC(env, ret, sz);
 		if (!(env->me_flags & MDB_NOMEMINIT)) {
 			memset((char *)ret + off, 0, psize);
 			ret->mp_pad = 0;
 		}
-		VGMEMP_ALLOC(env, ret, sz);
 	}
 	return ret;
 }
