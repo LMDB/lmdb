@@ -2834,8 +2834,8 @@ mdb_txn_commit(MDB_txn *txn)
 	unsigned int i;
 	MDB_env	*env;
 
-	assert(txn != NULL);
-	assert(txn->mt_env != NULL);
+	if (txn == NULL || txn->mt_env == NULL)
+		return EINVAL;
 
 	if (txn->mt_child) {
 		rc = mdb_txn_commit(txn->mt_child);
@@ -3175,9 +3175,6 @@ mdb_env_write_meta(MDB_txn *txn)
 #else
 	int r2;
 #endif
-
-	assert(txn != NULL);
-	assert(txn->mt_env != NULL);
 
 	toggle = txn->mt_txnid & 1;
 	DPRINTF(("writing meta page %d for root page %"Z"u",
@@ -4624,7 +4621,6 @@ mdb_cursor_push(MDB_cursor *mc, MDB_page *mp)
 		DDBI(mc), (void *) mc));
 
 	if (mc->mc_snum >= CURSOR_STACK) {
-		assert(mc->mc_snum < CURSOR_STACK);
 		return MDB_CURSOR_FULL;
 	}
 
@@ -4684,7 +4680,6 @@ mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret, int *lvl)
 		p = (MDB_page *)(env->me_map + env->me_psize * pgno);
 	} else {
 		DPRINTF(("page %"Z"u not found", pgno));
-		assert(p != NULL);
 		return MDB_PAGE_NOTFOUND;
 	}
 
@@ -4984,8 +4979,9 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 	int exact = 0;
 	DKBUF;
 
-	assert(key);
-	assert(data);
+	if (key == NULL || data == NULL)
+		return EINVAL;
+
 	DPRINTF(("===> get db %u key [%s]", dbi, DKEY(key)));
 
 	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
@@ -5499,7 +5495,8 @@ mdb_cursor_get(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	int		 exact = 0;
 	int		 (*mfunc)(MDB_cursor *mc, MDB_val *key, MDB_val *data);
 
-	assert(mc);
+	if (mc == NULL)
+		return EINVAL;
 
 	if (mc->mc_txn->mt_flags & MDB_TXN_ERROR)
 		return MDB_BAD_TXN;
@@ -7405,7 +7402,8 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 	int		 rc, exact;
 	DKBUF;
 
-	assert(key != NULL);
+	if (key == NULL)
+		return EINVAL;
 
 	DPRINTF(("====> delete db %u key [%s]", dbi, DKEY(key)));
 
@@ -7850,8 +7848,8 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 	MDB_cursor mc;
 	MDB_xcursor mx;
 
-	assert(key != NULL);
-	assert(data != NULL);
+	if (key == NULL || data == NULL)
+		return EINVAL;
 
 	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
 		return EINVAL;
