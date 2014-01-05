@@ -149,13 +149,24 @@
 /** @defgroup internal	MDB Internals
  *	@{
  */
-/** @defgroup compat	Windows Compatibility Macros
+/** @defgroup compat	Compatibility Macros
  *	A bunch of macros to minimize the amount of platform-specific ifdefs
  *	needed throughout the rest of the code. When the features this library
  *	needs are similar enough to POSIX to be hidden in a one-or-two line
  *	replacement, this macro approach is used.
  *	@{
  */
+
+	/** Wrapper around __func__, which is a C99 feature */
+#if __STDC_VERSION__ >= 199901L
+# define mdb_func_	__func__
+#elif __GNUC__ >= 2 || _MSC_VER >= 1300
+# define mdb_func_	__FUNCTION__
+#else
+/* If a debug message says <mdb_unknown>(), update the #if statements above */
+# define mdb_func_	"<mdb_unknown>"
+#endif
+
 #ifdef _WIN32
 #define MDB_USE_HASH	1
 #define MDB_PIDLOCK	0
@@ -327,7 +338,7 @@ static txnid_t mdb_debug_start;
 	 */
 # define DPRINTF(args) ((void) ((mdb_debug) && DPRINTF0 args))
 # define DPRINTF0(fmt, ...) \
-	fprintf(stderr, "%s:%d " fmt "\n", __func__, __LINE__, __VA_ARGS__)
+	fprintf(stderr, "%s:%d " fmt "\n", mdb_func_, __LINE__, __VA_ARGS__)
 #else
 # define DPRINTF(args)	((void) 0)
 #endif
