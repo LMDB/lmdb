@@ -4621,6 +4621,7 @@ mdb_cursor_push(MDB_cursor *mc, MDB_page *mp)
 		DDBI(mc), (void *) mc));
 
 	if (mc->mc_snum >= CURSOR_STACK) {
+		mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
 		return MDB_CURSOR_FULL;
 	}
 
@@ -4680,6 +4681,7 @@ mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret, int *lvl)
 		p = (MDB_page *)(env->me_map + env->me_psize * pgno);
 	} else {
 		DPRINTF(("page %"Z"u not found", pgno));
+		txn->mt_flags |= MDB_TXN_ERROR;
 		return MDB_PAGE_NOTFOUND;
 	}
 
@@ -4747,6 +4749,7 @@ mdb_page_search_root(MDB_cursor *mc, MDB_val *key, int flags)
 	if (!IS_LEAF(mp)) {
 		DPRINTF(("internal error, index points to a %02X page!?",
 		    mp->mp_flags));
+		mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
 		return MDB_CORRUPTED;
 	}
 
@@ -6454,6 +6457,7 @@ full:
 		mdb_dbg_pgno(mp), NUMKEYS(mp)));
 	DPRINTF(("upper-lower = %u - %u = %"Z"d", mp->mp_upper,mp->mp_lower,room));
 	DPRINTF(("node size = %"Z"u", node_size));
+	mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
 	return MDB_PAGE_FULL;
 }
 
