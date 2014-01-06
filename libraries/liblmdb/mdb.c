@@ -1405,6 +1405,8 @@ mdb_page_malloc(MDB_txn *txn, unsigned num)
 			memset((char *)ret + off, 0, psize);
 			ret->mp_pad = 0;
 		}
+	} else {
+		txn->mt_flags |= MDB_TXN_ERROR;
 	}
 	return ret;
 }
@@ -1725,8 +1727,10 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 	*mp = NULL;
 
 	/* If our dirty list is already full, we can't do anything */
-	if (txn->mt_dirty_room == 0)
-		return MDB_TXN_FULL;
+	if (txn->mt_dirty_room == 0) {
+		rc = MDB_TXN_FULL;
+		goto fail;
+	}
 
 	for (op = MDB_FIRST;; op = MDB_NEXT) {
 		MDB_val key, data;
@@ -1771,7 +1775,7 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 		if (rc) {
 			if (rc == MDB_NOTFOUND)
 				break;
-			return rc;
+			goto fail;
 		}
 		last = *(txnid_t*)key.mv_data;
 		if (oldest <= last)
@@ -1784,11 +1788,13 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 		idl = (MDB_ID *) data.mv_data;
 		i = idl[0];
 		if (!mop) {
-			if (!(env->me_pghead = mop = mdb_midl_alloc(i)))
-				return ENOMEM;
+			if (!(env->me_pghead = mop = mdb_midl_alloc(i))) {
+				rc = ENOMEM;
+				goto fail;
+			}
 		} else {
 			if ((rc = mdb_midl_need(&env->me_pghead, i)) != 0)
-				return rc;
+				goto fail;
 			mop = env->me_pghead;
 		}
 		env->me_pglast = last;
@@ -1817,15 +1823,18 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 	pgno = txn->mt_next_pgno;
 	if (pgno + num >= env->me_maxpg) {
 			DPUTS("DB size maxed out");
-			return MDB_MAP_FULL;
+			rc = MDB_MAP_FULL;
+			goto fail;
 	}
 
 search_done:
 	if (env->me_flags & MDB_WRITEMAP) {
 		np = (MDB_page *)(env->me_map + env->me_psize * pgno);
 	} else {
-		if (!(np = mdb_page_malloc(txn, num)))
-			return ENOMEM;
+		if (!(np = mdb_page_malloc(txn, num))) {
+			rc = ENOMEM;
+			goto fail;
+		}
 	}
 	if (i) {
 		mop[0] = mop_len -= num;
@@ -1840,6 +1849,10 @@ search_done:
 	*mp = np;
 
 	return MDB_SUCCESS;
+
+fail:
+	txn->mt_flags |= MDB_TXN_ERROR;
+	return rc;
 }
 
 /** Copy the used portions of a non-overflow page.
@@ -1946,13 +1959,13 @@ mdb_page_touch(MDB_cursor *mc)
 			np = NULL;
 			rc = mdb_page_unspill(txn, mp, &np);
 			if (rc)
-				return rc;
+				goto fail;
 			if (np)
 				goto done;
 		}
 		if ((rc = mdb_midl_need(&txn->mt_free_pgs, 1)) ||
 			(rc = mdb_page_alloc(mc, 1, &np)))
-			return rc;
+			goto fail;
 		pgno = np->mp_pgno;
 		DPRINTF(("touched db %d page %"Z"u -> %"Z"u", DDBI(mc),
 			mp->mp_pgno, pgno));
@@ -1977,6 +1990,7 @@ mdb_page_touch(MDB_cursor *mc)
 			if (x <= dl[0].mid && dl[x].mid == pgno) {
 				if (mp != dl[x].mptr) { /* bad cursor? */
 					mc->mc_flags &= ~(C_INITIALIZED|C_EOF);
+					txn->mt_flags |= MDB_TXN_ERROR;
 					return MDB_CORRUPTED;
 				}
 				return 0;
@@ -2025,6 +2039,10 @@ done:
 		}
 	}
 	return 0;
+
+fail:
+	txn->mt_flags |= MDB_TXN_ERROR;
+	return rc;
 }
 
 int
