@@ -1130,7 +1130,7 @@ static void mdb_env_close0(MDB_env *env, int excl);
 static MDB_node *mdb_node_search(MDB_cursor *mc, MDB_val *key, int *exactp);
 static int  mdb_node_add(MDB_cursor *mc, indx_t indx,
 			    MDB_val *key, MDB_val *data, pgno_t pgno, unsigned int flags);
-static void mdb_node_del(MDB_page *mp, indx_t indx, int ksize);
+static void mdb_node_del(MDB_cursor *mc, int ksize);
 static void mdb_node_shrink(MDB_page *mp, indx_t indx);
 static int	mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst);
 static int  mdb_node_read(MDB_txn *txn, MDB_node *leaf, MDB_val *data);
@@ -6032,7 +6032,7 @@ prep_subDB:
 			flags |= F_DUPDATA;
 			do_sub = 1;
 			if (!insert)
-				mdb_node_del(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], 0);
+				mdb_node_del(mc, 0);
 			goto new_sub;
 		}
 current:
@@ -6108,7 +6108,7 @@ current:
 				memcpy(NODEKEY(leaf), key->mv_data, key->mv_size);
 			goto done;
 		}
-		mdb_node_del(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], 0);
+		mdb_node_del(mc, 0);
 		mc->mc_db->md_entries--;
 	}
 
@@ -6526,8 +6526,10 @@ full:
  * part of a #MDB_DUPFIXED database.
  */
 static void
-mdb_node_del(MDB_page *mp, indx_t indx, int ksize)
+mdb_node_del(MDB_cursor *mc, int ksize)
 {
+	MDB_page *mp = mc->mc_pg[mc->mc_top];
+	indx_t	indx = mc->mc_ki[mc->mc_top];
 	unsigned int	 sz;
 	indx_t		 i, j, numkeys, ptr;
 	MDB_node	*node;
@@ -6535,10 +6537,11 @@ mdb_node_del(MDB_page *mp, indx_t indx, int ksize)
 
 	DPRINTF(("delete node %u on %s page %"Z"u", indx,
 	    IS_LEAF(mp) ? "leaf" : "branch", mdb_dbg_pgno(mp)));
-	assert(indx < NUMKEYS(mp));
+	numkeys = NUMKEYS(mp);
+	mdb_cassert(mc, indx < numkeys);
 
 	if (IS_LEAF2(mp)) {
-		int x = NUMKEYS(mp) - 1 - indx;
+		int x = numkeys - 1 - indx;
 		base = LEAF2KEY(mp, indx, ksize);
 		if (x)
 			memmove(base, base + ksize, x * ksize);
@@ -6558,7 +6561,6 @@ mdb_node_del(MDB_page *mp, indx_t indx, int ksize)
 	sz = EVEN(sz);
 
 	ptr = mp->mp_ptrs[indx];
-	numkeys = NUMKEYS(mp);
 	for (i = j = 0; i < numkeys; i++) {
 		if (i != indx) {
 			mp->mp_ptrs[j] = mp->mp_ptrs[i];
@@ -6883,7 +6885,7 @@ mdb_update_key(MDB_cursor *mc, MDB_val *key)
 			/* not enough space left, do a delete and split */
 			DPRINTF(("Not enough room, delta = %d, splitting...", delta));
 			pgno = NODEPGNO(node);
-			mdb_node_del(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], 0);
+			mdb_node_del(mc, 0);
 			return mdb_page_split(mc, key, NULL, pgno, MDB_SPLIT_REPLACE);
 		}
 
@@ -7005,7 +7007,7 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 
 	/* Delete the node from the source page.
 	 */
-	mdb_node_del(csrc->mc_pg[csrc->mc_top], csrc->mc_ki[csrc->mc_top], key.mv_size);
+	mdb_node_del(csrc, key.mv_size);
 
 	{
 		/* Adjust other cursors pointing to mp */
@@ -7163,15 +7165,17 @@ mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst)
 
 	/* Unlink the src page from parent and add to free list.
 	 */
-	mdb_node_del(csrc->mc_pg[csrc->mc_top-1], csrc->mc_ki[csrc->mc_top-1], 0);
-	if (csrc->mc_ki[csrc->mc_top-1] == 0) {
+	csrc->mc_top--;
+	mdb_node_del(csrc, 0);
+	if (csrc->mc_ki[csrc->mc_top] == 0) {
 		key.mv_size = 0;
-		csrc->mc_top--;
 		rc = mdb_update_key(csrc, &key);
-		csrc->mc_top++;
-		if (rc)
+		if (rc) {
+			csrc->mc_top++;
 			return rc;
+		}
 	}
+	csrc->mc_top++;
 
 	rc = mdb_midl_append(&csrc->mc_txn->mt_free_pgs,
 		csrc->mc_pg[csrc->mc_top]->mp_pgno);
@@ -7414,7 +7418,7 @@ mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
 			(rc = mdb_ovpage_free(mc, omp)))
 			return rc;
 	}
-	mdb_node_del(mp, ki, mc->mc_db->md_pad);
+	mdb_node_del(mc, mc->mc_db->md_pad);
 	mc->mc_db->md_entries--;
 	rc = mdb_rebalance(mc);
 	if (rc != MDB_SUCCESS)
