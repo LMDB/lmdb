@@ -65,7 +65,6 @@
 #include <fcntl.h>
 #endif
 
-#include <assert.h>
 #include <errno.h>
 #include <limits.h>
 #include <stddef.h>
@@ -1701,7 +1700,7 @@ static void
 mdb_page_dirty(MDB_txn *txn, MDB_page *mp)
 {
 	MDB_ID2 mid;
-	int (*insert)(MDB_ID2L, MDB_ID2 *);
+	int rc, (*insert)(MDB_ID2L, MDB_ID2 *);
 
 	if (txn->mt_env->me_flags & MDB_WRITEMAP) {
 		insert = mdb_mid2l_append;
@@ -1710,7 +1709,8 @@ mdb_page_dirty(MDB_txn *txn, MDB_page *mp)
 	}
 	mid.mid = mp->mp_pgno;
 	mid.mptr = mp;
-	insert(txn->mt_u.dirty_list, &mid);
+	rc = insert(txn->mt_u.dirty_list, &mid);
+	mdb_tassert(txn, rc == 0);
 	txn->mt_dirty_room--;
 }
 
@@ -2032,7 +2032,8 @@ mdb_page_touch(MDB_cursor *mc)
 			return ENOMEM;
 		mid.mid = pgno;
 		mid.mptr = np;
-		mdb_mid2l_insert(dl, &mid);
+		rc = mdb_mid2l_insert(dl, &mid);
+		mdb_cassert(mc, rc == 0);
 	} else {
 		return 0;
 	}
@@ -5279,8 +5280,6 @@ mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	MDB_node	*leaf = NULL;
 	DKBUF;
 
-	assert(mc);
-	mdb_cassert(mc, key);
 	if (key->mv_size == 0)
 		return MDB_BAD_VALSIZE;
 
@@ -5749,7 +5748,7 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
     unsigned int flags)
 {
 	enum { MDB_NO_ROOT = MDB_LAST_ERRCODE+10 }; /* internal code */
-	MDB_env		*env = mc->mc_txn->mt_env;
+	MDB_env		*env;
 	MDB_node	*leaf = NULL;
 	MDB_page	*fp, *mp;
 	uint16_t	fp_flags;
@@ -5761,6 +5760,11 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	int rc, rc2;
 	unsigned int nflags;
 	DKBUF;
+
+	if (mc == NULL || key == NULL)
+		return EINVAL;
+
+	env = mc->mc_txn->mt_env;
 
 	/* Check this first so counter will always be zero on any
 	 * early failures.
@@ -6072,7 +6076,8 @@ current:
 						return ENOMEM;
 					id2.mid = pg;
 					id2.mptr = np;
-					mdb_mid2l_insert(mc->mc_txn->mt_u.dirty_list, &id2);
+					rc = mdb_mid2l_insert(mc->mc_txn->mt_u.dirty_list, &id2);
+					mdb_cassert(mc, rc == 0);
 					if (!(flags & MDB_RESERVE)) {
 						/* Copy end of page, adjusting alignment so
 						 * compiler may copy words instead of bytes.
@@ -6835,7 +6840,6 @@ mdb_cursor_txn(MDB_cursor *mc)
 MDB_dbi
 mdb_cursor_dbi(MDB_cursor *mc)
 {
-	assert(mc != NULL);
 	return mc->mc_dbi;
 }
 
