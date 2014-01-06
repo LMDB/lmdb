@@ -1080,6 +1080,7 @@ struct MDB_env {
 	sem_t		*me_rmutex;		/* Shared mutexes are not supported */
 	sem_t		*me_wmutex;
 #endif
+	void		*me_userctx;	 /**< User-settable context */
 };
 
 	/** Nested transaction */
@@ -7914,6 +7915,21 @@ mdb_env_get_flags(MDB_env *env, unsigned int *arg)
 
 	*arg = env->me_flags;
 	return MDB_SUCCESS;
+}
+
+int
+mdb_env_set_userctx(MDB_env *env, void *ctx)
+{
+	if (!env)
+		return EINVAL;
+	env->me_userctx = ctx;
+	return MDB_SUCCESS;
+}
+
+void *
+mdb_env_get_userctx(MDB_env *env)
+{
+	return env ? env->me_userctx : NULL;
 }
 
 int
