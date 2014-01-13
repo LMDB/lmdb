@@ -3556,7 +3556,7 @@ mdb_env_open2(MDB_env *env)
 			env->me_mapsize = minsize;
 	}
 
-	rc = mdb_env_map(env, meta.mm_address, newenv);
+	rc = mdb_env_map(env, meta.mm_address, newenv || env->me_mapsize != meta.mm_mapsize);
 	if (rc)
 		return rc;
 
