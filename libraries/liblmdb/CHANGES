@@ -1,5 +1,16 @@
 LMDB 0.9 Change Log
 
+LMDB 0.9.11 Release (2014/01/15)
+	Add mdb_env_set_assert() (ITS#7775)
+	Fix: invalidate txn on page allocation errors (ITS#7377)
+	Fix xcursor tracking in mdb_cursor_del0() (ITS#7771)
+	Fix corruption from deletes (ITS#7756)
+	Fix Windows/MSVC build issues
+	Raise safe limit of max MDB_MAXKEYSIZE
+	Misc code cleanup
+	Documentation
+		Remove spurious note about non-overlapping flags (ITS#7665)
+
 LMDB 0.9.10 Release (2013/11/12)
 	Add MDB_NOMEMINIT option
 	Fix mdb_page_split() again (ITS#7589)
