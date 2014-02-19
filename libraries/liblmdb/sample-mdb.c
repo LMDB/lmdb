@@ -27,6 +27,8 @@ int main(int argc,char * argv[])
 	MDB_cursor *cursor;
 	char sval[32];
 
+	/* Note: Most error checking omitted for simplicity */
+
 	rc = mdb_env_create(&env);
 	rc = mdb_env_open(env, "./testdb", 0, 0664);
 	rc = mdb_txn_begin(env, NULL, 0, &txn);

@@ -28,6 +28,8 @@ int main(int argc,char * argv[])
 	DBC *cursor;
 	char sval[32], kval[32];
 
+	/* Note: Most error checking omitted for simplicity */
+
 #define FLAGS (DB_INIT_LOCK|DB_INIT_LOG|DB_INIT_TXN|DB_INIT_MPOOL|DB_CREATE|DB_THREAD)
 	rc = db_env_create(&env, 0);
 	rc = env->open(env, "./testdb", FLAGS, 0664);
