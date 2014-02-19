@@ -48,7 +48,7 @@ int main(int argc,char * argv[])
 	rc = mdb_env_set_maxdbs(env, 4);
 	rc = mdb_env_open(env, "./testdb", MDB_FIXEDMAP|MDB_NOSYNC, 0664);
 	rc = mdb_txn_begin(env, NULL, 0, &txn);
-	rc = mdb_open(txn, "id2", MDB_CREATE|MDB_DUPSORT|MDB_DUPFIXED, &dbi);
+	rc = mdb_open(txn, "id4", MDB_CREATE|MDB_DUPSORT|MDB_DUPFIXED, &dbi);
 
 	key.mv_size = sizeof(int);
 	key.mv_data = kval;
