@@ -7765,7 +7765,13 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 				mc->mc_ki[i] = mn.mc_ki[i];
 			}
 			mc->mc_pg[ptop] = mn.mc_pg[ptop];
-			mc->mc_ki[ptop] = mn.mc_ki[ptop] - 1;
+			if (mn.mc_ki[ptop]) {
+				mc->mc_ki[ptop] = mn.mc_ki[ptop] - 1;
+			} else {
+				/* find right page's left sibling */
+				mc->mc_ki[ptop] = mn.mc_ki[ptop];
+				mdb_cursor_sibling(mc, 0);
+			}
 		}
 	} else {
 		mn.mc_top--;
