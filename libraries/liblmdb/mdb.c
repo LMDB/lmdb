@@ -1098,6 +1098,10 @@ typedef struct MDB_ntxn {
 	/** max bytes to write in one call */
 #define MAX_WRITE		(0x80000000U >> (sizeof(ssize_t) == 4))
 
+	/** Check \b txn and \b dbi arguments to a function */
+#define TXN_DBI_EXIST(txn, dbi) \
+	((txn) && (dbi) < (txn)->mt_numdbs && ((txn)->mt_dbflags[dbi] & DB_VALID))
+
 static int  mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp);
 static int  mdb_page_new(MDB_cursor *mc, uint32_t flags, int num, MDB_page **mp);
 static int  mdb_page_touch(MDB_cursor *mc);
@@ -1378,6 +1382,7 @@ mdb_cursor_chk(MDB_cursor *mc)
 /** Count all the pages in each DB and in the freelist
  *  and make sure it matches the actual number of pages
  *  being used.
+ *  All named DBs must be open for a correct count.
  */
 static void mdb_audit(MDB_txn *txn)
 {
@@ -1395,6 +1400,8 @@ static void mdb_audit(MDB_txn *txn)
 	count = 0;
 	for (i = 0; i<txn->mt_numdbs; i++) {
 		MDB_xcursor mx;
+		if (!(txn->mt_dbflags[i] & DB_VALID))
+			continue;
 		mdb_cursor_init(&mc, txn, i, &mx);
 		if (txn->mt_dbs[i].md_root == P_INVALID)
 			continue;
@@ -5080,12 +5087,9 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 	int exact = 0;
 	DKBUF;
 
-	if (key == NULL || data == NULL)
-		return EINVAL;
-
 	DPRINTF(("===> get db %u key [%s]", dbi, DKEY(key)));
 
-	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
+	if (!key || !data || dbi == FREE_DBI || !TXN_DBI_EXIST(txn, dbi))
 		return EINVAL;
 
 	if (txn->mt_flags & MDB_TXN_ERROR)
@@ -6795,7 +6799,7 @@ mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **ret)
 	MDB_cursor	*mc;
 	size_t size = sizeof(MDB_cursor);
 
-	if (txn == NULL || ret == NULL || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
+	if (!ret || !TXN_DBI_EXIST(txn, dbi))
 		return EINVAL;
 
 	if (txn->mt_flags & MDB_TXN_ERROR)
@@ -6827,11 +6831,14 @@ mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **ret)
 int
 mdb_cursor_renew(MDB_txn *txn, MDB_cursor *mc)
 {
-	if (txn == NULL || mc == NULL || mc->mc_dbi >= txn->mt_numdbs)
+	if (!mc || !TXN_DBI_EXIST(txn, mc->mc_dbi))
 		return EINVAL;
 
 	if ((mc->mc_flags & C_UNTRACK) || txn->mt_cursors)
 		return EINVAL;
+
+	if (txn->mt_flags & MDB_TXN_ERROR)
+		return MDB_BAD_TXN;
 
 	mdb_cursor_init(mc, txn, mc->mc_dbi, mc->mc_xcursor);
 	return MDB_SUCCESS;
@@ -6848,6 +6855,9 @@ mdb_cursor_count(MDB_cursor *mc, size_t *countp)
 
 	if (mc->mc_xcursor == NULL)
 		return MDB_INCOMPATIBLE;
+
+	if (mc->mc_txn->mt_flags & MDB_TXN_ERROR)
+		return MDB_BAD_TXN;
 
 	leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
 	if (!F_ISSET(leaf->mn_flags, F_DUPDATA)) {
@@ -7519,12 +7529,9 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 	int		 rc, exact;
 	DKBUF;
 
-	if (key == NULL)
-		return EINVAL;
-
 	DPRINTF(("====> delete db %u key [%s]", dbi, DKEY(key)));
 
-	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
+	if (!key || dbi == FREE_DBI || !TXN_DBI_EXIST(txn, dbi))
 		return EINVAL;
 
 	if (txn->mt_flags & (MDB_TXN_RDONLY|MDB_TXN_ERROR))
@@ -7969,10 +7976,7 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 	MDB_cursor mc;
 	MDB_xcursor mx;
 
-	if (key == NULL || data == NULL)
-		return EINVAL;
-
-	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
+	if (!key || !data || dbi == FREE_DBI || !TXN_DBI_EXIST(txn, dbi))
 		return EINVAL;
 
 	if ((flags & (MDB_NOOVERWRITE|MDB_NODUPDATA|MDB_RESERVE|MDB_APPEND|MDB_APPENDDUP)) != flags)
@@ -8231,8 +8235,11 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 
 int mdb_stat(MDB_txn *txn, MDB_dbi dbi, MDB_stat *arg)
 {
-	if (txn == NULL || arg == NULL || dbi >= txn->mt_numdbs)
+	if (!arg || !TXN_DBI_EXIST(txn, dbi))
 		return EINVAL;
+
+	if (txn->mt_flags & MDB_TXN_ERROR)
+		return MDB_BAD_TXN;
 
 	if (txn->mt_dbflags[dbi] & DB_STALE) {
 		MDB_cursor mc;
@@ -8258,7 +8265,7 @@ void mdb_dbi_close(MDB_env *env, MDB_dbi dbi)
 int mdb_dbi_flags(MDB_txn *txn, MDB_dbi dbi, unsigned int *flags)
 {
 	/* We could return the flags for the FREE_DBI too but what's the point? */
-	if (txn == NULL || dbi < MAIN_DBI || dbi >= txn->mt_numdbs)
+	if (dbi == FREE_DBI || !TXN_DBI_EXIST(txn, dbi))
 		return EINVAL;
 	*flags = txn->mt_dbs[dbi].md_flags & PERSISTENT_FLAGS;
 	return MDB_SUCCESS;
@@ -8351,7 +8358,7 @@ int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)
 	MDB_cursor *mc, *m2;
 	int rc;
 
-	if (!txn || !dbi || dbi >= txn->mt_numdbs || (unsigned)del > 1 || !(txn->mt_dbflags[dbi] & DB_VALID))
+	if ((unsigned)del > 1 || dbi == FREE_DBI || !TXN_DBI_EXIST(txn, dbi))
 		return EINVAL;
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY))
@@ -8394,7 +8401,7 @@ leave:
 
 int mdb_set_compare(MDB_txn *txn, MDB_dbi dbi, MDB_cmp_func *cmp)
 {
-	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
+	if (dbi == FREE_DBI || !TXN_DBI_EXIST(txn, dbi))
 		return EINVAL;
 
 	txn->mt_dbxs[dbi].md_cmp = cmp;
@@ -8403,7 +8410,7 @@ int mdb_set_compare(MDB_txn *txn, MDB_dbi dbi, MDB_cmp_func *cmp)
 
 int mdb_set_dupsort(MDB_txn *txn, MDB_dbi dbi, MDB_cmp_func *cmp)
 {
-	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
+	if (dbi == FREE_DBI || !TXN_DBI_EXIST(txn, dbi))
 		return EINVAL;
 
 	txn->mt_dbxs[dbi].md_dcmp = cmp;
@@ -8412,7 +8419,7 @@ int mdb_set_dupsort(MDB_txn *txn, MDB_dbi dbi, MDB_cmp_func *cmp)
 
 int mdb_set_relfunc(MDB_txn *txn, MDB_dbi dbi, MDB_rel_func *rel)
 {
-	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
+	if (dbi == FREE_DBI || !TXN_DBI_EXIST(txn, dbi))
 		return EINVAL;
 
 	txn->mt_dbxs[dbi].md_rel = rel;
@@ -8421,7 +8428,7 @@ int mdb_set_relfunc(MDB_txn *txn, MDB_dbi dbi, MDB_rel_func *rel)
 
 int mdb_set_relctx(MDB_txn *txn, MDB_dbi dbi, void *ctx)
 {
-	if (txn == NULL || !dbi || dbi >= txn->mt_numdbs || !(txn->mt_dbflags[dbi] & DB_VALID))
+	if (dbi == FREE_DBI || !TXN_DBI_EXIST(txn, dbi))
 		return EINVAL;
 
 	txn->mt_dbxs[dbi].md_relctx = ctx;
