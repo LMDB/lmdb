@@ -2105,6 +2105,7 @@ done:
 			if (m2->mc_pg[mc->mc_top] == mp) {
 				m2->mc_pg[mc->mc_top] = np;
 				if ((mc->mc_db->md_flags & MDB_DUPSORT) &&
+					IS_LEAF(np) &&
 					m2->mc_ki[mc->mc_top] == mc->mc_ki[mc->mc_top])
 				{
 					MDB_node *leaf = NODEPTR(np, mc->mc_ki[mc->mc_top]);
@@ -6305,9 +6306,11 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 		return rc;
 
 	mp = mc->mc_pg[mc->mc_top];
+	if (IS_LEAF2(mp))
+		goto del_key;
 	leaf = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
 
-	if (!IS_LEAF2(mp) && F_ISSET(leaf->mn_flags, F_DUPDATA)) {
+	if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
 		if (!(flags & MDB_NODUPDATA)) {
 			if (!F_ISSET(leaf->mn_flags, F_SUBDATA)) {
 				mc->mc_xcursor->mx_cursor.mc_pg[0] = NODEDATA(leaf);
@@ -6351,7 +6354,7 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 	}
 
 	/* add overflow pages to free list */
-	if (!IS_LEAF2(mp) && F_ISSET(leaf->mn_flags, F_BIGDATA)) {
+	if (F_ISSET(leaf->mn_flags, F_BIGDATA)) {
 		MDB_page *omp;
 		pgno_t pg;
 
@@ -6361,6 +6364,7 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 			return rc;
 	}
 
+del_key:
 	return mdb_cursor_del0(mc);
 }
 
