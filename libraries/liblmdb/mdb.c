@@ -352,7 +352,7 @@ static txnid_t mdb_debug_start;
 
 	/**	@brief The maximum size of a database page.
 	 *
-	 *	This is 32k, since it must fit in #MDB_page.#mp_upper.
+	 *	This is 32k, since it must fit in #MDB_page.%mp_upper.
 	 *
 	 *	LMDB will use database pages < OS pages if needed.
 	 *	That causes more I/O in write transactions: The OS must
@@ -941,7 +941,7 @@ struct MDB_txn {
 #define MDB_TXN_SPILLS		0x08		/**< txn or a parent has spilled pages */
 /** @} */
 	unsigned int	mt_flags;		/**< @ref mdb_txn */
-	/** dirty_list room: Array size - #dirty pages visible to this txn.
+	/** #dirty_list room: Array size - \#dirty pages visible to this txn.
 	 *	Includes ancestor txns' dirty pages not hidden by other txns'
 	 *	dirty/spilled pages. Thus commit(nested txn) has room to merge
 	 *	dirty_list into mt_parent after freeing hidden mt_parent pages.
@@ -1096,7 +1096,7 @@ typedef struct MDB_ntxn {
 #define MDB_COMMIT_PAGES	IOV_MAX
 #endif
 
-	/* max bytes to write in one call */
+	/** max bytes to write in one call */
 #define MAX_WRITE		(0x80000000U >> (sizeof(ssize_t) == 4))
 
 static int  mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp);
@@ -6534,8 +6534,7 @@ full:
 }
 
 /** Delete the specified node from a page.
- * @param[in] mp The page to operate on.
- * @param[in] indx The index of the node to delete.
+ * @param[in] mc Cursor pointing to the node to delete.
  * @param[in] ksize The size of a node. Only used if the page is
  * part of a #MDB_DUPFIXED database.
  */
@@ -7109,6 +7108,7 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
  *	the \b csrc page will be freed.
  * @param[in] csrc Cursor pointing to the source page.
  * @param[in] cdst Cursor pointing to the destination page.
+ * @return 0 on success, non-zero on failure.
  */
 static int
 mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst)

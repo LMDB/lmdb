@@ -829,7 +829,7 @@ typedef void MDB_assert_func(MDB_env *env, const char *msg);
 	 * Disabled if liblmdb is buillt with NDEBUG.
 	 * @note This hack should become obsolete as lmdb's error handling matures.
 	 * @param[in] env An environment handle returned by #mdb_env_create().
-	 * @parem[in] func An #MDB_assert_func function, or 0.
+	 * @param[in] func An #MDB_assert_func function, or 0.
 	 * @return A non-zero error value on failure and 0 on success.
 	 */
 int  mdb_env_set_assert(MDB_env *env, MDB_assert_func *func);
