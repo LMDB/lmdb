@@ -1,6 +1,6 @@
-/* sample-mdb.c - MDB toy/sample
+/* sample-mdb.txt - MDB toy/sample
  *
- * Do a line-by-line comparison of this and sample-bdb.c
+ * Do a line-by-line comparison of this and sample-bdb.txt
  */
 /*
  * Copyright 2012 Howard Chu, Symas Corp.

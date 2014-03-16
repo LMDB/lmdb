@@ -1,6 +1,6 @@
-/* sample-bdb.c - BerkeleyDB toy/sample
+/* sample-bdb.txt - BerkeleyDB toy/sample
  *
- * Do a line-by-line comparison of this and sample-mdb.c
+ * Do a line-by-line comparison of this and sample-mdb.txt
  */
 /*
  * Copyright 2012 Howard Chu, Symas Corp.
