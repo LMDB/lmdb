@@ -1034,8 +1034,6 @@ struct MDB_env {
 #define	MDB_ENV_ACTIVE	0x20000000U
 	/** me_txkey is set */
 #define	MDB_ENV_TXKEY	0x10000000U
-	/** Have liveness lock in reader table */
-#define	MDB_LIVE_READER	0x08000000U
 	uint32_t 	me_flags;		/**< @ref mdb_env */
 	unsigned int	me_psize;	/**< DB page size, inited from me_os_psize */
 	unsigned int	me_os_psize;	/**< OS page size, from #GET_PAGESIZE */
@@ -1071,6 +1069,7 @@ struct MDB_env {
 #if !(MDB_MAXKEYSIZE)
 	unsigned int	me_maxkey;	/**< max size of a key */
 #endif
+	int		me_live_reader;		/**< have liveness lock in reader table */
 #ifdef _WIN32
 	int		me_pidquery;		/**< Used in OpenProcess */
 	HANDLE		me_rmutex;		/* Windows mutexes don't reside in shared mem */
@@ -2268,11 +2267,11 @@ mdb_txn_renew0(MDB_txn *txn)
 				MDB_PID_T pid = env->me_pid;
 				pthread_t tid = pthread_self();
 
-				if (!(env->me_flags & MDB_LIVE_READER)) {
+				if (!env->me_live_reader) {
 					rc = mdb_reader_pid(env, Pidset, pid);
 					if (rc)
 						return rc;
-					env->me_flags |= MDB_LIVE_READER;
+					env->me_live_reader = 1;
 				}
 
 				LOCK_MUTEX_R(env);
