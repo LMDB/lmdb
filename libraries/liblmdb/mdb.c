@@ -1282,18 +1282,55 @@ mdb_dkey(MDB_val *key, char *buf)
 	return buf;
 }
 
+static const char *
+mdb_leafnode_type(MDB_node *n)
+{
+	static char *const tp[2][2] = {{"", ": DB"}, {": sub-page", ": sub-DB"}};
+	return F_ISSET(n->mn_flags, F_BIGDATA) ? ": overflow page" :
+		tp[F_ISSET(n->mn_flags, F_DUPDATA)][F_ISSET(n->mn_flags, F_SUBDATA)];
+}
+
 /** Display all the keys in the page. */
 void
 mdb_page_list(MDB_page *mp)
 {
+	pgno_t pgno = mdb_dbg_pgno(mp);
+	const char *type, *state = (mp->mp_flags & P_DIRTY) ? ", dirty" : "";
 	MDB_node *node;
 	unsigned int i, nkeys, nsize, total = 0;
 	MDB_val key;
 	DKBUF;
 
+	switch (mp->mp_flags & (P_BRANCH|P_LEAF|P_LEAF2|P_META|P_OVERFLOW|P_SUBP)) {
+	case P_BRANCH:              type = "Branch page";		break;
+	case P_LEAF:                type = "Leaf page";			break;
+	case P_LEAF|P_SUBP:         type = "Sub-page";			break;
+	case P_LEAF|P_LEAF2:        type = "LEAF2 page";		break;
+	case P_LEAF|P_LEAF2|P_SUBP: type = "LEAF2 sub-page";	break;
+	case P_OVERFLOW:
+		fprintf(stderr, "Overflow page %"Z"u pages %u%s\n",
+			pgno, mp->mp_pages, state);
+		return;
+	case P_META:
+		fprintf(stderr, "Meta-page %"Z"u txnid %"Z"u\n",
+			pgno, ((MDB_meta *)METADATA(mp))->mm_txnid);
+		return;
+	default:
+		fprintf(stderr, "Bad page %"Z"u flags 0x%u\n", pgno, mp->mp_flags);
+		return;
+	}
+
 	nkeys = NUMKEYS(mp);
-	fprintf(stderr, "Page %"Z"u numkeys %d\n", mdb_dbg_pgno(mp), nkeys);
+	fprintf(stderr, "%s %"Z"u numkeys %d%s\n", type, pgno, nkeys, state);
+
 	for (i=0; i<nkeys; i++) {
+		if (IS_LEAF2(mp)) {	/* LEAF2 pages have no mp_ptrs[] or node headers */
+			key.mv_size = nsize = mp->mp_pad;
+			key.mv_data = LEAF2KEY(mp, i, nsize);
+			total += nsize;
+			fprintf(stderr, "key %d: nsize %d, %s\n", i, nsize, DKEY(&key));
+			continue;
+		}
 		node = NODEPTR(mp, i);
 		key.mv_size = node->mn_ksize;
 		key.mv_data = node->mn_data;
@@ -1309,11 +1346,13 @@ mdb_page_list(MDB_page *mp)
 				nsize += NODEDSZ(node);
 			total += nsize;
 			nsize += sizeof(indx_t);
-			fprintf(stderr, "key %d: nsize %d, %s\n", i, nsize, DKEY(&key));
+			fprintf(stderr, "key %d: nsize %d, %s%s\n",
+				i, nsize, DKEY(&key), mdb_leafnode_type(node));
 		}
 		total = EVEN(total);
 	}
-	fprintf(stderr, "Total: %d\n", total);
+	fprintf(stderr, "Total: header %d + contents %d + unused %d\n",
+		IS_LEAF2(mp) ? PAGEHDRSZ : mp->mp_lower, total, SIZELEFT(mp));
 }
 
 void
