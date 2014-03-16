@@ -1145,7 +1145,8 @@ static int	mdb_update_key(MDB_cursor *mc, MDB_val *key);
 static void	mdb_cursor_pop(MDB_cursor *mc);
 static int	mdb_cursor_push(MDB_cursor *mc, MDB_page *mp);
 
-static int	mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf);
+static int	mdb_cursor_del0(MDB_cursor *mc);
+static int	mdb_del0(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data, unsigned flags);
 static int	mdb_cursor_sibling(MDB_cursor *mc, int move_right);
 static int	mdb_cursor_next(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op);
 static int	mdb_cursor_prev(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op);
@@ -6349,7 +6350,18 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 		}
 	}
 
-	return mdb_cursor_del0(mc, leaf);
+	/* add overflow pages to free list */
+	if (!IS_LEAF2(mp) && F_ISSET(leaf->mn_flags, F_BIGDATA)) {
+		MDB_page *omp;
+		pgno_t pg;
+
+		memcpy(&pg, NODEDATA(leaf), sizeof(pg));
+		if ((rc = mdb_page_get(mc->mc_txn, pg, &omp, NULL)) ||
+			(rc = mdb_ovpage_free(mc, omp)))
+			return rc;
+	}
+
+	return mdb_cursor_del0(mc);
 }
 
 /** Allocate and initialize new pages for a database.
@@ -7459,26 +7471,14 @@ mdb_rebalance(MDB_cursor *mc)
 
 /** Complete a delete operation started by #mdb_cursor_del(). */
 static int
-mdb_cursor_del0(MDB_cursor *mc, MDB_node *leaf)
+mdb_cursor_del0(MDB_cursor *mc)
 {
 	int rc;
 	MDB_page *mp;
 	indx_t ki;
 	unsigned int nkeys;
 
-	mp = mc->mc_pg[mc->mc_top];
 	ki = mc->mc_ki[mc->mc_top];
-
-	/* add overflow pages to free list */
-	if (!IS_LEAF2(mp) && F_ISSET(leaf->mn_flags, F_BIGDATA)) {
-		MDB_page *omp;
-		pgno_t pg;
-
-		memcpy(&pg, NODEDATA(leaf), sizeof(pg));
-		if ((rc = mdb_page_get(mc->mc_txn, pg, &omp, NULL)) ||
-			(rc = mdb_ovpage_free(mc, omp)))
-			return rc;
-	}
 	mdb_node_del(mc, mc->mc_db->md_pad);
 	mc->mc_db->md_entries--;
 	rc = mdb_rebalance(mc);
@@ -7522,28 +7522,35 @@ int
 mdb_del(MDB_txn *txn, MDB_dbi dbi,
     MDB_val *key, MDB_val *data)
 {
-	MDB_cursor mc;
-	MDB_xcursor mx;
-	MDB_cursor_op op;
-	MDB_val rdata, *xdata;
-	int		 rc, exact;
-	DKBUF;
-
-	DPRINTF(("====> delete db %u key [%s]", dbi, DKEY(key)));
-
 	if (!key || dbi == FREE_DBI || !TXN_DBI_EXIST(txn, dbi))
 		return EINVAL;
 
 	if (txn->mt_flags & (MDB_TXN_RDONLY|MDB_TXN_ERROR))
 		return (txn->mt_flags & MDB_TXN_RDONLY) ? EACCES : MDB_BAD_TXN;
 
-	mdb_cursor_init(&mc, txn, dbi, &mx);
-
-	exact = 0;
 	if (!F_ISSET(txn->mt_dbs[dbi].md_flags, MDB_DUPSORT)) {
 		/* must ignore any data */
 		data = NULL;
 	}
+
+	return mdb_del0(txn, dbi, key, data, 0);
+}
+
+static int
+mdb_del0(MDB_txn *txn, MDB_dbi dbi,
+	MDB_val *key, MDB_val *data, unsigned flags)
+{
+	MDB_cursor mc;
+	MDB_xcursor mx;
+	MDB_cursor_op op;
+	MDB_val rdata, *xdata;
+	int		 rc, exact = 0;
+	DKBUF;
+
+	DPRINTF(("====> delete db %u key [%s]", dbi, DKEY(key)));
+
+	mdb_cursor_init(&mc, txn, dbi, &mx);
+
 	if (data) {
 		op = MDB_GET_BOTH;
 		rdata = *data;
@@ -7551,6 +7558,7 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 	} else {
 		op = MDB_SET;
 		xdata = NULL;
+		flags |= MDB_NODUPDATA;
 	}
 	rc = mdb_cursor_set(&mc, key, xdata, op, &exact);
 	if (rc == 0) {
@@ -7565,7 +7573,7 @@ mdb_del(MDB_txn *txn, MDB_dbi dbi,
 		mc.mc_flags |= C_UNTRACK;
 		mc.mc_next = txn->mt_cursors[dbi];
 		txn->mt_cursors[dbi] = &mc;
-		rc = mdb_cursor_del(&mc, data ? 0 : MDB_NODUPDATA);
+		rc = mdb_cursor_del(&mc, flags);
 		txn->mt_cursors[dbi] = mc.mc_next;
 	}
 	return rc;
@@ -8377,7 +8385,7 @@ int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)
 
 	/* Can't delete the main DB */
 	if (del && dbi > MAIN_DBI) {
-		rc = mdb_del(txn, MAIN_DBI, &mc->mc_dbx->md_name, NULL);
+		rc = mdb_del0(txn, MAIN_DBI, &mc->mc_dbx->md_name, NULL, 0);
 		if (!rc) {
 			txn->mt_dbflags[dbi] = DB_STALE;
 			mdb_dbi_close(txn->mt_env, dbi);
