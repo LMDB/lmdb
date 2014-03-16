@@ -31,6 +31,7 @@ int main(int argc,char * argv[])
 	MDB_txn *txn;
 	MDB_stat mst;
 	MDB_cursor *cursor, *cur2;
+	MDB_cursor_op op;
 	int count;
 	int *values;
 	char sval[32] = "";
@@ -143,12 +144,8 @@ int main(int argc,char * argv[])
 		}
 
 		printf("Restarting cursor in txn\n");
-		E(mdb_cursor_get(cur2, &key, &data, MDB_FIRST));
-		printf("key: %p %.*s, data: %p %.*s\n",
-			key.mv_data,  (int) key.mv_size,  (char *) key.mv_data,
-			data.mv_data, (int) data.mv_size, (char *) data.mv_data);
-		for (i=0; i<32; i++) {
-			if (RES(MDB_NOTFOUND, mdb_cursor_get(cur2, &key, &data, MDB_NEXT)))
+		for (op=MDB_FIRST, i=0; i<=32; op=MDB_NEXT, i++) {
+			if (RES(MDB_NOTFOUND, mdb_cursor_get(cur2, &key, &data, op)))
 				break;
 			printf("key: %p %.*s, data: %p %.*s\n",
 				key.mv_data,  (int) key.mv_size,  (char *) key.mv_data,
@@ -160,12 +157,8 @@ int main(int argc,char * argv[])
 		printf("Restarting cursor outside txn\n");
 		E(mdb_txn_begin(env, NULL, 0, &txn));
 		E(mdb_cursor_open(txn, dbi, &cursor));
-		E(mdb_cursor_get(cursor, &key, &data, MDB_FIRST));
-		printf("key: %p %.*s, data: %p %.*s\n",
-			key.mv_data,  (int) key.mv_size,  (char *) key.mv_data,
-			data.mv_data, (int) data.mv_size, (char *) data.mv_data);
-		for (i=0; i<32; i++) {
-			if (RES(MDB_NOTFOUND, mdb_cursor_get(cursor, &key, &data, MDB_NEXT)))
+		for (op=MDB_FIRST, i=0; i<=32; op=MDB_NEXT, i++) {
+			if (RES(MDB_NOTFOUND, mdb_cursor_get(cursor, &key, &data, op)))
 				break;
 			printf("key: %p %.*s, data: %p %.*s\n",
 				key.mv_data,  (int) key.mv_size,  (char *) key.mv_data,
