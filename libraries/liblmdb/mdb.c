@@ -6130,8 +6130,8 @@ current:
 						return ENOMEM;
 					id2.mid = pg;
 					id2.mptr = np;
-					rc = mdb_mid2l_insert(mc->mc_txn->mt_u.dirty_list, &id2);
-					mdb_cassert(mc, rc == 0);
+					rc2 = mdb_mid2l_insert(mc->mc_txn->mt_u.dirty_list, &id2);
+					mdb_cassert(mc, rc2 == 0);
 					if (!(flags & MDB_RESERVE)) {
 						/* Copy end of page, adjusting alignment so
 						 * compiler may copy words instead of bytes.
