@@ -380,7 +380,7 @@ typedef enum MDB_cursor_op {
 #define MDB_PAGE_NOTFOUND	(-30797)
 	/** Located page was wrong type */
 #define MDB_CORRUPTED	(-30796)
-	/** Update of meta page failed, probably I/O error */
+	/** Update of meta page failed, or environment had fatal error */
 #define MDB_PANIC		(-30795)
 	/** Environment version mismatch */
 #define MDB_VERSION_MISMATCH	(-30794)
