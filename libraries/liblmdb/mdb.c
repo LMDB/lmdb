@@ -1188,7 +1188,7 @@ static char *const mdb_errstr[] = {
 	"MDB_NOTFOUND: No matching key/data pair found",
 	"MDB_PAGE_NOTFOUND: Requested page not found",
 	"MDB_CORRUPTED: Located page was wrong type",
-	"MDB_PANIC: Update of meta page failed, or environment had fatal error",
+	"MDB_PANIC: Update of meta page failed",
 	"MDB_VERSION_MISMATCH: Database environment version mismatch",
 	"MDB_INVALID: File is not an MDB file",
 	"MDB_MAP_FULL: Environment mapsize limit reached",
