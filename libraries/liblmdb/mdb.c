@@ -6157,7 +6157,6 @@ current:
 			goto done;
 		}
 		mdb_node_del(mc, 0);
-		mc->mc_db->md_entries--;
 	}
 
 	rdata = data;
@@ -6250,7 +6249,7 @@ put_sub:
 		/* sub-writes might have failed so check rc again.
 		 * Don't increment count if we just replaced an existing item.
 		 */
-		if (!rc && !(flags & MDB_CURRENT))
+		if (!rc && insert)
 			mc->mc_db->md_entries++;
 		if (flags & MDB_MULTIPLE) {
 			if (!rc) {
