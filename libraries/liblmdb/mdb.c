@@ -2776,11 +2776,10 @@ mdb_freelist_save(MDB_txn *txn)
 			MDB_ID save;
 
 			mdb_tassert(txn, len >= 0 && id <= env->me_pglast);
+			key.mv_data = &id;
 			if (len > mop_len) {
 				len = mop_len;
 				data.mv_size = (len + 1) * sizeof(MDB_ID);
-				/* Drop MDB_CURRENT when changing the data size */
-				key.mv_data = &id;
 				flags = 0;
 			}
 			data.mv_data = mop -= len;
@@ -5807,7 +5806,7 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	unsigned int nflags;
 	DKBUF;
 
-	if (mc == NULL)
+	if (mc == NULL || key == NULL)
 		return EINVAL;
 
 	env = mc->mc_txn->mt_env;
@@ -5828,16 +5827,8 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	if (mc->mc_txn->mt_flags & (MDB_TXN_RDONLY|MDB_TXN_ERROR))
 		return (mc->mc_txn->mt_flags & MDB_TXN_RDONLY) ? EACCES : MDB_BAD_TXN;
 
-	if (flags != MDB_CURRENT) {
-		if (key == NULL)
-			return EINVAL;
-		if (key->mv_size-1 >= ENV_MAXKEY(env))
-			return MDB_BAD_VALSIZE;
-	} else {
-		/* Ignore key except in sub-cursor, where key holds the data */
-		if (!(mc->mc_flags & C_SUB))
-			key = NULL;
-	}
+	if (flags != MDB_CURRENT && key->mv_size-1 >= ENV_MAXKEY(env))
+		return MDB_BAD_VALSIZE;
 
 #if SIZE_MAX > MAXDATASIZE
 	if (data->mv_size > ((mc->mc_db->md_flags & MDB_DUPSORT) ? ENV_MAXKEY(env) : MAXDATASIZE))
@@ -6161,7 +6152,7 @@ current:
 			 */
 			if (F_ISSET(flags, MDB_RESERVE))
 				data->mv_data = olddata.mv_data;
-			else if (!(mc->mc_flags & C_SUB))
+			else if (data->mv_size)
 				memcpy(olddata.mv_data, data->mv_data, data->mv_size);
 			else
 				memcpy(NODEKEY(leaf), key->mv_data, key->mv_size);
