@@ -2770,7 +2770,6 @@ mdb_freelist_save(MDB_txn *txn)
 		mop += mop_len;
 		rc = mdb_cursor_first(&mc, &key, &data);
 		for (; !rc; rc = mdb_cursor_next(&mc, &key, &data, MDB_NEXT)) {
-			unsigned flags = MDB_CURRENT;
 			txnid_t id = *(txnid_t *)key.mv_data;
 			ssize_t	len = (ssize_t)(data.mv_size / sizeof(MDB_ID)) - 1;
 			MDB_ID save;
@@ -2780,12 +2779,11 @@ mdb_freelist_save(MDB_txn *txn)
 			if (len > mop_len) {
 				len = mop_len;
 				data.mv_size = (len + 1) * sizeof(MDB_ID);
-				flags = 0;
 			}
 			data.mv_data = mop -= len;
 			save = mop[0];
 			mop[0] = len;
-			rc = mdb_cursor_put(&mc, &key, &data, flags);
+			rc = mdb_cursor_put(&mc, &key, &data, MDB_CURRENT);
 			mop[0] = save;
 			if (rc || !(mop_len -= len))
 				break;
@@ -6152,7 +6150,7 @@ current:
 			 */
 			if (F_ISSET(flags, MDB_RESERVE))
 				data->mv_data = olddata.mv_data;
-			else if (data->mv_size)
+			else if (!(mc->mc_flags & C_SUB))
 				memcpy(olddata.mv_data, data->mv_data, data->mv_size);
 			else
 				memcpy(NODEKEY(leaf), key->mv_data, key->mv_size);

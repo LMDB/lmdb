@@ -1334,7 +1334,8 @@ int  mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	 * <ul>
 	 *	<li>#MDB_CURRENT - overwrite the data of the key/data pair to which
 	 *		the cursor refers with the specified data item. The \b key
-	 *		parameter is ignored.
+	 *		parameter is not used for positioning the cursor, but should
+	 *		still be provided.
 	 *	<li>#MDB_NODUPDATA - enter the new key/data pair only if it does not
 	 *		already appear in the database. This flag may only be specified
 	 *		if the database was opened with #MDB_DUPSORT. The function will
