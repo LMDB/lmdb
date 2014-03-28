@@ -7323,6 +7323,7 @@ mdb_rebalance(MDB_cursor *mc)
 	int rc;
 	unsigned int ptop, minkeys;
 	MDB_cursor	mn;
+	indx_t oldki;
 
 	minkeys = 1 + (IS_BRANCH(mc->mc_pg[mc->mc_top]));
 	DPRINTF(("rebalancing %s page %"Z"u (has %u keys, %.1f%% full)",
@@ -7427,6 +7428,7 @@ mdb_rebalance(MDB_cursor *mc)
 	mdb_cursor_copy(mc, &mn);
 	mn.mc_xcursor = NULL;
 
+	oldki = mc->mc_ki[mc->mc_top];
 	if (mc->mc_ki[ptop] == 0) {
 		/* We're the leftmost leaf in our parent.
 		 */
@@ -7460,17 +7462,21 @@ mdb_rebalance(MDB_cursor *mc)
 	 * (A branch page must never have less than 2 keys.)
 	 */
 	minkeys = 1 + (IS_BRANCH(mn.mc_pg[mn.mc_top]));
-	if (PAGEFILL(mc->mc_txn->mt_env, mn.mc_pg[mn.mc_top]) >= FILL_THRESHOLD && NUMKEYS(mn.mc_pg[mn.mc_top]) > minkeys)
-		return mdb_node_move(&mn, mc);
-	else {
-		if (mc->mc_ki[ptop] == 0)
+	if (PAGEFILL(mc->mc_txn->mt_env, mn.mc_pg[mn.mc_top]) >= FILL_THRESHOLD && NUMKEYS(mn.mc_pg[mn.mc_top]) > minkeys) {
+		rc = mdb_node_move(&mn, mc);
+		mc->mc_ki[mc->mc_top] = oldki;
+	} else {
+		if (mc->mc_ki[ptop] == 0) {
 			rc = mdb_page_merge(&mn, mc);
-		else {
+			mc->mc_ki[mc->mc_top] = oldki;
+		} else {
+			unsigned int nkeys = NUMKEYS(mn.mc_pg[mn.mc_top]);
 			mn.mc_ki[mn.mc_top] += mc->mc_ki[mn.mc_top] + 1;
 			rc = mdb_page_merge(mc, &mn);
 			mdb_cursor_copy(&mn, mc);
+			mc->mc_ki[mc->mc_top] = oldki + nkeys;
 		}
-		mc->mc_flags &= ~(C_INITIALIZED|C_EOF);
+		mc->mc_flags &= ~C_EOF;
 	}
 	return rc;
 }
