@@ -7464,7 +7464,11 @@ mdb_rebalance(MDB_cursor *mc)
 	minkeys = 1 + (IS_BRANCH(mn.mc_pg[mn.mc_top]));
 	if (PAGEFILL(mc->mc_txn->mt_env, mn.mc_pg[mn.mc_top]) >= FILL_THRESHOLD && NUMKEYS(mn.mc_pg[mn.mc_top]) > minkeys) {
 		rc = mdb_node_move(&mn, mc);
-		mc->mc_ki[mc->mc_top] = oldki;
+		if (mc->mc_ki[ptop] == 0) {
+			mc->mc_ki[mc->mc_top] = oldki;
+		} else {
+			mc->mc_ki[mc->mc_top] = oldki + 1;
+		}
 	} else {
 		if (mc->mc_ki[ptop] == 0) {
 			rc = mdb_page_merge(&mn, mc);
@@ -7473,7 +7477,7 @@ mdb_rebalance(MDB_cursor *mc)
 			unsigned int nkeys = NUMKEYS(mn.mc_pg[mn.mc_top]);
 			mn.mc_ki[mn.mc_top] += mc->mc_ki[mn.mc_top] + 1;
 			rc = mdb_page_merge(mc, &mn);
-			mdb_cursor_copy(&mn, mc);
+			mc->mc_pg[mc->mc_top] = mn.mc_pg[mn.mc_top];
 			mc->mc_ki[mc->mc_top] = oldki + nkeys;
 		}
 		mc->mc_flags &= ~C_EOF;
