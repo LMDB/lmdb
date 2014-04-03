@@ -7283,9 +7283,18 @@ mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst)
 			}
 		}
 	}
-	mdb_cursor_pop(csrc);
-
-	return mdb_rebalance(csrc);
+	{
+		unsigned int snum = cdst->mc_snum;
+		uint16_t depth = cdst->mc_db->md_depth;
+		mdb_cursor_pop(cdst);
+		rc = mdb_rebalance(cdst);
+		/* Did the tree shrink? */
+		if (depth > cdst->mc_db->md_depth)
+			snum--;
+		cdst->mc_snum = snum;
+		cdst->mc_top = snum-1;
+	}
+	return rc;
 }
 
 /** Copy the contents of a cursor.
@@ -7474,7 +7483,7 @@ mdb_rebalance(MDB_cursor *mc)
 			oldki += NUMKEYS(mn.mc_pg[mn.mc_top]);
 			mn.mc_ki[mn.mc_top] += mc->mc_ki[mn.mc_top] + 1;
 			rc = mdb_page_merge(mc, &mn);
-			mc->mc_pg[mc->mc_top] = mn.mc_pg[mn.mc_top];
+			mdb_cursor_copy(&mn, mc);
 		}
 		mc->mc_flags &= ~C_EOF;
 	}
