@@ -7383,6 +7383,7 @@ mdb_rebalance(MDB_cursor *mc)
 				}
 			}
 		} else if (IS_BRANCH(mp) && NUMKEYS(mp) == 1) {
+			int i;
 			DPUTS("collapsing root page!");
 			rc = mdb_midl_append(&mc->mc_txn->mt_free_pgs, mp->mp_pgno);
 			if (rc)
@@ -7394,6 +7395,10 @@ mdb_rebalance(MDB_cursor *mc)
 			mc->mc_db->md_depth--;
 			mc->mc_db->md_branch_pages--;
 			mc->mc_ki[0] = mc->mc_ki[1];
+			for (i = 1; i<mc->mc_db->md_depth; i++) {
+				mc->mc_pg[i] = mc->mc_pg[i+1];
+				mc->mc_ki[i] = mc->mc_ki[i+1];
+			}
 			{
 				/* Adjust other cursors pointing to mp */
 				MDB_cursor *m2, *m3;
@@ -7406,7 +7411,6 @@ mdb_rebalance(MDB_cursor *mc)
 						m3 = m2;
 					if (m3 == mc || m3->mc_snum < mc->mc_snum) continue;
 					if (m3->mc_pg[0] == mp) {
-						int i;
 						m3->mc_snum--;
 						m3->mc_top--;
 						for (i=0; i<m3->mc_snum; i++) {
