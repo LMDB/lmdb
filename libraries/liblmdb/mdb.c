@@ -3677,7 +3677,9 @@ static void NTAPI mdb_tls_callback(PVOID module, DWORD reason, PVOID ptr)
 	case DLL_THREAD_DETACH:
 		for (i=0; i<mdb_tls_nkeys; i++) {
 			MDB_reader *r = pthread_getspecific(mdb_tls_keys[i]);
-			mdb_env_reader_dest(r);
+			if (r) {
+				mdb_env_reader_dest(r);
+			}
 		}
 		break;
 	case DLL_PROCESS_DETACH: break;
