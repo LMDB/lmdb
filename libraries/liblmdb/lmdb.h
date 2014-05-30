@@ -1336,9 +1336,9 @@ int  mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	/** @brief Store by cursor.
 	 *
 	 * This function stores key/data pairs into the database.
-	 * If the function fails for any reason, the state of the cursor will be
-	 * unchanged. If the function succeeds and an item is inserted into the
-	 * database, the cursor is always positioned to refer to the newly inserted item.
+	 * The cursor is positioned at the new item, or on failure usually near it.
+	 * @note Earlier documentation incorrectly said errors would leave the
+	 * state of the cursor unchanged.
 	 * @param[in] cursor A cursor handle returned by #mdb_cursor_open()
 	 * @param[in] key The key operated on.
 	 * @param[in] data The data operated on.
