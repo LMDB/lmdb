@@ -6190,9 +6190,7 @@ new_sub:
 		}
 	}
 
-	if (rc != MDB_SUCCESS)
-		mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
-	else {
+	if (rc == MDB_SUCCESS) {
 		/* Now store the actual data in the child DB. Note that we're
 		 * storing the user data in the keys field, so there are strict
 		 * size limits on dupdata. The actual data fields of the child
@@ -6215,10 +6213,8 @@ put_sub:
 			/* converted, write the original data first */
 			if (dkey.mv_size) {
 				rc = mdb_cursor_put(&mc->mc_xcursor->mx_cursor, &dkey, &xdata, xflags);
-				if (rc) {
-					mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
-					return rc == MDB_KEYEXIST ? MDB_CORRUPTED : rc;
-				}
+				if (rc)
+					goto bad_sub;
 				{
 					/* Adjust other cursors pointing to mp */
 					MDB_cursor *m2;
@@ -6268,7 +6264,12 @@ next_sub:
 				}
 			}
 		}
+		return rc;
+bad_sub:
+		if (rc == MDB_KEYEXIST)	/* should not happen, we deleted that item */
+			rc = MDB_CORRUPTED;
 	}
+	mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
 	return rc;
 }
 
