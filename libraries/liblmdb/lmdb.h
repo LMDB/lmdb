@@ -408,7 +408,7 @@ typedef enum MDB_cursor_op {
 #define MDB_BAD_RSLOT		(-30783)
 	/** Transaction cannot recover - it must be aborted */
 #define MDB_BAD_TXN			(-30782)
-	/** Too big key/data, key is empty, or wrong DUPFIXED size */
+	/** Unsupported size of key/DB name/data, or wrong DUPFIXED size */
 #define MDB_BAD_VALSIZE		(-30781)
 #define MDB_LAST_ERRCODE	MDB_BAD_VALSIZE
 /** @} */
@@ -784,6 +784,10 @@ int  mdb_env_get_maxreaders(MDB_env *env, unsigned int *readers);
 	 * environment. Simpler applications that use the environment as a single
 	 * unnamed database can ignore this option.
 	 * This function may only be called after #mdb_env_create() and before #mdb_env_open().
+	 *
+	 * Currently a moderate number of slots are cheap but a huge number gets
+	 * expensive: 7-120 words per transaction, and every #mdb_dbi_open()
+	 * does a linear search of the opened slots.
 	 * @param[in] env An environment handle returned by #mdb_env_create()
 	 * @param[in] dbs The maximum number of databases
 	 * @return A non-zero error value on failure and 0 on success. Some possible
@@ -951,7 +955,7 @@ int  mdb_txn_renew(MDB_txn *txn);
 	 * independently of whether such a database exists.
 	 * The database handle may be discarded by calling #mdb_dbi_close().
 	 * The old database handle is returned if the database was already open.
-	 * The handle must only be closed once.
+	 * The handle may only be closed once.
 	 * The database handle will be private to the current transaction until
 	 * the transaction is successfully committed. If the transaction is
 	 * aborted the handle will be closed automatically.
@@ -963,7 +967,8 @@ int  mdb_txn_renew(MDB_txn *txn);
 	 * use this function.
 	 *
 	 * To use named databases (with name != NULL), #mdb_env_set_maxdbs()
-	 * must be called before opening the environment.
+	 * must be called before opening the environment.  Database names
+	 * are kept as keys in the unnamed database.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] name The name of the database to open. If only a single
 	 * 	database is needed in the environment, this value may be NULL.
@@ -1033,12 +1038,19 @@ int  mdb_stat(MDB_txn *txn, MDB_dbi dbi, MDB_stat *stat);
 	 */
 int mdb_dbi_flags(MDB_txn *txn, MDB_dbi dbi, unsigned int *flags);
 
-	/** @brief Close a database handle.
+	/** @brief Close a database handle. Normally unnecessary. Use with care:
 	 *
 	 * This call is not mutex protected. Handles should only be closed by
 	 * a single thread, and only if no other threads are going to reference
 	 * the database handle or one of its cursors any further. Do not close
 	 * a handle if an existing transaction has modified its database.
+	 * Doing so can cause misbehavior from database corruption to errors
+	 * like MDB_BAD_VALSIZE (since the DB name is gone).
+	 *
+	 * Closing a database handle is not necessary, but lets #mdb_dbi_open()
+	 * reuse the handle value.  Usually it's better to set a bigger
+	 * #mdb_env_set_maxdbs(), unless that value would be large.
+	 *
 	 * @param[in] env An environment handle returned by #mdb_env_create()
 	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 */
@@ -1046,6 +1058,7 @@ void mdb_dbi_close(MDB_env *env, MDB_dbi dbi);
 
 	/** @brief Empty or delete+close a database.
 	 *
+	 * See #mdb_dbi_close() for restrictions about closing the DB handle.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 * @param[in] del 0 to empty the DB, 1 to delete it from the
