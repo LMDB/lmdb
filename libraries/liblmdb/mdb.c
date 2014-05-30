@@ -5797,7 +5797,7 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	uint16_t	fp_flags;
 	MDB_val		xdata, *rdata, dkey, olddata;
 	MDB_db dummy;
-	int do_sub = 0, insert;
+	int do_sub = 0, insert_key, insert_data;
 	unsigned int mcount = 0, dcount = 0, nospill;
 	size_t nsize;
 	int rc, rc2;
@@ -5916,8 +5916,8 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 			return rc2;
 	}
 
-	insert = rc;
-	if (insert) {
+	insert_key = insert_data = rc;
+	if (insert_key) {
 		/* The key does not exist */
 		DPRINTF(("inserting key at index %i", mc->mc_ki[mc->mc_top]));
 		if ((mc->mc_db->md_flags & MDB_DUPSORT) &&
@@ -6078,7 +6078,7 @@ prep_subDB:
 			rdata = &xdata;
 			flags |= F_DUPDATA;
 			do_sub = 1;
-			if (!insert)
+			if (!insert_key)
 				mdb_node_del(mc, 0);
 			goto new_sub;
 		}
@@ -6167,13 +6167,13 @@ new_sub:
 	if (SIZELEFT(mc->mc_pg[mc->mc_top]) < nsize) {
 		if (( flags & (F_DUPDATA|F_SUBDATA)) == F_DUPDATA )
 			nflags &= ~MDB_APPEND;
-		if (!insert)
+		if (!insert_key)
 			nflags |= MDB_SPLIT_REPLACE;
 		rc = mdb_page_split(mc, key, rdata, P_INVALID, nflags);
 	} else {
 		/* There is room already in this leaf page. */
 		rc = mdb_node_add(mc, mc->mc_ki[mc->mc_top], key, rdata, 0, nflags);
-		if (rc == 0 && !do_sub && insert) {
+		if (rc == 0 && !do_sub && insert_key) {
 			/* Adjust other cursors pointing to mp */
 			MDB_cursor *m2, *m3;
 			MDB_dbi dbi = mc->mc_dbi;
@@ -6203,6 +6203,7 @@ new_sub:
 		 */
 		if (do_sub) {
 			int xflags;
+			size_t ecount;
 put_sub:
 			xdata.mv_size = 0;
 			xdata.mv_data = "";
@@ -6238,6 +6239,7 @@ put_sub:
 				/* we've done our job */
 				dkey.mv_size = 0;
 			}
+			ecount = mc->mc_xcursor->mx_db.md_entries;
 			if (flags & MDB_APPENDDUP)
 				xflags |= MDB_APPEND;
 			rc = mdb_cursor_put(&mc->mc_xcursor->mx_cursor, data, &xdata, xflags);
@@ -6245,11 +6247,10 @@ put_sub:
 				void *db = NODEDATA(leaf);
 				memcpy(db, &mc->mc_xcursor->mx_db, sizeof(MDB_db));
 			}
+			insert_data = mc->mc_xcursor->mx_db.md_entries - ecount;
 		}
-		/* sub-writes might have failed so check rc again.
-		 * Don't increment count if we just replaced an existing item.
-		 */
-		if (!rc && insert)
+		/* Increment count unless we just replaced an existing item. */
+		if (insert_data)
 			mc->mc_db->md_entries++;
 		if (flags & MDB_MULTIPLE) {
 			if (!rc) {
@@ -6268,7 +6269,7 @@ done:
 	/* If we succeeded and the key didn't exist before, make sure
 	 * the cursor is marked valid.
 	 */
-	if (!rc && insert)
+	if (!rc && insert_key)
 		mc->mc_flags |= C_INITIALIZED;
 	return rc;
 }
@@ -6302,7 +6303,10 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 	leaf = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
 
 	if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
-		if (!(flags & MDB_NODUPDATA)) {
+		if (flags & MDB_NODUPDATA) {
+			/* mdb_cursor_del0() will subtract the final entry */
+			mc->mc_db->md_entries -= mc->mc_xcursor->mx_db.md_entries - 1;
+		} else {
 			if (!F_ISSET(leaf->mn_flags, F_SUBDATA)) {
 				mc->mc_xcursor->mx_cursor.mc_pg[0] = NODEDATA(leaf);
 			}
@@ -6341,7 +6345,6 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 			rc = mdb_drop0(&mc->mc_xcursor->mx_cursor, 0);
 			if (rc)
 				goto fail;
-			mc->mc_db->md_entries -= mc->mc_xcursor->mx_db.md_entries;
 		}
 	}
 
