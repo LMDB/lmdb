@@ -6166,7 +6166,7 @@ new_sub:
 	nsize = IS_LEAF2(mc->mc_pg[mc->mc_top]) ? key->mv_size : mdb_leaf_size(env, key, rdata);
 	if (SIZELEFT(mc->mc_pg[mc->mc_top]) < nsize) {
 		if (( flags & (F_DUPDATA|F_SUBDATA)) == F_DUPDATA )
-			nflags &= ~MDB_APPEND;
+			nflags &= ~MDB_APPEND; /* sub-page may need room to grow */
 		if (!insert_key)
 			nflags |= MDB_SPLIT_REPLACE;
 		rc = mdb_page_split(mc, key, rdata, P_INVALID, nflags);
