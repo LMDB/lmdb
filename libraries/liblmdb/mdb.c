@@ -6138,7 +6138,7 @@ current:
 					data->mv_data = METADATA(omp);
 				else
 					memcpy(METADATA(omp), data->mv_data, data->mv_size);
-				goto done;
+				return MDB_SUCCESS;
 			  }
 			}
 			if ((rc2 = mdb_ovpage_free(mc, omp)) != MDB_SUCCESS)
@@ -6154,7 +6154,7 @@ current:
 				memcpy(olddata.mv_data, data->mv_data, data->mv_size);
 			else
 				memcpy(NODEKEY(leaf), key->mv_data, key->mv_size);
-			goto done;
+			return MDB_SUCCESS;
 		}
 		mdb_node_del(mc, 0);
 	}
@@ -6252,6 +6252,12 @@ put_sub:
 		/* Increment count unless we just replaced an existing item. */
 		if (insert_data)
 			mc->mc_db->md_entries++;
+		if (!rc && insert_key) {
+			/* If we succeeded and the key didn't exist before,
+			 * make sure the cursor is marked valid.
+			 */
+			mc->mc_flags |= C_INITIALIZED;
+		}
 		if (flags & MDB_MULTIPLE) {
 			if (!rc) {
 next_mult:
@@ -6260,17 +6266,12 @@ next_mult:
 				data[1].mv_size = mcount;
 				if (mcount < dcount) {
 					data[0].mv_data = (char *)data[0].mv_data + data[0].mv_size;
+					insert_key = insert_data = 0;
 					goto more;
 				}
 			}
 		}
 	}
-done:
-	/* If we succeeded and the key didn't exist before, make sure
-	 * the cursor is marked valid.
-	 */
-	if (!rc && insert_key)
-		mc->mc_flags |= C_INITIALIZED;
 	return rc;
 }
 
