@@ -5976,12 +5976,9 @@ more:
 				/* if data matches, skip it */
 				if (!mc->mc_dbx->md_dcmp(data, &olddata)) {
 					if (flags & MDB_NODUPDATA)
-						rc = MDB_KEYEXIST;
-					else if (flags & MDB_MULTIPLE)
-						goto next_mult;
-					else
-						rc = MDB_SUCCESS;
-					return rc;
+						return MDB_KEYEXIST;
+					rc = MDB_SUCCESS;
+					goto next_sub;
 				}
 
 				/* Back up original data item */
@@ -6258,9 +6255,9 @@ put_sub:
 			 */
 			mc->mc_flags |= C_INITIALIZED;
 		}
+next_sub:
 		if (flags & MDB_MULTIPLE) {
 			if (!rc) {
-next_mult:
 				mcount++;
 				/* let caller know how many succeeded, if any */
 				data[1].mv_size = mcount;
