@@ -4544,6 +4544,13 @@ mdb_cmp_cint(const MDB_val *a, const MDB_val *b)
 #endif
 }
 
+/** Compare two items pointing at size_t's of unknown alignment. */
+#ifdef MISALIGNED_OK
+# define mdb_cmp_clong mdb_cmp_long
+#else
+# define mdb_cmp_clong mdb_cmp_cint
+#endif
+
 /** Compare two items lexically */
 static int
 mdb_cmp_memn(const MDB_val *a, const MDB_val *b)
@@ -5967,11 +5974,7 @@ more:
 
 #if UINT_MAX < SIZE_MAX
 				if (mc->mc_dbx->md_dcmp == mdb_cmp_int && olddata.mv_size == sizeof(size_t))
-#ifdef MISALIGNED_OK
-					mc->mc_dbx->md_dcmp = mdb_cmp_long;
-#else
-					mc->mc_dbx->md_dcmp = mdb_cmp_cint;
-#endif
+					mc->mc_dbx->md_dcmp = mdb_cmp_clong;
 #endif
 				/* if data matches, skip it */
 				if (!mc->mc_dbx->md_dcmp(data, &olddata)) {
@@ -6775,11 +6778,7 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
 	mx->mx_dbflag = DB_VALID|DB_DIRTY; /* DB_DIRTY guides mdb_cursor_touch */
 #if UINT_MAX < SIZE_MAX
 	if (mx->mx_dbx.md_cmp == mdb_cmp_int && mx->mx_db.md_pad == sizeof(size_t))
-#ifdef MISALIGNED_OK
-		mx->mx_dbx.md_cmp = mdb_cmp_long;
-#else
-		mx->mx_dbx.md_cmp = mdb_cmp_cint;
-#endif
+		mx->mx_dbx.md_cmp = mdb_cmp_clong;
 #endif
 }
 
