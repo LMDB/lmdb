@@ -6170,7 +6170,7 @@ new_sub:
 	} else {
 		/* There is room already in this leaf page. */
 		rc = mdb_node_add(mc, mc->mc_ki[mc->mc_top], key, rdata, 0, nflags);
-		if (rc == 0 && !do_sub && insert_key) {
+		if (rc == 0 && insert_key) {
 			/* Adjust other cursors pointing to mp */
 			MDB_cursor *m2, *m3;
 			MDB_dbi dbi = mc->mc_dbi;
@@ -6245,7 +6245,10 @@ put_sub:
 		/* Increment count unless we just replaced an existing item. */
 		if (insert_data)
 			mc->mc_db->md_entries++;
-		if (!rc && insert_key) {
+		if (insert_key) {
+			/* Invalidate txn if we created an empty sub-DB */
+			if (rc)
+				goto bad_sub;
 			/* If we succeeded and the key didn't exist before,
 			 * make sure the cursor is marked valid.
 			 */
