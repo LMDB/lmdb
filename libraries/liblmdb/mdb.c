@@ -5421,7 +5421,7 @@ mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 		if (!mc->mc_top) {
 			/* There are no other pages */
 			mc->mc_ki[mc->mc_top] = 0;
-			if (op == MDB_SET_RANGE) {
+			if (op == MDB_SET_RANGE && !exactp) {
 				rc = 0;
 				goto set1;
 			} else
