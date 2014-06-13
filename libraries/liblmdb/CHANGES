@@ -1,5 +1,18 @@
 LMDB 0.9 Change Log
 
+LMDB 0.9.12 Release (2014/06/13)
+	Fix MDB_GET_BOTH regression (ITS#7875,#7681)
+	Fix MDB_MULTIPLE writing multiple keys (ITS#7834)
+	Fix mdb_rebalance (ITS#7829)
+	Fix mdb_page_split (ITS#7815)
+	Fix md_entries count (ITS#7861,#7828,#7793)
+	Fix MDB_CURRENT (ITS#7793)
+	Fix possible crash on Windows DLL detach
+	Misc code cleanup
+	Documentation
+		mdb_cursor_put: cursor moves on error (ITS#7771)
+
+
 LMDB 0.9.11 Release (2014/01/15)
 	Add mdb_env_set_assert() (ITS#7775)
 	Fix: invalidate txn on page allocation errors (ITS#7377)
