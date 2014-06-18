@@ -1,5 +1,11 @@
 LMDB 0.9 Change Log
 
+LMDB 0.9.13 Release (2014/06/18)
+	Fix mdb_page_alloc unlimited overflow page search
+	Documentation
+		Re-fix MDB_CURRENT doc (ITS#7793)
+		Fix MDB_GET_MULTIPLE/MDB_NEXT_MULTIPLE doc
+
 LMDB 0.9.12 Release (2014/06/13)
 	Fix MDB_GET_BOTH regression (ITS#7875,#7681)
 	Fix MDB_MULTIPLE writing multiple keys (ITS#7834)
