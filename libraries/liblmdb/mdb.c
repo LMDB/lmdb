@@ -1779,6 +1779,10 @@ mdb_page_dirty(MDB_txn *txn, MDB_page *mp)
 static int
 mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 {
+/* use PARANOID for now, default infinite search slows down too much
+ * when the freelist is large
+ */
+#define MDB_PARANOID
 #ifdef MDB_PARANOID	/* Seems like we can ignore this now */
 	/* Get at most <Max_retries> more freeDB records once me_pghead
 	 * has enough pages.  If not enough, use new pages from the map.
@@ -1790,7 +1794,7 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 #else
 	enum { Paranoid = 0, Max_retries = INT_MAX /*infinite*/ };
 #endif
-	int rc, retry = Max_retries;
+	int rc, retry = num;
 	MDB_txn *txn = mc->mc_txn;
 	MDB_env *env = txn->mt_env;
 	pgno_t pgno, *mop = env->me_pghead;
