@@ -1347,11 +1347,9 @@ int  mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	 * @param[in] flags Options for this operation. This parameter
 	 * must be set to 0 or one of the values described here.
 	 * <ul>
-	 *	<li>#MDB_CURRENT - overwrite the data of the key/data pair to which
-	 *		the cursor refers with the specified data item. The \b key
-	 *		parameter is not used for positioning the cursor, but should
-	 *		still be provided. If using sorted duplicates (#MDB_DUPSORT)
-	 *		the data item must still sort into the same place.
+	 *	<li>#MDB_CURRENT - replace the item at the current cursor position.
+	 *		The \b key parameter must still be provided, and must match it.
+	 *		So must \b data if using sorted duplicates (#MDB_DUPSORT).
 	 *	<li>#MDB_NODUPDATA - enter the new key/data pair only if it does not
 	 *		already appear in the database. This flag may only be specified
 	 *		if the database was opened with #MDB_DUPSORT. The function will
