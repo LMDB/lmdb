@@ -5457,8 +5457,10 @@ set1:
 	mc->mc_flags &= ~C_EOF;
 
 	if (IS_LEAF2(mp)) {
-		key->mv_size = mc->mc_db->md_pad;
-		key->mv_data = LEAF2KEY(mp, mc->mc_ki[mc->mc_top], key->mv_size);
+		if (op == MDB_SET_RANGE || op == MDB_SET_KEY) {
+			key->mv_size = mc->mc_db->md_pad;
+			key->mv_data = LEAF2KEY(mp, mc->mc_ki[mc->mc_top], key->mv_size);
+		}
 		return MDB_SUCCESS;
 	}
 
@@ -5942,13 +5944,12 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 	} else {
 		/* there's only a key anyway, so this is a no-op */
 		if (IS_LEAF2(mc->mc_pg[mc->mc_top])) {
+			char *ptr;
 			unsigned int ksize = mc->mc_db->md_pad;
 			if (key->mv_size != ksize)
 				return MDB_BAD_VALSIZE;
-			if (flags == MDB_CURRENT) {
-				char *ptr = LEAF2KEY(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], ksize);
-				memcpy(ptr, key->mv_data, ksize);
-			}
+			ptr = LEAF2KEY(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], ksize);
+			memcpy(ptr, key->mv_data, ksize);
 			return MDB_SUCCESS;
 		}
 
@@ -5978,12 +5979,12 @@ more:
 				if (mc->mc_dbx->md_dcmp == mdb_cmp_int && olddata.mv_size == sizeof(size_t))
 					mc->mc_dbx->md_dcmp = mdb_cmp_clong;
 #endif
-				/* if data matches, skip it */
+				/* does data match? */
 				if (!mc->mc_dbx->md_dcmp(data, &olddata)) {
 					if (flags & MDB_NODUPDATA)
 						return MDB_KEYEXIST;
-					rc = MDB_SUCCESS;
-					goto next_sub;
+					/* overwrite it */
+					goto current;
 				}
 
 				/* Back up original data item */
@@ -6259,7 +6260,6 @@ put_sub:
 			 */
 			mc->mc_flags |= C_INITIALIZED;
 		}
-next_sub:
 		if (flags & MDB_MULTIPLE) {
 			if (!rc) {
 				mcount++;
