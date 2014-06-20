@@ -150,6 +150,7 @@ static int readline(MDB_val *out, MDB_val *buf)
 			return EOF;
 		}
 		if (c != ' ') {
+			lineno++;
 			if (fgets(buf->mv_data, buf->mv_size, stdin) == NULL) {
 badend:
 				eof = 1;
