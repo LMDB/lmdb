@@ -128,11 +128,11 @@ static int unhex(unsigned char *c2)
 	int x, c;
 	x = *c2++ & 0x4f;
 	if (x & 0x40)
-		x -= 54;
+		x -= 55;
 	c = x << 4;
 	x = *c2 & 0x4f;
 	if (x & 0x40)
-		x -= 54;
+		x -= 55;
 	c |= x;
 	return c;
 }
