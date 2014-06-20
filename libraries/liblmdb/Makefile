@@ -29,8 +29,8 @@ prefix	= /usr/local
 
 IHDRS	= lmdb.h
 ILIBS	= liblmdb.a liblmdb.so
-IPROGS	= mdb_stat mdb_copy
-IDOCS	= mdb_stat.1 mdb_copy.1
+IPROGS	= mdb_stat mdb_copy mdb_dump
+IDOCS	= mdb_stat.1 mdb_copy.1 mdb_dump.1
 PROGS	= $(IPROGS) mtest mtest2 mtest3 mtest4 mtest5
 all:	$(ILIBS) $(PROGS)
 
@@ -56,6 +56,7 @@ liblmdb.so:	mdb.o midl.o
 
 mdb_stat: mdb_stat.o liblmdb.a
 mdb_copy: mdb_copy.o liblmdb.a
+mdb_dump: mdb_dump.o liblmdb.a
 mtest:    mtest.o    liblmdb.a
 mtest2:	mtest2.o liblmdb.a
 mtest3:	mtest3.o liblmdb.a

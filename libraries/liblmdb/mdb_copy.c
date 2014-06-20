@@ -37,12 +37,15 @@ int main(int argc,char * argv[])
 	for (; argc > 1 && argv[1][0] == '-'; argc--, argv++) {
 		if (argv[1][1] == 'n' && argv[1][2] == '\0')
 			flags |= MDB_NOSUBDIR;
-		else
+		else if (argv[1][1] == 'V' && argv[1][2] == '\0') {
+			printf("%s\n", MDB_VERSION_STRING);
+			exit(0);
+		} else
 			argc = 0;
 	}
 
 	if (argc<2 || argc>3) {
-		fprintf(stderr, "usage: %s [-n] srcpath [dstpath]\n", progname);
+		fprintf(stderr, "usage: %s [-V] [-n] srcpath [dstpath]\n", progname);
 		exit(EXIT_FAILURE);
 	}
 
