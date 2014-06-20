@@ -300,9 +300,7 @@ int main(int argc, char *argv[])
 	envname = argv[optind];
 	rc = mdb_env_create(&env);
 
-	if (subname) {
-		mdb_env_set_maxdbs(env, 2);
-	}
+	mdb_env_set_maxdbs(env, 2);
 
 	rc = mdb_env_open(env, envname, envflags, 0664);
 	if (rc) {
@@ -329,7 +327,7 @@ int main(int argc, char *argv[])
 			goto env_close;
 		}
 
-		rc = mdb_open(txn, subname, flags, &dbi);
+		rc = mdb_open(txn, subname, flags|MDB_CREATE, &dbi);
 		if (rc) {
 			printf("mdb_open failed, error %d %s\n", rc, mdb_strerror(rc));
 			goto txn_abort;
