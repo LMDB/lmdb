@@ -7215,22 +7215,21 @@ mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst)
 		for (i = 0; i < NUMKEYS(csrc->mc_pg[csrc->mc_top]); i++, j++) {
 			srcnode = NODEPTR(csrc->mc_pg[csrc->mc_top], i);
 			if (i == 0 && IS_BRANCH(csrc->mc_pg[csrc->mc_top])) {
-				unsigned int snum = csrc->mc_snum;
+				MDB_cursor mn;
 				MDB_node *s2;
+				mdb_cursor_copy(csrc, &mn);
 				/* must find the lowest key below src */
-				rc = mdb_page_search_lowest(csrc);
+				rc = mdb_page_search_lowest(&mn);
 				if (rc)
 					return rc;
-				if (IS_LEAF2(csrc->mc_pg[csrc->mc_top])) {
-					key.mv_size = csrc->mc_db->md_pad;
-					key.mv_data = LEAF2KEY(csrc->mc_pg[csrc->mc_top], 0, key.mv_size);
+				if (IS_LEAF2(mn.mc_pg[mn.mc_top])) {
+					key.mv_size = mn.mc_db->md_pad;
+					key.mv_data = LEAF2KEY(mn.mc_pg[mn.mc_top], 0, key.mv_size);
 				} else {
-					s2 = NODEPTR(csrc->mc_pg[csrc->mc_top], 0);
+					s2 = NODEPTR(mn.mc_pg[mn.mc_top], 0);
 					key.mv_size = NODEKSZ(s2);
 					key.mv_data = NODEKEY(s2);
 				}
-				csrc->mc_snum = snum--;
-				csrc->mc_top = snum;
 			} else {
 				key.mv_size = srcnode->mn_ksize;
 				key.mv_data = NODEKEY(srcnode);
