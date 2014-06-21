@@ -7054,20 +7054,20 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 		MDB_node *s2;
 		MDB_val bkey;
 		/* must find the lowest key below dst */
-		rc = mdb_page_search_lowest(cdst);
+		mdb_cursor_copy(cdst, &mn);
+		rc = mdb_page_search_lowest(&mn);
 		if (rc)
 			return rc;
-		if (IS_LEAF2(cdst->mc_pg[cdst->mc_top])) {
-			bkey.mv_size = cdst->mc_db->md_pad;
-			bkey.mv_data = LEAF2KEY(cdst->mc_pg[cdst->mc_top], 0, bkey.mv_size);
+		if (IS_LEAF2(mn.mc_pg[mn.mc_top])) {
+			bkey.mv_size = mn.mc_db->md_pad;
+			bkey.mv_data = LEAF2KEY(mn.mc_pg[mn.mc_top], 0, bkey.mv_size);
 		} else {
-			s2 = NODEPTR(cdst->mc_pg[cdst->mc_top], 0);
+			s2 = NODEPTR(mn.mc_pg[mn.mc_top], 0);
 			bkey.mv_size = NODEKSZ(s2);
 			bkey.mv_data = NODEKEY(s2);
 		}
-		cdst->mc_snum = snum--;
-		cdst->mc_top = snum;
-		mdb_cursor_copy(cdst, &mn);
+		mn.mc_snum = snum--;
+		mn.mc_top = snum;
 		mn.mc_ki[snum] = 0;
 		rc = mdb_update_key(&mn, &bkey);
 		if (rc)
