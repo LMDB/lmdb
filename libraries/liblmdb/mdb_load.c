@@ -65,7 +65,7 @@ static void readhdr()
 	while (fgets(dbuf.mv_data, dbuf.mv_size, stdin) != NULL) {
 		lineno++;
 		if (!strncmp(dbuf.mv_data, "VERSION=", STRLENOF("VERSION="))) {
-			version=atoi(dbuf.mv_data+STRLENOF("VERSION="));
+			version=atoi((char *)dbuf.mv_data+STRLENOF("VERSION="));
 			if (version > 3) {
 				fprintf(stderr, "%s: line %zd: unsupported VERSION %d\n",
 					prog, lineno, version);
@@ -74,9 +74,9 @@ static void readhdr()
 		} else if (!strncmp(dbuf.mv_data, "HEADER=END", STRLENOF("HEADER=END"))) {
 			break;
 		} else if (!strncmp(dbuf.mv_data, "format=", STRLENOF("format="))) {
-			if (!strncmp(dbuf.mv_data+STRLENOF("FORMAT="), "print", STRLENOF("print")))
+			if (!strncmp((char *)dbuf.mv_data+STRLENOF("FORMAT="), "print", STRLENOF("print")))
 				mode |= PRINT;
-			else if (strncmp(dbuf.mv_data+STRLENOF("FORMAT="), "bytevalue", STRLENOF("bytevalue"))) {
+			else if (strncmp((char *)dbuf.mv_data+STRLENOF("FORMAT="), "bytevalue", STRLENOF("bytevalue"))) {
 				fprintf(stderr, "%s: line %zd: unsupported FORMAT %s\n",
 					prog, lineno, (char *)dbuf.mv_data+STRLENOF("FORMAT="));
 				exit(EXIT_FAILURE);
@@ -85,9 +85,9 @@ static void readhdr()
 			ptr = memchr(dbuf.mv_data, '\n', dbuf.mv_size);
 			if (ptr) *ptr = '\0';
 			if (subname) free(subname);
-			subname = strdup(dbuf.mv_data+STRLENOF("database="));
+			subname = strdup((char *)dbuf.mv_data+STRLENOF("database="));
 		} else if (!strncmp(dbuf.mv_data, "type=", STRLENOF("type="))) {
-			if (strncmp(dbuf.mv_data+STRLENOF("type="), "btree", STRLENOF("btree")))  {
+			if (strncmp((char *)dbuf.mv_data+STRLENOF("type="), "btree", STRLENOF("btree")))  {
 				fprintf(stderr, "%s: line %zd: unsupported type %s\n",
 					prog, lineno, (char *)dbuf.mv_data+STRLENOF("type="));
 				exit(EXIT_FAILURE);
