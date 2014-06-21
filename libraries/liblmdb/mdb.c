@@ -650,6 +650,7 @@ typedef struct MDB_page {
 #define	P_DIRTY		 0x10		/**< dirty page, also set for #P_SUBP pages */
 #define	P_LEAF2		 0x20		/**< for #MDB_DUPFIXED records */
 #define	P_SUBP		 0x40		/**< for #MDB_DUPSORT sub-pages */
+#define	P_LOOSE		 0x4000		/**< page was dirtied then freed, can be reused */
 #define	P_KEEP		 0x8000		/**< leave this page alone during spill */
 /** @} */
 	uint16_t	mp_flags;		/**< @ref mdb_page */
@@ -1021,6 +1022,7 @@ typedef struct MDB_xcursor {
 typedef struct MDB_pgstate {
 	pgno_t		*mf_pghead;	/**< Reclaimed freeDB pages, or NULL before use */
 	txnid_t		mf_pglast;	/**< ID of last used record, or 0 if !mf_pghead */
+	MDB_page	*mf_pgloose;	/**< Dirty pages that can be reused */
 } MDB_pgstate;
 
 	/** The database environment. */
@@ -1057,6 +1059,7 @@ struct MDB_env {
 	MDB_pgstate	me_pgstate;		/**< state of old pages from freeDB */
 #	define		me_pglast	me_pgstate.mf_pglast
 #	define		me_pghead	me_pgstate.mf_pghead
+#	define		me_pgloose	me_pgstate.mf_pgloose
 	MDB_page	*me_dpages;		/**< list of malloc'd blocks for re-use */
 	/** IDL of pages that became unused in a write txn */
 	MDB_IDL		me_free_pgs;
@@ -1485,7 +1488,6 @@ mdb_page_malloc(MDB_txn *txn, unsigned num)
 	}
 	return ret;
 }
-
 /** Free a single page.
  * Saves single pages to a list, for future reuse.
  * (This is not used for multi-page overflow pages.)
@@ -1523,6 +1525,23 @@ mdb_dlist_free(MDB_txn *txn)
 		mdb_dpage_free(env, dl[i].mptr);
 	}
 	dl[0].mid = 0;
+}
+
+/** Loosen a single page.
+ * Saves single pages to a list for future reuse
+ * in this same txn. It has been pulled from the freeDB
+ * and already resides on the dirty list, but has been
+ * deleted. Use these pages first before pulling again
+ * from the freeDB.
+ */
+static void
+mdb_page_loose(MDB_env *env, MDB_page *mp)
+{
+		pgno_t *pp = (pgno_t *)mp->mp_ptrs;
+		*pp = mp->mp_pgno;
+		mp->mp_next = env->me_pgloose;
+		env->me_pgloose = mp;
+		mp->mp_flags |= P_LOOSE;
 }
 
 /** Set or clear P_KEEP in dirty, non-overflow, non-sub pages watched by txn.
@@ -1571,6 +1590,12 @@ mdb_pages_xkeep(MDB_cursor *mc, unsigned pflags, int all)
 		}
 		if (i == 0)
 			break;
+	}
+
+	/* Loose pages shouldn't be spilled */
+	for (dp = txn->mt_env->me_pgloose; dp; dp=dp->mp_next) {
+		if ((dp->mp_flags & Mask) == pflags)
+			dp->mp_flags ^= P_KEEP;
 	}
 
 	if (all) {
@@ -1799,6 +1824,17 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 	txnid_t oldest = 0, last;
 	MDB_cursor_op op;
 	MDB_cursor m2;
+
+	/* If there are any loose pages, just use them */
+	if (num == 1 && env->me_pgloose) {
+		pgno_t *pp;
+		np = env->me_pgloose;
+		env->me_pgloose = np->mp_next;
+		pp = (pgno_t *)np->mp_ptrs;
+		np->mp_pgno = *pp;
+		*mp = np;
+		return MDB_SUCCESS;
+	}
 
 	*mp = NULL;
 
@@ -2659,6 +2695,38 @@ mdb_freelist_save(MDB_txn *txn)
 		rc = mdb_page_search(&mc, NULL, MDB_PS_FIRST|MDB_PS_MODIFY);
 		if (rc && rc != MDB_NOTFOUND)
 			return rc;
+	}
+
+	/* Dispose of loose pages. Usually they will have all
+	 * been used up by the time we get here.
+	 */
+	if (env->me_pgloose) {
+		MDB_page *mp = env->me_pgloose;
+		pgno_t *pp;
+		/* Just return them to freeDB */
+		if (env->me_pghead) {
+			int i, j;
+			mop = env->me_pghead;
+			while(mp) {
+				pgno_t pg;
+				pp = (pgno_t *)mp->mp_ptrs;
+				pg = *pp;
+				j = mop[0] + 1;
+				for (i = mop[0]; i && mop[i] < pg; i--)
+					mop[j--] = mop[i];
+				mop[j] = pg;
+				mop[0] += 1;
+				mp = mp->mp_next;
+			}
+		} else {
+		/* Oh well, they were wasted. Put on freelist */
+			while(mp) {
+				pp = (pgno_t *)mp->mp_ptrs;
+				mdb_midl_append(&txn->mt_free_pgs, *pp);
+				mp = mp->mp_next;
+			}
+		}
+		env->me_pgloose = NULL;
 	}
 
 	/* MDB_RESERVE cancels meminit in ovpage malloc (when no WRITEMAP) */
@@ -7261,10 +7329,7 @@ mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst)
 	}
 	csrc->mc_top++;
 
-	rc = mdb_midl_append(&csrc->mc_txn->mt_free_pgs,
-		csrc->mc_pg[csrc->mc_top]->mp_pgno);
-	if (rc)
-		return rc;
+	mdb_page_loose(csrc->mc_txn->mt_env, csrc->mc_pg[csrc->mc_top]);
 	if (IS_LEAF(csrc->mc_pg[csrc->mc_top]))
 		csrc->mc_db->md_leaf_pages--;
 	else
