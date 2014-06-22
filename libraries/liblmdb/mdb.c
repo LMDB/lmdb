@@ -7333,7 +7333,10 @@ mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst)
 	csrc->mc_top++;
 
 	psrc = csrc->mc_pg[csrc->mc_top];
-	if (psrc->mp_flags & P_DIRTY) {
+	/* If not operating on FreeDB, allow this page to be reused
+	 * in this txn.
+	 */
+	if ((psrc->mp_flags & P_DIRTY) && csrc->mc_dbi != FREE_DBI) {
 		mdb_page_loose(csrc->mc_txn->mt_env, psrc);
 	} else {
 		rc = mdb_midl_append(&csrc->mc_txn->mt_free_pgs, psrc->mp_pgno);
