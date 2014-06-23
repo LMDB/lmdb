@@ -1,6 +1,6 @@
 /* mtest5.c - memory-mapped database tester/toy */
 /*
- * Copyright 2011 Howard Chu, Symas Corp.
+ * Copyright 2011-2014 Howard Chu, Symas Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -13,7 +13,6 @@
  */
 
 /* Tests for sorted duplicate DBs using cursor_put */
-#define _XOPEN_SOURCE 500		/* srandom(), random() */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,15 +38,15 @@ int main(int argc,char * argv[])
 	char sval[32];
 	char kval[sizeof(int)];
 
-	srandom(time(NULL));
+	srand(time(NULL));
 
 	memset(sval, 0, sizeof(sval));
 
-	count = (random()%384) + 64;
+	count = (rand()%384) + 64;
 	values = (int *)malloc(count*sizeof(int));
 
 	for(i = 0;i<count;i++) {
-		values[i] = random()%1024;
+		values[i] = rand()%1024;
 	}
 
 	E(mdb_env_create(&env));
@@ -89,7 +88,7 @@ int main(int argc,char * argv[])
 
 	j=0;
 
-	for (i= count - 1; i > -1; i-= (random()%5)) {
+	for (i= count - 1; i > -1; i-= (rand()%5)) {
 		j++;
 		txn=NULL;
 		E(mdb_txn_begin(env, NULL, 0, &txn));

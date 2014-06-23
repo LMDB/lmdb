@@ -1,6 +1,6 @@
 /* mtest6.c - memory-mapped database tester/toy */
 /*
- * Copyright 2011 Howard Chu, Symas Corp.
+ * Copyright 2011-2014 Howard Chu, Symas Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -13,7 +13,6 @@
  */
 
 /* Tests for DB splits and merges */
-#define _XOPEN_SOURCE 500		/* srandom(), random() */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,7 +40,7 @@ int main(int argc,char * argv[])
 	long kval;
 	char *sval;
 
-	srandom(time(NULL));
+	srand(time(NULL));
 
 	E(mdb_env_create(&env));
 	E(mdb_env_set_mapsize(env, 10485760));
@@ -90,7 +89,7 @@ int main(int argc,char * argv[])
 #if 0
 	j=0;
 
-	for (i= count - 1; i > -1; i-= (random()%5)) {
+	for (i= count - 1; i > -1; i-= (rand()%5)) {
 		j++;
 		txn=NULL;
 		E(mdb_txn_begin(env, NULL, 0, &txn));

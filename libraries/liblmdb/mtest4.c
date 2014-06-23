@@ -1,6 +1,6 @@
 /* mtest4.c - memory-mapped database tester/toy */
 /*
- * Copyright 2011 Howard Chu, Symas Corp.
+ * Copyright 2011-2014 Howard Chu, Symas Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -13,7 +13,6 @@
  */
 
 /* Tests for sorted duplicate DBs with fixed-size keys */
-#define _XOPEN_SOURCE 500		/* srandom(), random() */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -123,7 +122,7 @@ int main(int argc,char * argv[])
 	mdb_txn_abort(txn);
 	j=0;
 
-	for (i= count - 1; i > -1; i-= (random()%3)) {
+	for (i= count - 1; i > -1; i-= (rand()%3)) {
 		j++;
 		txn=NULL;
 		E(mdb_txn_begin(env, NULL, 0, &txn));

@@ -1,6 +1,6 @@
 /* mtest2.c - memory-mapped database tester/toy */
 /*
- * Copyright 2011 Howard Chu, Symas Corp.
+ * Copyright 2011-2014 Howard Chu, Symas Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -14,7 +14,6 @@
 
 /* Just like mtest.c, but using a subDB instead of the main DB */
 
-#define _XOPEN_SOURCE 500		/* srandom(), random() */
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -38,13 +37,13 @@ int main(int argc,char * argv[])
 	int *values;
 	char sval[32] = "";
 
-	srandom(time(NULL));
+	srand(time(NULL));
 
-	count = (random()%384) + 64;
+	count = (rand()%384) + 64;
 	values = (int *)malloc(count*sizeof(int));
 
 	for(i = 0;i<count;i++) {
-		values[i] = random()%1024;
+		values[i] = rand()%1024;
 	}
 
 	E(mdb_env_create(&env));
@@ -82,7 +81,7 @@ int main(int argc,char * argv[])
 
 	j=0;
 	key.mv_data = sval;
-	for (i= count - 1; i > -1; i-= (random()%5)) {	
+	for (i= count - 1; i > -1; i-= (rand()%5)) {
 		j++;
 		txn=NULL;
 		E(mdb_txn_begin(env, NULL, 0, &txn));

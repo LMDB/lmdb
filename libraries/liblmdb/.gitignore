@@ -5,6 +5,7 @@ mdb_copy
 mdb_stat
 *.[ao]
 *.so
+*.exe
 *[~#]
 *.bak
 *.orig
