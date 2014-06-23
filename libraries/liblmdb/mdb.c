@@ -4610,7 +4610,16 @@ mdb_cmp_cint(const MDB_val *a, const MDB_val *b)
 	} while(!x && u > (unsigned short *)a->mv_data);
 	return x;
 #else
-	return memcmp(a->mv_data, b->mv_data, a->mv_size);
+	unsigned short *u, *c, *end;
+	int x;
+
+	end = (unsigned short *) ((char *) a->mv_data + a->mv_size);
+	u = (unsigned short *)a->mv_data;
+	c = (unsigned short *)b->mv_data;
+	do {
+		x = *u++ - *c++;
+	} while(!x && u < end);
+	return x;
 #endif
 }
 
