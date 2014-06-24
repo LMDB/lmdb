@@ -899,6 +899,10 @@ struct MDB_txn {
 	/** The list of pages that became unused during this transaction.
 	 */
 	MDB_IDL		mt_free_pgs;
+	/** The list of loose pages that became unused and may be reused
+	 *	in this transaction.
+	 */
+	MDB_page	*mt_loose_pgs;
 	/** The sorted list of dirty pages we temporarily wrote to disk
 	 *	because the dirty list was full. page numbers in here are
 	 *	shifted left by 1, deleted slots have the LSB set.
@@ -1022,7 +1026,6 @@ typedef struct MDB_xcursor {
 typedef struct MDB_pgstate {
 	pgno_t		*mf_pghead;	/**< Reclaimed freeDB pages, or NULL before use */
 	txnid_t		mf_pglast;	/**< ID of last used record, or 0 if !mf_pghead */
-	MDB_page	*mf_pgloose;	/**< Dirty pages that can be reused */
 } MDB_pgstate;
 
 	/** The database environment. */
@@ -1059,7 +1062,6 @@ struct MDB_env {
 	MDB_pgstate	me_pgstate;		/**< state of old pages from freeDB */
 #	define		me_pglast	me_pgstate.mf_pglast
 #	define		me_pghead	me_pgstate.mf_pghead
-#	define		me_pgloose	me_pgstate.mf_pgloose
 	MDB_page	*me_dpages;		/**< list of malloc'd blocks for re-use */
 	/** IDL of pages that became unused in a write txn */
 	MDB_IDL		me_free_pgs;
@@ -1527,21 +1529,58 @@ mdb_dlist_free(MDB_txn *txn)
 	dl[0].mid = 0;
 }
 
-/** Loosen a single page.
+/** Loosen or free a single page.
  * Saves single pages to a list for future reuse
  * in this same txn. It has been pulled from the freeDB
  * and already resides on the dirty list, but has been
  * deleted. Use these pages first before pulling again
  * from the freeDB.
+ *
+ * If the page wasn't dirtied in this txn, just add it
+ * to this txn's free list.
  */
-static void
-mdb_page_loose(MDB_env *env, MDB_page *mp)
+static int
+mdb_page_loose(MDB_cursor *mc, MDB_page *mp)
 {
+	int loose = 0;
+	pgno_t pgno = mp->mp_pgno;
+
+	if ((mp->mp_flags & P_DIRTY) && mc->mc_dbi != FREE_DBI) {
+		if (mc->mc_txn->mt_parent) {
+			MDB_ID2 *dl = mc->mc_txn->mt_u.dirty_list;
+			/* If txn has a parent, make sure the page is in our
+			 * dirty list.
+			 */
+			if (dl[0].mid) {
+				unsigned x = mdb_mid2l_search(dl, pgno);
+				if (x <= dl[0].mid && dl[x].mid == pgno) {
+					if (mp != dl[x].mptr) { /* bad cursor? */
+						mc->mc_flags &= ~(C_INITIALIZED|C_EOF);
+						mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
+						return MDB_CORRUPTED;
+					}
+					/* ok, it's ours */
+					loose = 1;
+				}
+			}
+		} else {
+			/* no parent txn, so it's just ours */
+			loose = 1;
+		}
+	}
+	if (loose) {
 		pgno_t *pp = (pgno_t *)mp->mp_ptrs;
-		*pp = mp->mp_pgno;
-		mp->mp_next = env->me_pgloose;
-		env->me_pgloose = mp;
+		*pp = pgno;
+		mp->mp_next = mc->mc_txn->mt_loose_pgs;
+		mc->mc_txn->mt_loose_pgs = mp;
 		mp->mp_flags |= P_LOOSE;
+	} else {
+		int rc = mdb_midl_append(&mc->mc_txn->mt_free_pgs, pgno);
+		if (rc)
+			return rc;
+	}
+
+	return MDB_SUCCESS;
 }
 
 /** Set or clear P_KEEP in dirty, non-overflow, non-sub pages watched by txn.
@@ -1593,7 +1632,7 @@ mdb_pages_xkeep(MDB_cursor *mc, unsigned pflags, int all)
 	}
 
 	/* Loose pages shouldn't be spilled */
-	for (dp = txn->mt_env->me_pgloose; dp; dp=dp->mp_next) {
+	for (dp = txn->mt_loose_pgs; dp; dp=dp->mp_next) {
 		if ((dp->mp_flags & Mask) == pflags)
 			dp->mp_flags ^= P_KEEP;
 	}
@@ -1826,10 +1865,10 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 	MDB_cursor m2;
 
 	/* If there are any loose pages, just use them */
-	if (num == 1 && env->me_pgloose) {
+	if (num == 1 && txn->mt_loose_pgs) {
 		pgno_t *pp;
-		np = env->me_pgloose;
-		env->me_pgloose = np->mp_next;
+		np = txn->mt_loose_pgs;
+		txn->mt_loose_pgs = np->mp_next;
 		pp = (pgno_t *)np->mp_ptrs;
 		np->mp_pgno = *pp;
 		*mp = np;
@@ -2700,8 +2739,8 @@ mdb_freelist_save(MDB_txn *txn)
 	/* Dispose of loose pages. Usually they will have all
 	 * been used up by the time we get here.
 	 */
-	if (env->me_pgloose) {
-		MDB_page *mp = env->me_pgloose;
+	if (txn->mt_loose_pgs) {
+		MDB_page *mp = txn->mt_loose_pgs;
 		pgno_t *pp;
 		/* Just return them to freeDB */
 		if (env->me_pghead) {
@@ -2726,7 +2765,7 @@ mdb_freelist_save(MDB_txn *txn)
 				mp = mp->mp_next;
 			}
 		}
-		env->me_pgloose = NULL;
+		txn->mt_loose_pgs = NULL;
 	}
 
 	/* MDB_RESERVE cancels meminit in ovpage malloc (when no WRITEMAP) */
@@ -7343,15 +7382,11 @@ mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst)
 
 	psrc = csrc->mc_pg[csrc->mc_top];
 	/* If not operating on FreeDB, allow this page to be reused
-	 * in this txn.
+	 * in this txn. Otherwise just add to free list.
 	 */
-	if ((psrc->mp_flags & P_DIRTY) && csrc->mc_dbi != FREE_DBI) {
-		mdb_page_loose(csrc->mc_txn->mt_env, psrc);
-	} else {
-		rc = mdb_midl_append(&csrc->mc_txn->mt_free_pgs, psrc->mp_pgno);
-		if (rc)
-			return rc;
-	}
+	rc = mdb_page_loose(csrc, psrc);
+	if (rc)
+		return rc;
 	if (IS_LEAF(psrc))
 		csrc->mc_db->md_leaf_pages--;
 	else
