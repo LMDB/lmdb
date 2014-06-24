@@ -1,5 +1,5 @@
 /** @file mdb.c
- *	@brief memory-mapped database library
+ *	@brief Lightning memory-mapped database library
  *
  *	A Btree-based database management library modeled loosely on the
  *	BerkeleyDB API, but much simplified.
@@ -145,7 +145,7 @@
 # error "Two's complement, reasonably sized integer types, please"
 #endif
 
-/** @defgroup internal	MDB Internals
+/** @defgroup internal	LMDB Internals
  *	@{
  */
 /** @defgroup compat	Compatibility Macros
@@ -381,7 +381,7 @@ static txnid_t mdb_debug_start;
 	 */
 #define MDB_MINKEYS	 2
 
-	/**	A stamp that identifies a file as an MDB file.
+	/**	A stamp that identifies a file as an LMDB file.
 	 *	There's nothing special about this value other than that it is easily
 	 *	recognizable, and it will reflect any byte order mismatches.
 	 */
@@ -568,7 +568,7 @@ typedef struct MDB_reader {
 	 *	unlikely. If a collision occurs, the results are unpredictable.
 	 */
 typedef struct MDB_txbody {
-		/** Stamp identifying this as an MDB file. It must be set
+		/** Stamp identifying this as an LMDB file. It must be set
 		 *	to #MDB_MAGIC. */
 	uint32_t	mtb_magic;
 		/** Format of this lock file. Must be set to #MDB_LOCK_FORMAT. */
@@ -842,7 +842,7 @@ typedef struct MDB_db {
 	 *	Pages 0-1 are meta pages. Transaction N writes meta page #(N % 2).
 	 */
 typedef struct MDB_meta {
-		/** Stamp identifying this as an MDB file. It must be set
+		/** Stamp identifying this as an LMDB file. It must be set
 		 *	to #MDB_MAGIC. */
 	uint32_t	mm_magic;
 		/** Version number of this lock file. Must be set to #MDB_DATA_VERSION. */
@@ -1185,7 +1185,7 @@ mdb_version(int *major, int *minor, int *patch)
 	return MDB_VERSION_STRING;
 }
 
-/** Table of descriptions for MDB @ref errors */
+/** Table of descriptions for LMDB @ref errors */
 static char *const mdb_errstr[] = {
 	"MDB_KEYEXIST: Key/data pair already exists",
 	"MDB_NOTFOUND: No matching key/data pair found",
@@ -1193,7 +1193,7 @@ static char *const mdb_errstr[] = {
 	"MDB_CORRUPTED: Located page was wrong type",
 	"MDB_PANIC: Update of meta page failed",
 	"MDB_VERSION_MISMATCH: Database environment version mismatch",
-	"MDB_INVALID: File is not an MDB file",
+	"MDB_INVALID: File is not an LMDB file",
 	"MDB_MAP_FULL: Environment mapsize limit reached",
 	"MDB_DBS_FULL: Environment maxdbs limit reached",
 	"MDB_READERS_FULL: Environment maxreaders limit reached",
@@ -3623,7 +3623,7 @@ mdb_env_get_maxreaders(MDB_env *env, unsigned int *readers)
 	return MDB_SUCCESS;
 }
 
-/** Further setup required for opening an MDB environment
+/** Further setup required for opening an LMDB environment
  */
 static int
 mdb_env_open2(MDB_env *env)
@@ -3959,7 +3959,7 @@ mdb_hash_enc(MDB_val *val, char *encbuf)
 #endif
 
 /** Open and/or initialize the lock region for the environment.
- * @param[in] env The MDB environment.
+ * @param[in] env The LMDB environment.
  * @param[in] lpath The pathname of the file used for the lock region.
  * @param[in] mode The Unix permissions for the file, if we create it.
  * @param[out] excl Resulting file lock type: -1 none, 0 shared, 1 exclusive

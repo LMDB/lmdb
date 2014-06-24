@@ -22,7 +22,7 @@
 #include <sys/types.h>
 #include "midl.h"
 
-/** @defgroup internal	MDB Internals
+/** @defgroup internal	LMDB Internals
  *	@{
  */
 /** @defgroup idls	ID List Management
