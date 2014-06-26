@@ -10,6 +10,9 @@ mdb_stat
 *.bak
 *.orig
 *.rej
+*.gcov
+*.gcda
+*.gcno
 core
 core.*
 valgrind.*

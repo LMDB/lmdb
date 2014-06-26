@@ -76,3 +76,18 @@ midl.o: midl.c midl.h
 
 %.o:	%.c lmdb.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c $<
+
+coverage: xmtest
+	-rm -rf testdb; mkdir testdb
+	./xmtest
+	gcov xmdb.c
+	gcov xmidl.c
+
+xmtest:	mtest.o xmdb.o xmidl.o
+	gcc -o xmtest mtest.o xmdb.o xmidl.o -pthread -fprofile-arcs -ftest-coverage
+
+xmdb.o: mdb.c lmdb.h midl.h
+	$(CC) $(CFLAGS) -fPIC $(CPPFLAGS) -O0 -fprofile-arcs -ftest-coverage -c mdb.c -o $@
+
+xmidl.o: midl.c midl.h
+	$(CC) $(CFLAGS) -fPIC $(CPPFLAGS) -O0 -fprofile-arcs -ftest-coverage -c midl.c -o $@
