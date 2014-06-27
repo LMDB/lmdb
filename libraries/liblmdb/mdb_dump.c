@@ -17,6 +17,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <signal.h>
 #include "lmdb.h"
 
 #define PRINT	1
@@ -36,6 +37,13 @@ flagbit dbflags[] = {
 	{ MDB_REVERSEDUP, "reversedup" },
 	{ 0, NULL }
 };
+
+static volatile sig_atomic_t gotsig;
+
+static void dumpsig( int sig )
+{
+	gotsig=1;
+}
 
 static const char hexc[] = "0123456789abcdef";
 
@@ -112,6 +120,10 @@ static int dumpit(MDB_txn *txn, MDB_dbi dbi, char *name)
 	if (rc) return rc;
 
 	while ((rc = mdb_cursor_get(mc, &key, &data, MDB_NEXT) == MDB_SUCCESS)) {
+		if (gotsig) {
+			rc = EINTR;
+			break;
+		}
 		if (mode & PRINT) {
 			text(&key);
 			text(&data);
@@ -196,6 +208,15 @@ int main(int argc, char *argv[])
 	if (optind != argc - 1)
 		usage(prog);
 
+#ifdef SIGPIPE
+	signal(SIGPIPE, dumpsig);
+#endif
+#ifdef SIGHUP
+	signal(SIGHUP, dumpsig);
+#endif
+	signal(SIGINT, dumpsig);
+	signal(SIGTERM, dumpsig);
+
 	envname = argv[optind];
 	rc = mdb_env_create(&env);
 
@@ -247,6 +268,8 @@ int main(int argc, char *argv[])
 					list++;
 				} else {
 					rc = dumpit(txn, db2, str);
+					if (rc)
+						break;
 				}
 				mdb_close(env, db2);
 			}
