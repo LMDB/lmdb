@@ -701,6 +701,9 @@ typedef struct MDB_page {
 	/** The number of overflow pages needed to store the given size. */
 #define OVPAGES(size, psize)	((PAGEHDRSZ-1 + (size)) / (psize) + 1)
 
+	/** Link in #MDB_txn.%mt_loose_pages list */
+#define NEXT_LOOSE_PAGE(p)		(*(MDB_page **)METADATA(p))
+
 	/** Header for a single key/data pair within a page.
 	 * Used in pages of type #P_BRANCH and #P_LEAF without #P_LEAF2.
 	 * We guarantee 2-byte alignment for 'MDB_node's.
@@ -900,7 +903,7 @@ struct MDB_txn {
 	 */
 	MDB_IDL		mt_free_pgs;
 	/** The list of loose pages that became unused and may be reused
-	 *	in this transaction.
+	 *	in this transaction, linked through #NEXT_LOOSE_PAGE(page).
 	 */
 	MDB_page	*mt_loose_pgs;
 	/** The sorted list of dirty pages we temporarily wrote to disk
@@ -1569,9 +1572,7 @@ mdb_page_loose(MDB_cursor *mc, MDB_page *mp)
 		}
 	}
 	if (loose) {
-		pgno_t *pp = (pgno_t *)mp->mp_ptrs;
-		*pp = pgno;
-		mp->mp_next = mc->mc_txn->mt_loose_pgs;
+		NEXT_LOOSE_PAGE(mp) = mc->mc_txn->mt_loose_pgs;
 		mc->mc_txn->mt_loose_pgs = mp;
 		mp->mp_flags |= P_LOOSE;
 	} else {
@@ -1632,7 +1633,7 @@ mdb_pages_xkeep(MDB_cursor *mc, unsigned pflags, int all)
 	}
 
 	/* Loose pages shouldn't be spilled */
-	for (dp = txn->mt_loose_pgs; dp; dp=dp->mp_next) {
+	for (dp = txn->mt_loose_pgs; dp; dp = NEXT_LOOSE_PAGE(dp)) {
 		if ((dp->mp_flags & Mask) == pflags)
 			dp->mp_flags ^= P_KEEP;
 	}
@@ -1866,11 +1867,8 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 
 	/* If there are any loose pages, just use them */
 	if (num == 1 && txn->mt_loose_pgs) {
-		pgno_t *pp;
 		np = txn->mt_loose_pgs;
-		txn->mt_loose_pgs = np->mp_next;
-		pp = (pgno_t *)np->mp_ptrs;
-		np->mp_pgno = *pp;
+		txn->mt_loose_pgs = NEXT_LOOSE_PAGE(np);
 		*mp = np;
 		return MDB_SUCCESS;
 	}
@@ -2741,28 +2739,22 @@ mdb_freelist_save(MDB_txn *txn)
 	 */
 	if (txn->mt_loose_pgs) {
 		MDB_page *mp = txn->mt_loose_pgs;
-		pgno_t *pp;
 		/* Just return them to freeDB */
 		if (env->me_pghead) {
 			int i, j;
 			mop = env->me_pghead;
-			while(mp) {
-				pgno_t pg;
-				pp = (pgno_t *)mp->mp_ptrs;
-				pg = *pp;
+			for (; mp; mp = NEXT_LOOSE_PAGE(mp)) {
+				pgno_t pg = mp->mp_pgno;
 				j = mop[0] + 1;
 				for (i = mop[0]; i && mop[i] < pg; i--)
 					mop[j--] = mop[i];
 				mop[j] = pg;
 				mop[0] += 1;
-				mp = mp->mp_next;
 			}
 		} else {
 		/* Oh well, they were wasted. Put on freelist */
-			while(mp) {
-				pp = (pgno_t *)mp->mp_ptrs;
-				mdb_midl_append(&txn->mt_free_pgs, *pp);
-				mp = mp->mp_next;
+			for (; mp; mp = NEXT_LOOSE_PAGE(mp)) {
+				mdb_midl_append(&txn->mt_free_pgs, mp->mp_pgno);
 			}
 		}
 		txn->mt_loose_pgs = NULL;
