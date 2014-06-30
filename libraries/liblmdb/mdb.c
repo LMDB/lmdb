@@ -4505,7 +4505,23 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
 	if (rc)
 		goto leave;
 
-	wsize = txn->mt_next_pgno * env->me_psize - wsize;
+	w2 = txn->mt_next_pgno * env->me_psize;
+#ifdef WIN32
+	{
+		LARGE_INTEGER fsize;
+		GetFileSizeEx(env->me_fd, &fsize);
+		if (w2 > fsize.QuadPart)
+			w2 = fsize.QuadPart;
+	}
+#else
+	{
+		struct stat st;
+		fstat(env->me_fd, &st);
+		if (w2 > (size_t)st.st_size)
+			w2 = st.st_size;
+	}
+#endif
+	wsize = w2 - wsize;
 	while (wsize > 0) {
 		if (wsize > MAX_WRITE)
 			w2 = MAX_WRITE;
