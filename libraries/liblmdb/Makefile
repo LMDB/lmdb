@@ -77,17 +77,21 @@ midl.o: midl.c midl.h
 %.o:	%.c lmdb.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c $<
 
+COV_FLAGS=-fprofile-arcs -ftest-coverage
+COV_OBJS=xmdb.o xmidl.o
+
 coverage: xmtest
-	-rm -rf testdb; mkdir testdb
-	./xmtest
+	for i in mtest*.c [0-9]*.c; do j=`basename \$$i .c`; $(MAKE) $$j.o; \
+		gcc -o x$$j $$j.o $(COV_OBJS) -pthread $(COV_FLAGS); \
+		rm -rf testdb; mkdir testdb; ./x$$j; done
 	gcov xmdb.c
 	gcov xmidl.c
 
 xmtest:	mtest.o xmdb.o xmidl.o
-	gcc -o xmtest mtest.o xmdb.o xmidl.o -pthread -fprofile-arcs -ftest-coverage
+	gcc -o xmtest mtest.o xmdb.o xmidl.o -pthread $(COV_FLAGS)
 
 xmdb.o: mdb.c lmdb.h midl.h
-	$(CC) $(CFLAGS) -fPIC $(CPPFLAGS) -O0 -fprofile-arcs -ftest-coverage -c mdb.c -o $@
+	$(CC) $(CFLAGS) -fPIC $(CPPFLAGS) -O0 $(COV_FLAGS) -c mdb.c -o $@
 
 xmidl.o: midl.c midl.h
-	$(CC) $(CFLAGS) -fPIC $(CPPFLAGS) -O0 -fprofile-arcs -ftest-coverage -c midl.c -o $@
+	$(CC) $(CFLAGS) -fPIC $(CPPFLAGS) -O0 $(COV_FLAGS) -c midl.c -o $@
