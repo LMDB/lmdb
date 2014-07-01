@@ -305,7 +305,7 @@ int main(int argc, char *argv[])
 
 	rc = mdb_env_open(env, envname, envflags, 0664);
 	if (rc) {
-		printf("mdb_env_open failed, error %d %s\n", rc, mdb_strerror(rc));
+		fprintf(stderr, "mdb_env_open failed, error %d %s\n", rc, mdb_strerror(rc));
 		goto env_close;
 	}
 
@@ -324,19 +324,19 @@ int main(int argc, char *argv[])
 		
 		rc = mdb_txn_begin(env, NULL, 0, &txn);
 		if (rc) {
-			printf("mdb_txn_begin failed, error %d %s\n", rc, mdb_strerror(rc));
+			fprintf(stderr, "mdb_txn_begin failed, error %d %s\n", rc, mdb_strerror(rc));
 			goto env_close;
 		}
 
 		rc = mdb_open(txn, subname, flags|MDB_CREATE, &dbi);
 		if (rc) {
-			printf("mdb_open failed, error %d %s\n", rc, mdb_strerror(rc));
+			fprintf(stderr, "mdb_open failed, error %d %s\n", rc, mdb_strerror(rc));
 			goto txn_abort;
 		}
 
 		rc = mdb_cursor_open(txn, dbi, &mc);
 		if (rc) {
-			printf("mdb_cursor_open failed, error %d %s\n", rc, mdb_strerror(rc));
+			fprintf(stderr, "mdb_cursor_open failed, error %d %s\n", rc, mdb_strerror(rc));
 			goto txn_abort;
 		}
 
@@ -366,12 +366,12 @@ int main(int argc, char *argv[])
 				}
 				rc = mdb_txn_begin(env, NULL, 0, &txn);
 				if (rc) {
-					printf("mdb_txn_begin failed, error %d %s\n", rc, mdb_strerror(rc));
+					fprintf(stderr, "mdb_txn_begin failed, error %d %s\n", rc, mdb_strerror(rc));
 					goto env_close;
 				}
 				rc = mdb_cursor_open(txn, dbi, &mc);
 				if (rc) {
-					printf("mdb_cursor_open failed, error %d %s\n", rc, mdb_strerror(rc));
+					fprintf(stderr, "mdb_cursor_open failed, error %d %s\n", rc, mdb_strerror(rc));
 					goto txn_abort;
 				}
 				batch = 0;
