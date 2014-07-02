@@ -8139,41 +8139,44 @@ mdb_env_cwalk(mdb_copy *my, pgno_t pg)
 		unsigned n;
 		mp = mc.mc_pg[mc.mc_top];
 		n = NUMKEYS(mp);
+
 		if (IS_LEAF(mp)) {
-			for (i=0; i<n; i++) {
-				ni = NODEPTR(mp, i);
-				if (ni->mn_flags & F_BIGDATA) {
-					MDB_page *omp;
-					pgno_t pg;
-					memcpy(&pg, NODEDATA(ni), sizeof(pg));
-					rc = mdb_page_get(txn, pg, &omp, NULL);
-					if (rc)
-						goto done;
-					if (my->mc_wlen[toggle] >= WBUF) {
+			if (!IS_LEAF2(mp)) {
+				for (i=0; i<n; i++) {
+					ni = NODEPTR(mp, i);
+					if (ni->mn_flags & F_BIGDATA) {
+						MDB_page *omp;
+						pgno_t pg;
+						memcpy(&pg, NODEDATA(ni), sizeof(pg));
+						rc = mdb_page_get(txn, pg, &omp, NULL);
+						if (rc)
+							goto done;
+						if (my->mc_wlen[toggle] >= WBUF) {
+							rc = mdb_env_cthr_toggle(my);
+							if (rc)
+								goto done;
+							toggle ^= 1;
+						}
+						mo = (MDB_page *)(my->mc_wbuf[toggle] + my->mc_wlen[toggle]);
+						memcpy(mo, omp, my->mc_env->me_psize);
+						mo->mp_pgno = my->mc_next_pgno;
+						my->mc_next_pgno += omp->mp_pages;
+						my->mc_wlen[toggle] += my->mc_env->me_psize;
+						my->mc_olen[toggle] = my->mc_env->me_psize * (omp->mp_pages - 1);
+						my->mc_obuf[toggle] = (char *)omp + my->mc_env->me_psize;
 						rc = mdb_env_cthr_toggle(my);
 						if (rc)
 							goto done;
 						toggle ^= 1;
+					} else if (ni->mn_flags & F_SUBDATA) {
+						MDB_db db;
+						memcpy(&db, NODEDATA(ni), sizeof(db));
+						my->mc_toggle = toggle;
+						rc = mdb_env_cwalk(my, db.md_root);
+						if (rc)
+							goto done;
+						toggle = my->mc_toggle;
 					}
-					mo = (MDB_page *)(my->mc_wbuf[toggle] + my->mc_wlen[toggle]);
-					memcpy(mo, omp, my->mc_env->me_psize);
-					mo->mp_pgno = my->mc_next_pgno;
-					my->mc_next_pgno += omp->mp_pages;
-					my->mc_wlen[toggle] += my->mc_env->me_psize;
-					my->mc_olen[toggle] = my->mc_env->me_psize * (omp->mp_pages - 1);
-					my->mc_obuf[toggle] = (char *)omp + my->mc_env->me_psize;
-					rc = mdb_env_cthr_toggle(my);
-					if (rc)
-						goto done;
-					toggle ^= 1;
-				} else if (ni->mn_flags & F_SUBDATA) {
-					MDB_db db;
-					memcpy(&db, NODEDATA(ni), sizeof(db));
-					my->mc_toggle = toggle;
-					rc = mdb_env_cwalk(my, db.md_root);
-					if (rc)
-						goto done;
-					toggle = my->mc_toggle;
 				}
 			}
 		} else {
