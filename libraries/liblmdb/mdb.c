@@ -8010,7 +8010,9 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 	return mdb_cursor_put(&mc, key, data, flags);
 }
 
-#define WBUF	(64*1024)
+#ifndef MDB_WBUF
+#define MDB_WBUF	(1024*1024)
+#endif
 
 typedef struct mdb_copy {
 	pthread_mutex_t mc_mutex[2];
@@ -8151,7 +8153,7 @@ mdb_env_cwalk(mdb_copy *my, pgno_t pg)
 						rc = mdb_page_get(txn, pg, &omp, NULL);
 						if (rc)
 							goto done;
-						if (my->mc_wlen[toggle] >= WBUF) {
+						if (my->mc_wlen[toggle] >= MDB_WBUF) {
 							rc = mdb_env_cthr_toggle(my);
 							if (rc)
 								goto done;
@@ -8204,7 +8206,7 @@ again:
 			ni = NODEPTR(mc.mc_pg[mc.mc_top-1], mc.mc_ki[mc.mc_top-1]);
 			SETPGNO(ni, my->mc_next_pgno);
 		}
-		if (my->mc_wlen[toggle] >= WBUF) {
+		if (my->mc_wlen[toggle] >= MDB_WBUF) {
 			rc = mdb_env_cthr_toggle(my);
 			if (rc)
 				goto done;
@@ -8231,11 +8233,11 @@ mdb_env_copyfd2(MDB_env *env, HANDLE fd)
 	pthread_t thr;
 	int rc;
 
-	rc = posix_memalign(&my.mc_free, env->me_psize, WBUF*2);
+	rc = posix_memalign(&my.mc_free, env->me_psize, MDB_WBUF*2);
 	if (rc)
 		return rc;
 	my.mc_wbuf[0] = my.mc_free;
-	my.mc_wbuf[1] = my.mc_free + WBUF;
+	my.mc_wbuf[1] = my.mc_free + MDB_WBUF;
 	pthread_mutex_init(&my.mc_mutex[0], NULL);
 	pthread_mutex_init(&my.mc_mutex[1], NULL);
 	my.mc_wlen[0] = 0;
