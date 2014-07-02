@@ -91,6 +91,7 @@ static int dumpit(MDB_txn *txn, MDB_dbi dbi, char *name)
 	MDB_cursor *mc;
 	MDB_stat ms;
 	MDB_val key, data;
+	MDB_envinfo info;
 	unsigned int flags;
 	int rc, i;
 
@@ -100,11 +101,18 @@ static int dumpit(MDB_txn *txn, MDB_dbi dbi, char *name)
 	rc = mdb_stat(txn, dbi, &ms);
 	if (rc) return rc;
 
+	rc = mdb_env_info(mdb_txn_env(txn), &info);
+	if (rc) return rc;
+
 	printf("VERSION=3\n");
 	printf("format=%s\n", mode & PRINT ? "print" : "bytevalue");
 	if (name)
 		printf("database=%s\n", name);
 	printf("type=btree\n");
+	printf("mapsize=%zu\n", info.me_mapsize);
+	if (info.me_mapaddr)
+		printf("mapaddr=%p\n", info.me_mapaddr);
+	printf("maxreaders=%u\n", info.me_maxreaders);
 
 	if (flags & MDB_DUPSORT)
 		printf("duplicates=1\n");

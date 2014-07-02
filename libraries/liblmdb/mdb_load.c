@@ -34,6 +34,8 @@ static char *prog;
 
 static int eof;
 
+static MDB_envinfo info;
+
 static MDB_val kbuf, dbuf;
 
 #define STRLENOF(s)	(sizeof(s)-1)
@@ -90,6 +92,36 @@ static void readhdr()
 			if (strncmp((char *)dbuf.mv_data+STRLENOF("type="), "btree", STRLENOF("btree")))  {
 				fprintf(stderr, "%s: line %zd: unsupported type %s\n",
 					prog, lineno, (char *)dbuf.mv_data+STRLENOF("type="));
+				exit(EXIT_FAILURE);
+			}
+		} else if (!strncmp(dbuf.mv_data, "mapaddr=", STRLENOF("mapaddr="))) {
+			int i;
+			ptr = memchr(dbuf.mv_data, '\n', dbuf.mv_size);
+			if (ptr) *ptr = '\0';
+			i = sscanf((char *)dbuf.mv_data+STRLENOF("mapaddr="), "%p", &info.me_mapaddr);
+			if (i != 1) {
+				fprintf(stderr, "%s: line %zd: invalid mapaddr %s\n",
+					prog, lineno, (char *)dbuf.mv_data+STRLENOF("mapaddr="));
+				exit(EXIT_FAILURE);
+			}
+		} else if (!strncmp(dbuf.mv_data, "mapsize=", STRLENOF("mapsize="))) {
+			int i;
+			ptr = memchr(dbuf.mv_data, '\n', dbuf.mv_size);
+			if (ptr) *ptr = '\0';
+			i = sscanf((char *)dbuf.mv_data+STRLENOF("mapsize="), "%zu", &info.me_mapsize);
+			if (i != 1) {
+				fprintf(stderr, "%s: line %zd: invalid mapsize %s\n",
+					prog, lineno, (char *)dbuf.mv_data+STRLENOF("mapsize="));
+				exit(EXIT_FAILURE);
+			}
+		} else if (!strncmp(dbuf.mv_data, "maxreaders=", STRLENOF("maxreaders="))) {
+			int i;
+			ptr = memchr(dbuf.mv_data, '\n', dbuf.mv_size);
+			if (ptr) *ptr = '\0';
+			i = sscanf((char *)dbuf.mv_data+STRLENOF("maxreaders="), "%u", &info.me_maxreaders);
+			if (i != 1) {
+				fprintf(stderr, "%s: line %zd: invalid maxreaders %s\n",
+					prog, lineno, (char *)dbuf.mv_data+STRLENOF("maxreaders="));
 				exit(EXIT_FAILURE);
 			}
 		} else {
@@ -251,6 +283,7 @@ int main(int argc, char *argv[])
 	MDB_dbi dbi;
 	char *envname;
 	int envflags = 0, putflags = 0;
+	int dohdr = 0;
 
 	prog = argv[0];
 
@@ -298,10 +331,25 @@ int main(int argc, char *argv[])
 	if (optind != argc - 1)
 		usage(prog);
 
+	dbuf.mv_size = 4096;
+	dbuf.mv_data = malloc(dbuf.mv_size);
+
+	if (!(mode & NOHDR))
+		readhdr();
+
 	envname = argv[optind];
 	rc = mdb_env_create(&env);
 
 	mdb_env_set_maxdbs(env, 2);
+
+	if (info.me_maxreaders)
+		mdb_env_set_maxreaders(env, info.me_maxreaders);
+
+	if (info.me_mapsize)
+		mdb_env_set_mapsize(env, info.me_mapsize);
+
+	if (info.me_mapaddr)
+		envflags |= MDB_FIXEDMAP;
 
 	rc = mdb_env_open(env, envname, envflags, 0664);
 	if (rc) {
@@ -311,15 +359,15 @@ int main(int argc, char *argv[])
 
 	kbuf.mv_size = mdb_env_get_maxkeysize(env) * 2 + 2;
 	kbuf.mv_data = malloc(kbuf.mv_size);
-	dbuf.mv_size = 4096;
-	dbuf.mv_data = malloc(dbuf.mv_size);
 
 	while(!eof) {
 		MDB_val key, data;
 		int batch = 0;
 		flags = 0;
 
-		if (!(mode & NOHDR))
+		if (!dohdr) {
+			dohdr = 1;
+		} else if (!(mode & NOHDR))
 			readhdr();
 		
 		rc = mdb_txn_begin(env, NULL, 0, &txn);
