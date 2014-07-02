@@ -622,6 +622,43 @@ int  mdb_env_copy(MDB_env *env, const char *path);
 	 */
 int  mdb_env_copyfd(MDB_env *env, mdb_filehandle_t fd);
 
+	/** @brief Copy an LMDB environment to the specified path, with compaction.
+	 *
+	 * This function may be used to make a backup of an existing environment.
+	 * No lockfile is created, since it gets recreated at need. Unlike
+	 * #mdb_env_copy(), which copies all pages from the environment, this
+	 * function trims freed/unused pages from the copy and reorders leaf
+	 * pages in sequential order. This function may execute more slowly
+	 * than #mdb_env_copy() and will use more CPU time.
+	 * @note This call can trigger significant file size growth if run in
+	 * parallel with write transactions, because it employs a read-only
+	 * transaction. See long-lived transactions under @ref caveats_sec.
+	 * @param[in] env An environment handle returned by #mdb_env_create(). It
+	 * must have already been opened successfully.
+	 * @param[in] path The directory in which the copy will reside. This
+	 * directory must already exist and be writable but must otherwise be
+	 * empty.
+	 * @return A non-zero error value on failure and 0 on success.
+	 */
+int  mdb_env_copy2(MDB_env *env, const char *path);
+
+	/** @brief Copy an LMDB environment to the specified file descriptor,
+	 *	with compaction.
+	 *
+	 * This function may be used to make a backup of an existing environment.
+	 * No lockfile is created, since it gets recreated at need. See
+	 * #mdb_env_copy2() for further details.
+	 * @note This call can trigger significant file size growth if run in
+	 * parallel with write transactions, because it employs a read-only
+	 * transaction. See long-lived transactions under @ref caveats_sec.
+	 * @param[in] env An environment handle returned by #mdb_env_create(). It
+	 * must have already been opened successfully.
+	 * @param[in] fd The filedescriptor to write the copy to. It must
+	 * have already been opened for Write access.
+	 * @return A non-zero error value on failure and 0 on success.
+	 */
+int  mdb_env_copyfd2(MDB_env *env, mdb_filehandle_t fd);
+
 	/** @brief Return statistics about the LMDB environment.
 	 *
 	 * @param[in] env An environment handle returned by #mdb_env_create()

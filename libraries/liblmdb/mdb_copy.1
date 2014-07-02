@@ -8,6 +8,8 @@ mdb_copy \- LMDB environment copy tool
 [\c
 .BR \-V ]
 [\c
+.BR \-c ]
+[\c
 .BR \-n ]
 .B srcpath
 [\c
@@ -29,6 +31,11 @@ written to stdout.
 .TP
 .BR \-V
 Write the library version number to the standard output, and exit.
+.TP
+.BR \-c
+Compact while copying. Only current data pages will be copied; freed
+or unused pages will be omitted from the copy. This option will
+slow down the backup process as it is more CPU-intensive.
 .TP
 .BR \-n
 Open LDMB environment(s) which do not use subdirectories.

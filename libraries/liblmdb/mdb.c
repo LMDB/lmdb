@@ -3301,6 +3301,20 @@ mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 	return 0;
 }
 
+static void
+mdb_env_init_meta0(MDB_env *env, MDB_meta *meta)
+{
+	meta->mm_magic = MDB_MAGIC;
+	meta->mm_version = MDB_DATA_VERSION;
+	meta->mm_mapsize = env->me_mapsize;
+	meta->mm_psize = env->me_psize;
+	meta->mm_last_pg = 1;
+	meta->mm_flags = env->me_flags & 0xffff;
+	meta->mm_flags |= MDB_INTEGERKEY;
+	meta->mm_dbs[0].md_root = P_INVALID;
+	meta->mm_dbs[1].md_root = P_INVALID;
+}
+
 /** Write the environment parameters of a freshly created DB environment.
  * @param[in] env the environment handle
  * @param[out] meta address of where to store the meta information
@@ -3330,15 +3344,7 @@ mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 
 	psize = env->me_psize;
 
-	meta->mm_magic = MDB_MAGIC;
-	meta->mm_version = MDB_DATA_VERSION;
-	meta->mm_mapsize = env->me_mapsize;
-	meta->mm_psize = psize;
-	meta->mm_last_pg = 1;
-	meta->mm_flags = env->me_flags & 0xffff;
-	meta->mm_flags |= MDB_INTEGERKEY;
-	meta->mm_dbs[0].md_root = P_INVALID;
-	meta->mm_dbs[1].md_root = P_INVALID;
+	mdb_env_init_meta0(env, meta);
 
 	p = calloc(2, psize);
 	p->mp_pgno = 0;
@@ -4443,167 +4449,6 @@ mdb_env_close0(MDB_env *env, int excl)
 	env->me_flags &= ~(MDB_ENV_ACTIVE|MDB_ENV_TXKEY);
 }
 
-int
-mdb_env_copyfd(MDB_env *env, HANDLE fd)
-{
-	MDB_txn *txn = NULL;
-	int rc;
-	size_t wsize;
-	char *ptr;
-#ifdef _WIN32
-	DWORD len, w2;
-#define DO_WRITE(rc, fd, ptr, w2, len)	rc = WriteFile(fd, ptr, w2, &len, NULL)
-#else
-	ssize_t len;
-	size_t w2;
-#define DO_WRITE(rc, fd, ptr, w2, len)	len = write(fd, ptr, w2); rc = (len >= 0)
-#endif
-
-	/* Do the lock/unlock of the reader mutex before starting the
-	 * write txn.  Otherwise other read txns could block writers.
-	 */
-	rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
-	if (rc)
-		return rc;
-
-	if (env->me_txns) {
-		/* We must start the actual read txn after blocking writers */
-		mdb_txn_reset0(txn, "reset-stage1");
-
-		/* Temporarily block writers until we snapshot the meta pages */
-		LOCK_MUTEX_W(env);
-
-		rc = mdb_txn_renew0(txn);
-		if (rc) {
-			UNLOCK_MUTEX_W(env);
-			goto leave;
-		}
-	}
-
-	wsize = env->me_psize * 2;
-	ptr = env->me_map;
-	w2 = wsize;
-	while (w2 > 0) {
-		DO_WRITE(rc, fd, ptr, w2, len);
-		if (!rc) {
-			rc = ErrCode();
-			break;
-		} else if (len > 0) {
-			rc = MDB_SUCCESS;
-			ptr += len;
-			w2 -= len;
-			continue;
-		} else {
-			/* Non-blocking or async handles are not supported */
-			rc = EIO;
-			break;
-		}
-	}
-	if (env->me_txns)
-		UNLOCK_MUTEX_W(env);
-
-	if (rc)
-		goto leave;
-
-	w2 = txn->mt_next_pgno * env->me_psize;
-#ifdef WIN32
-	{
-		LARGE_INTEGER fsize;
-		GetFileSizeEx(env->me_fd, &fsize);
-		if (w2 > fsize.QuadPart)
-			w2 = fsize.QuadPart;
-	}
-#else
-	{
-		struct stat st;
-		fstat(env->me_fd, &st);
-		if (w2 > (size_t)st.st_size)
-			w2 = st.st_size;
-	}
-#endif
-	wsize = w2 - wsize;
-	while (wsize > 0) {
-		if (wsize > MAX_WRITE)
-			w2 = MAX_WRITE;
-		else
-			w2 = wsize;
-		DO_WRITE(rc, fd, ptr, w2, len);
-		if (!rc) {
-			rc = ErrCode();
-			break;
-		} else if (len > 0) {
-			rc = MDB_SUCCESS;
-			ptr += len;
-			wsize -= len;
-			continue;
-		} else {
-			rc = EIO;
-			break;
-		}
-	}
-
-leave:
-	mdb_txn_abort(txn);
-	return rc;
-}
-
-int
-mdb_env_copy(MDB_env *env, const char *path)
-{
-	int rc, len;
-	char *lpath;
-	HANDLE newfd = INVALID_HANDLE_VALUE;
-
-	if (env->me_flags & MDB_NOSUBDIR) {
-		lpath = (char *)path;
-	} else {
-		len = strlen(path);
-		len += sizeof(DATANAME);
-		lpath = malloc(len);
-		if (!lpath)
-			return ENOMEM;
-		sprintf(lpath, "%s" DATANAME, path);
-	}
-
-	/* The destination path must exist, but the destination file must not.
-	 * We don't want the OS to cache the writes, since the source data is
-	 * already in the OS cache.
-	 */
-#ifdef _WIN32
-	newfd = CreateFile(lpath, GENERIC_WRITE, 0, NULL, CREATE_NEW,
-				FILE_FLAG_NO_BUFFERING|FILE_FLAG_WRITE_THROUGH, NULL);
-#else
-	newfd = open(lpath, O_WRONLY|O_CREAT|O_EXCL, 0666);
-#endif
-	if (newfd == INVALID_HANDLE_VALUE) {
-		rc = ErrCode();
-		goto leave;
-	}
-
-#ifdef O_DIRECT
-	/* Set O_DIRECT if the file system supports it */
-	if ((rc = fcntl(newfd, F_GETFL)) != -1)
-		(void) fcntl(newfd, F_SETFL, rc | O_DIRECT);
-#endif
-#ifdef F_NOCACHE	/* __APPLE__ */
-	rc = fcntl(newfd, F_NOCACHE, 1);
-	if (rc) {
-		rc = ErrCode();
-		goto leave;
-	}
-#endif
-
-	rc = mdb_env_copyfd(env, newfd);
-
-leave:
-	if (!(env->me_flags & MDB_NOSUBDIR))
-		free(lpath);
-	if (newfd != INVALID_HANDLE_VALUE)
-		if (close(newfd) < 0 && rc == MDB_SUCCESS)
-			rc = ErrCode();
-
-	return rc;
-}
 
 void
 mdb_env_close(MDB_env *env)
@@ -8163,6 +8008,489 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 
 	mdb_cursor_init(&mc, txn, dbi, &mx);
 	return mdb_cursor_put(&mc, key, data, flags);
+}
+
+#define WBUF	(64*1024)
+
+typedef struct mdb_copy {
+	pthread_mutex_t mc_mutex[2];
+	char *mc_wbuf[2];
+	char *mc_over[2];
+	void *mc_obuf[2];
+	void *mc_free;
+	MDB_env *mc_env;
+	MDB_txn *mc_txn;
+	int mc_wlen[2];
+	int mc_olen[2];
+	pgno_t mc_next_pgno;
+	HANDLE mc_fd;
+	int mc_status;
+	int mc_toggle;
+} mdb_copy;
+
+static void *
+mdb_env_copythr(void *arg)
+{
+	mdb_copy *my = arg;
+	char *ptr;
+	int wsize;
+	int toggle = 0, len, rc;
+#ifdef _WIN32
+#define DO_WRITE(rc, fd, ptr, w2, len)	rc = WriteFile(fd, ptr, w2, &len, NULL)
+#else
+#define DO_WRITE(rc, fd, ptr, w2, len)	len = write(fd, ptr, w2); rc = (len >= 0)
+#endif
+
+	for(;;) {
+		pthread_mutex_lock(&my->mc_mutex[toggle]);
+		if (!my->mc_wlen[toggle]) {
+			pthread_mutex_unlock(&my->mc_mutex[toggle]);
+			break;
+		}
+		wsize = my->mc_wlen[toggle];
+		ptr = my->mc_wbuf[toggle];
+again:
+		while (wsize > 0) {
+			DO_WRITE(rc, my->mc_fd, ptr, wsize, len);
+			if (!rc) {
+				rc = ErrCode();
+				break;
+			} else if (len > 0) {
+				rc = MDB_SUCCESS;
+				ptr += len;
+				wsize -= len;
+				continue;
+			} else {
+				rc = EIO;
+				break;
+			}
+		}
+		if (rc) {
+			my->mc_status = rc;
+			pthread_mutex_unlock(&my->mc_mutex[toggle]);
+			break;
+		}
+		/* If there's an overflow page tail, write it too */
+		if (my->mc_olen[toggle]) {
+			wsize = my->mc_olen[toggle];
+			ptr = my->mc_over[toggle];
+			my->mc_olen[toggle] = 0;
+			goto again;
+		}
+		pthread_mutex_unlock(&my->mc_mutex[toggle]);
+		toggle ^= 1;
+	}
+	return NULL;
+#undef DO_WRITE
+}
+
+static int
+mdb_env_cthr_toggle(mdb_copy *my)
+{
+	int toggle = my->mc_toggle ^ 1;
+
+	pthread_mutex_unlock(&my->mc_mutex[my->mc_toggle]);
+	pthread_mutex_lock(&my->mc_mutex[toggle]);
+	if (my->mc_status) {
+		pthread_mutex_unlock(&my->mc_mutex[toggle]);
+		return my->mc_status;
+	}
+	my->mc_wlen[toggle] = 0;
+	my->mc_olen[toggle] = 0;
+	my->mc_toggle = toggle;
+	return 0;
+}
+
+static int
+mdb_env_cwalk(mdb_copy *my, pgno_t pg)
+{
+	MDB_cursor mc;
+	MDB_txn *txn = my->mc_txn;
+	MDB_node *ni;
+	MDB_page *mo, *mp;
+	char *buf, *ptr;
+	int rc, toggle;
+	unsigned int i;
+
+	mc.mc_snum = 1;
+	mc.mc_top = 0;
+	mc.mc_txn = txn;
+
+	rc = mdb_page_get(my->mc_txn, pg, &mc.mc_pg[0], NULL);
+	if (rc)
+		return rc;
+	rc = mdb_page_search_root(&mc, NULL, MDB_PS_FIRST);
+	if (rc)
+		return rc;
+
+	/* Make cursor pages writable */
+	buf = ptr = malloc(my->mc_env->me_psize * mc.mc_top);
+	if (buf == NULL)
+		return ENOMEM;
+
+	for (i=0; i<mc.mc_top; i++) {
+		mdb_page_copy((MDB_page *)ptr, mc.mc_pg[i], my->mc_env->me_psize);
+		mc.mc_pg[i] = (MDB_page *)ptr;
+		ptr += my->mc_env->me_psize;
+	}
+
+	toggle = my->mc_toggle;
+	while (mc.mc_snum > 0) {
+		unsigned n;
+		mp = mc.mc_pg[mc.mc_top];
+		n = NUMKEYS(mp);
+		if (IS_LEAF(mp)) {
+			for (i=0; i<n; i++) {
+				ni = NODEPTR(mp, i);
+				if (ni->mn_flags & F_BIGDATA) {
+					MDB_page *omp;
+					pgno_t pg;
+					memcpy(&pg, NODEDATA(ni), sizeof(pg));
+					rc = mdb_page_get(txn, pg, &omp, NULL);
+					if (rc)
+						goto done;
+					if (my->mc_wlen[toggle] >= WBUF) {
+						rc = mdb_env_cthr_toggle(my);
+						if (rc)
+							goto done;
+						toggle ^= 1;
+					}
+					mo = (MDB_page *)(my->mc_wbuf[toggle] + my->mc_wlen[toggle]);
+					memcpy(mo, omp, my->mc_env->me_psize);
+					mo->mp_pgno = my->mc_next_pgno;
+					my->mc_next_pgno += omp->mp_pages;
+					my->mc_wlen[toggle] += my->mc_env->me_psize;
+					my->mc_olen[toggle] = my->mc_env->me_psize * (omp->mp_pages - 1);
+					my->mc_obuf[toggle] = (char *)omp + my->mc_env->me_psize;
+					rc = mdb_env_cthr_toggle(my);
+					if (rc)
+						goto done;
+					toggle ^= 1;
+				} else if (ni->mn_flags & F_SUBDATA) {
+					MDB_db db;
+					memcpy(&db, NODEDATA(ni), sizeof(db));
+					my->mc_toggle = toggle;
+					rc = mdb_env_cwalk(my, db.md_root);
+					if (rc)
+						goto done;
+					toggle = my->mc_toggle;
+				}
+			}
+		} else {
+			mc.mc_ki[mc.mc_top]++;
+			if (mc.mc_ki[mc.mc_top] < n) {
+				pgno_t pg;
+again:
+				ni = NODEPTR(mp, mc.mc_ki[mc.mc_top]);
+				pg = NODEPGNO(ni);
+				rc = mdb_page_get(txn, pg, &mp, NULL);
+				if (rc)
+					goto done;
+				mc.mc_top++;
+				mc.mc_snum++;
+				mc.mc_ki[mc.mc_top] = 0;
+				if (IS_BRANCH(mp)) {
+					mdb_page_copy(mc.mc_pg[mc.mc_top], mp, my->mc_env->me_psize);
+					goto again;
+				} else
+					mc.mc_pg[mc.mc_top] = mp;
+				continue;
+			}
+		}
+		if (mc.mc_top) {
+			ni = NODEPTR(mc.mc_pg[mc.mc_top-1], mc.mc_ki[mc.mc_top-1]);
+			SETPGNO(ni, my->mc_next_pgno);
+		}
+		if (my->mc_wlen[toggle] >= WBUF) {
+			rc = mdb_env_cthr_toggle(my);
+			if (rc)
+				goto done;
+			toggle ^= 1;
+		}
+		mo = (MDB_page *)(my->mc_wbuf[toggle] + my->mc_wlen[toggle]);
+		mdb_page_copy(mo, mp, my->mc_env->me_psize);
+		mo->mp_pgno = my->mc_next_pgno++;
+		my->mc_wlen[toggle] += my->mc_env->me_psize;
+		mdb_cursor_pop(&mc);
+	}
+done:
+	free(buf);
+	return rc;
+}
+
+int
+mdb_env_copyfd2(MDB_env *env, HANDLE fd)
+{
+	MDB_meta *mm;
+	MDB_page *mp;
+	mdb_copy my;
+	MDB_txn *txn = NULL;
+	pthread_t thr;
+	int rc;
+
+	rc = posix_memalign(&my.mc_free, env->me_psize, WBUF*2);
+	if (rc)
+		return rc;
+	my.mc_wbuf[0] = my.mc_free;
+	my.mc_wbuf[1] = my.mc_free + WBUF;
+	pthread_mutex_init(&my.mc_mutex[0], NULL);
+	pthread_mutex_init(&my.mc_mutex[1], NULL);
+	my.mc_wlen[0] = 0;
+	my.mc_wlen[1] = 0;
+	my.mc_olen[0] = 0;
+	my.mc_olen[1] = 0;
+	my.mc_next_pgno = 2;
+	my.mc_status = 0;
+	my.mc_toggle = 0;
+	my.mc_env = env;
+	my.mc_fd = fd;
+	pthread_mutex_lock(&my.mc_mutex[0]);
+
+	/* Do the lock/unlock of the reader mutex before starting the
+	 * write txn.  Otherwise other read txns could block writers.
+	 */
+	rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
+	if (rc)
+		return rc;
+
+	if (env->me_txns) {
+		/* We must start the actual read txn after blocking writers */
+		mdb_txn_reset0(txn, "reset-stage1");
+
+		/* Temporarily block writers until we snapshot the meta pages */
+		LOCK_MUTEX_W(env);
+
+		rc = mdb_txn_renew0(txn);
+		if (rc) {
+			UNLOCK_MUTEX_W(env);
+			goto leave;
+		}
+	}
+
+	mp = (MDB_page *)my.mc_wbuf[0];
+	memset(mp, 0, 2*env->me_psize);
+	mp->mp_pgno = 0;
+	mp->mp_flags = P_META;
+	mm = (MDB_meta *)METADATA(mp);
+	mdb_env_init_meta0(env, mm);
+	mm->mm_address = env->me_metas[0]->mm_address;
+
+	mp = (MDB_page *)(my.mc_wbuf[0] + env->me_psize);
+	mp->mp_pgno = 1;
+	mp->mp_flags = P_META;
+	*(MDB_meta *)METADATA(mp) = *mm;
+	mm = (MDB_meta *)METADATA(mp);
+
+	/* Count the number of free pages, subtract from lastpg to find
+	 * number of active pages
+	 */
+	{
+		MDB_ID freecount = 0;
+		MDB_cursor mc;
+		MDB_val key, data;
+		mdb_cursor_init(&mc, txn, FREE_DBI, NULL);
+		while ((rc = mdb_cursor_get(&mc, &key, &data, MDB_NEXT)) == 0)
+			freecount += *(MDB_ID *)data.mv_data;
+		freecount += txn->mt_dbs[0].md_branch_pages +
+			txn->mt_dbs[0].md_leaf_pages +
+			txn->mt_dbs[0].md_overflow_pages;
+
+		/* Set metapage 1 */
+		mm->mm_last_pg = txn->mt_next_pgno - freecount - 1;
+		mm->mm_dbs[1] = txn->mt_dbs[1];
+		mm->mm_dbs[1].md_root = mm->mm_last_pg;
+		mm->mm_txnid = 1;
+	}
+	my.mc_wlen[0] = env->me_psize * 2;
+	my.mc_txn = txn;
+	pthread_create(&thr, NULL, mdb_env_copythr, &my);
+	rc = mdb_env_cwalk(&my, txn->mt_dbs[1].md_root);
+	if (rc == MDB_SUCCESS && my.mc_wlen[my.mc_toggle])
+		rc = mdb_env_cthr_toggle(&my);
+	my.mc_wlen[my.mc_toggle] = 0;
+	pthread_mutex_unlock(&my.mc_mutex[my.mc_toggle]);
+	pthread_join(thr, NULL);
+leave:
+	mdb_txn_abort(txn);
+	free(my.mc_free);
+	return rc;
+}
+
+int
+mdb_env_copyfd(MDB_env *env, HANDLE fd)
+{
+	MDB_txn *txn = NULL;
+	int rc;
+	size_t wsize;
+	char *ptr;
+#ifdef _WIN32
+	DWORD len, w2;
+#define DO_WRITE(rc, fd, ptr, w2, len)	rc = WriteFile(fd, ptr, w2, &len, NULL)
+#else
+	ssize_t len;
+	size_t w2;
+#define DO_WRITE(rc, fd, ptr, w2, len)	len = write(fd, ptr, w2); rc = (len >= 0)
+#endif
+
+	/* Do the lock/unlock of the reader mutex before starting the
+	 * write txn.  Otherwise other read txns could block writers.
+	 */
+	rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
+	if (rc)
+		return rc;
+
+	if (env->me_txns) {
+		/* We must start the actual read txn after blocking writers */
+		mdb_txn_reset0(txn, "reset-stage1");
+
+		/* Temporarily block writers until we snapshot the meta pages */
+		LOCK_MUTEX_W(env);
+
+		rc = mdb_txn_renew0(txn);
+		if (rc) {
+			UNLOCK_MUTEX_W(env);
+			goto leave;
+		}
+	}
+
+	wsize = env->me_psize * 2;
+	ptr = env->me_map;
+	w2 = wsize;
+	while (w2 > 0) {
+		DO_WRITE(rc, fd, ptr, w2, len);
+		if (!rc) {
+			rc = ErrCode();
+			break;
+		} else if (len > 0) {
+			rc = MDB_SUCCESS;
+			ptr += len;
+			w2 -= len;
+			continue;
+		} else {
+			/* Non-blocking or async handles are not supported */
+			rc = EIO;
+			break;
+		}
+	}
+	if (env->me_txns)
+		UNLOCK_MUTEX_W(env);
+
+	if (rc)
+		goto leave;
+
+	w2 = txn->mt_next_pgno * env->me_psize;
+#ifdef WIN32
+	{
+		LARGE_INTEGER fsize;
+		GetFileSizeEx(env->me_fd, &fsize);
+		if (w2 > fsize.QuadPart)
+			w2 = fsize.QuadPart;
+	}
+#else
+	{
+		struct stat st;
+		fstat(env->me_fd, &st);
+		if (w2 > (size_t)st.st_size)
+			w2 = st.st_size;
+	}
+#endif
+	wsize = w2 - wsize;
+	while (wsize > 0) {
+		if (wsize > MAX_WRITE)
+			w2 = MAX_WRITE;
+		else
+			w2 = wsize;
+		DO_WRITE(rc, fd, ptr, w2, len);
+		if (!rc) {
+			rc = ErrCode();
+			break;
+		} else if (len > 0) {
+			rc = MDB_SUCCESS;
+			ptr += len;
+			wsize -= len;
+			continue;
+		} else {
+			rc = EIO;
+			break;
+		}
+	}
+
+leave:
+	mdb_txn_abort(txn);
+	return rc;
+}
+
+static int
+mdb_env_copy0(MDB_env *env, const char *path, int flag)
+{
+	int rc, len;
+	char *lpath;
+	HANDLE newfd = INVALID_HANDLE_VALUE;
+
+	if (env->me_flags & MDB_NOSUBDIR) {
+		lpath = (char *)path;
+	} else {
+		len = strlen(path);
+		len += sizeof(DATANAME);
+		lpath = malloc(len);
+		if (!lpath)
+			return ENOMEM;
+		sprintf(lpath, "%s" DATANAME, path);
+	}
+
+	/* The destination path must exist, but the destination file must not.
+	 * We don't want the OS to cache the writes, since the source data is
+	 * already in the OS cache.
+	 */
+#ifdef _WIN32
+	newfd = CreateFile(lpath, GENERIC_WRITE, 0, NULL, CREATE_NEW,
+				FILE_FLAG_NO_BUFFERING|FILE_FLAG_WRITE_THROUGH, NULL);
+#else
+	newfd = open(lpath, O_WRONLY|O_CREAT|O_EXCL, 0666);
+#endif
+	if (newfd == INVALID_HANDLE_VALUE) {
+		rc = ErrCode();
+		goto leave;
+	}
+
+#ifdef O_DIRECT
+	/* Set O_DIRECT if the file system supports it */
+	if ((rc = fcntl(newfd, F_GETFL)) != -1)
+		(void) fcntl(newfd, F_SETFL, rc | O_DIRECT);
+#endif
+#ifdef F_NOCACHE	/* __APPLE__ */
+	rc = fcntl(newfd, F_NOCACHE, 1);
+	if (rc) {
+		rc = ErrCode();
+		goto leave;
+	}
+#endif
+
+	if (flag)
+		rc = mdb_env_copyfd2(env, newfd);
+	else
+		rc = mdb_env_copyfd(env, newfd);
+
+leave:
+	if (!(env->me_flags & MDB_NOSUBDIR))
+		free(lpath);
+	if (newfd != INVALID_HANDLE_VALUE)
+		if (close(newfd) < 0 && rc == MDB_SUCCESS)
+			rc = ErrCode();
+
+	return rc;
+}
+
+int
+mdb_env_copy(MDB_env *env, const char *path)
+{
+	return mdb_env_copy0(env, path, 0);
+}
+
+int
+mdb_env_copy2(MDB_env *env, const char *path)
+{
+	return mdb_env_copy0(env, path, 1);
 }
 
 int
