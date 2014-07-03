@@ -8087,7 +8087,6 @@ again:
 				break;
 			}
 		}
-		my->mc_wlen[toggle] = wsize;
 		if (rc) {
 			my->mc_status = rc;
 			pthread_mutex_unlock(&my->mc_mutex[toggle]);
@@ -8100,6 +8099,7 @@ again:
 			my->mc_olen[toggle] = 0;
 			goto again;
 		}
+		my->mc_wlen[toggle] = 0;
 		toggle ^= 1;
 	}
 	return (THREAD_RET)0;
@@ -8117,8 +8117,6 @@ mdb_env_cthr_toggle(mdb_copy *my)
 		pthread_mutex_unlock(&my->mc_mutex[toggle]);
 		return my->mc_status;
 	}
-	my->mc_wlen[toggle] = 0;
-	my->mc_olen[toggle] = 0;
 	my->mc_toggle = toggle;
 	return 0;
 }
@@ -8133,6 +8131,10 @@ mdb_env_cwalk(mdb_copy *my, pgno_t *pg, int flags)
 	char *buf, *ptr;
 	int rc, toggle;
 	unsigned int i;
+
+	/* Empty DB, nothing to do */
+	if (*pg == P_INVALID)
+		return MDB_SUCCESS;
 
 	mc.mc_snum = 1;
 	mc.mc_top = 0;
@@ -8307,6 +8309,7 @@ mdb_env_copyfd2(MDB_env *env, HANDLE fd)
 	my.mc_env = env;
 	my.mc_fd = fd;
 	pthread_mutex_lock(&my.mc_mutex[0]);
+	THREAD_CREATE(thr, mdb_env_copythr, &my);
 
 	/* Do the lock/unlock of the reader mutex before starting the
 	 * write txn.  Otherwise other read txns could block writers.
@@ -8365,7 +8368,6 @@ mdb_env_copyfd2(MDB_env *env, HANDLE fd)
 	}
 	my.mc_wlen[0] = env->me_psize * 2;
 	my.mc_txn = txn;
-	THREAD_CREATE(thr, mdb_env_copythr, &my);
 	rc = mdb_env_cwalk(&my, &txn->mt_dbs[1].md_root, 0);
 	if (rc == MDB_SUCCESS && my.mc_wlen[my.mc_toggle])
 		rc = mdb_env_cthr_toggle(&my);
