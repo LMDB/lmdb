@@ -8671,7 +8671,7 @@ mdb_env_info(MDB_env *env, MDB_envinfo *arg)
 		return EINVAL;
 
 	toggle = mdb_env_pick_meta(env);
-	arg->me_mapaddr = (env->me_flags & MDB_FIXEDMAP) ? env->me_map : 0;
+	arg->me_mapaddr = env->me_metas[toggle]->mm_address;
 	arg->me_mapsize = env->me_mapsize;
 	arg->me_maxreaders = env->me_maxreaders;
 
