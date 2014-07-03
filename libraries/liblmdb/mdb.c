@@ -35,15 +35,17 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1
 #endif
-#include <sys/types.h>
-#include <sys/stat.h>
 #ifdef _WIN32
+#include <malloc.h>
 #include <windows.h>
 /** getpid() returns int; MinGW defines pid_t but MinGW64 typedefs it
  *  as int64 which is wrong. MSVC doesn't define it at all, so just
  *  don't use it.
  */
 #define MDB_PID_T	int
+#define MDB_THR_T	DWORD
+#include <sys/types.h>
+#include <sys/stat.h>
 #ifdef __GNUC__
 # include <sys/param.h>
 #else
@@ -55,7 +57,10 @@
 # endif
 #endif
 #else
+#include <sys/types.h>
+#include <sys/stat.h>
 #define MDB_PID_T	pid_t
+#define MDB_THR_T	pthread_t
 #include <sys/param.h>
 #include <sys/uio.h>
 #include <sys/mman.h>
@@ -169,7 +174,8 @@
 #ifdef _WIN32
 #define MDB_USE_HASH	1
 #define MDB_PIDLOCK	0
-#define pthread_t	DWORD
+#define THREAD_RET	DWORD
+#define pthread_t	HANDLE
 #define pthread_mutex_t	HANDLE
 #define pthread_key_t	DWORD
 #define pthread_self()	GetCurrentThreadId()
@@ -180,6 +186,8 @@
 #define pthread_setspecific(x,y)	(TlsSetValue(x,y) ? 0 : ErrCode())
 #define pthread_mutex_unlock(x)	ReleaseMutex(x)
 #define pthread_mutex_lock(x)	WaitForSingleObject(x, INFINITE)
+#define THREAD_CREATE(thr,start,arg)	thr=CreateThread(NULL,0,start,arg,0,NULL)
+#define THREAD_FINISH(thr)	WaitForSingleObject(thr, INFINITE)
 #define LOCK_MUTEX_R(env)	pthread_mutex_lock((env)->me_rmutex)
 #define UNLOCK_MUTEX_R(env)	pthread_mutex_unlock((env)->me_rmutex)
 #define LOCK_MUTEX_W(env)	pthread_mutex_lock((env)->me_wmutex)
@@ -198,7 +206,9 @@
 #endif
 #define	Z	"I"
 #else
-
+#define THREAD_RET	void *
+#define THREAD_CREATE(thr,start,arg)	pthread_create(&thr,NULL,start,arg)
+#define THREAD_FINISH(thr)	pthread_join(thr,NULL)
 #define	Z	"z"			/**< printf format modifier for size_t */
 
 	/** For MDB_LOCK_FORMAT: True if readers take a pid lock in the lockfile */
@@ -537,7 +547,7 @@ typedef struct MDB_rxbody {
 	/** The process ID of the process owning this reader txn. */
 	MDB_PID_T	mrb_pid;
 	/** The thread ID of the thread owning this txn. */
-	pthread_t	mrb_tid;
+	MDB_THR_T	mrb_tid;
 } MDB_rxbody;
 
 	/** The actual reader record, with cacheline padding. */
@@ -2387,7 +2397,7 @@ mdb_txn_renew0(MDB_txn *txn)
 					return MDB_BAD_RSLOT;
 			} else {
 				MDB_PID_T pid = env->me_pid;
-				pthread_t tid = pthread_self();
+				MDB_THR_T tid = pthread_self();
 
 				if (!env->me_live_reader) {
 					rc = mdb_reader_pid(env, Pidset, pid);
@@ -3534,8 +3544,17 @@ mdb_env_map(MDB_env *env, void *addr, int newsize)
 	int rc;
 	HANDLE mh;
 	LONG sizelo, sizehi;
-	sizelo = env->me_mapsize & 0xffffffff;
-	sizehi = env->me_mapsize >> 16 >> 16; /* only needed on Win64 */
+	size_t msize;
+
+	if (flags & MDB_RDONLY) {
+		msize = 0;
+		sizelo = 0;
+		sizehi = 0;
+	} else {
+		msize = env->me_mapsize;
+		sizelo = msize & 0xffffffff;
+		sizehi = msize >> 16 >> 16; /* only needed on Win64 */
+	}
 
 	/* Windows won't create mappings for zero length files.
 	 * Just allocate the maxsize right now.
@@ -3553,7 +3572,7 @@ mdb_env_map(MDB_env *env, void *addr, int newsize)
 		return ErrCode();
 	env->me_map = MapViewOfFileEx(mh, flags & MDB_WRITEMAP ?
 		FILE_MAP_WRITE : FILE_MAP_READ,
-		0, 0, env->me_mapsize, addr);
+		0, 0, msize, addr);
 	rc = env->me_map ? 0 : ErrCode();
 	CloseHandle(mh);
 	if (rc)
@@ -8018,7 +8037,6 @@ typedef struct mdb_copy {
 	pthread_mutex_t mc_mutex[2];
 	char *mc_wbuf[2];
 	char *mc_over[2];
-	void *mc_free;
 	MDB_env *mc_env;
 	MDB_txn *mc_txn;
 	int mc_wlen[2];
@@ -8029,16 +8047,17 @@ typedef struct mdb_copy {
 	int mc_toggle;
 } mdb_copy;
 
-static void *
+static THREAD_RET
 mdb_env_copythr(void *arg)
 {
 	mdb_copy *my = arg;
 	char *ptr;
-	int wsize;
-	int toggle = 0, len, rc;
+	int toggle = 0, wsize, rc;
 #ifdef _WIN32
+	DWORD len;
 #define DO_WRITE(rc, fd, ptr, w2, len)	rc = WriteFile(fd, ptr, w2, &len, NULL)
 #else
+	int len;
 #define DO_WRITE(rc, fd, ptr, w2, len)	len = write(fd, ptr, w2); rc = (len >= 0)
 #endif
 
@@ -8083,7 +8102,7 @@ again:
 		}
 		toggle ^= 1;
 	}
-	return NULL;
+	return (THREAD_RET)0;
 #undef DO_WRITE
 }
 
@@ -8228,10 +8247,6 @@ again:
 				continue;
 			}
 		}
-		if (mc.mc_top) {
-			ni = NODEPTR(mc.mc_pg[mc.mc_top-1], mc.mc_ki[mc.mc_top-1]);
-			SETPGNO(ni, my->mc_next_pgno);
-		}
 		if (my->mc_wlen[toggle] >= MDB_WBUF) {
 			rc = mdb_env_cthr_toggle(my);
 			if (rc)
@@ -8242,9 +8257,17 @@ again:
 		mdb_page_copy(mo, mp, my->mc_env->me_psize);
 		mo->mp_pgno = my->mc_next_pgno++;
 		my->mc_wlen[toggle] += my->mc_env->me_psize;
-		mdb_cursor_pop(&mc);
+		if (mc.mc_top) {
+			/* Update parent if there is one */
+			ni = NODEPTR(mc.mc_pg[mc.mc_top-1], mc.mc_ki[mc.mc_top-1]);
+			SETPGNO(ni, mo->mp_pgno);
+			mdb_cursor_pop(&mc);
+		} else {
+			/* Otherwise we're done */
+			*pg = mo->mp_pgno;
+			break;
+		}
 	}
-	*pg = mo->mp_pgno;
 done:
 	free(buf);
 	return rc;
@@ -8260,13 +8283,20 @@ mdb_env_copyfd2(MDB_env *env, HANDLE fd)
 	pthread_t thr;
 	int rc;
 
-	rc = posix_memalign(&my.mc_free, env->me_psize, MDB_WBUF*2);
-	if (rc)
-		return rc;
-	my.mc_wbuf[0] = my.mc_free;
-	my.mc_wbuf[1] = my.mc_free + MDB_WBUF;
+#ifdef _WIN32
+	my.mc_mutex[0] = CreateMutex(NULL, FALSE, NULL);
+	my.mc_mutex[1] = CreateMutex(NULL, FALSE, NULL);
+	my.mc_wbuf[0] = _aligned_malloc(MDB_WBUF*2, env->me_psize);
+	if (my.mc_wbuf[0] == NULL)
+		return errno;
+#else
 	pthread_mutex_init(&my.mc_mutex[0], NULL);
 	pthread_mutex_init(&my.mc_mutex[1], NULL);
+	rc = posix_memalign((void **)&my.mc_wbuf[0], env->me_psize, MDB_WBUF*2);
+	if (rc)
+		return rc;
+#endif
+	my.mc_wbuf[1] = my.mc_wbuf[0] + MDB_WBUF;
 	my.mc_wlen[0] = 0;
 	my.mc_wlen[1] = 0;
 	my.mc_olen[0] = 0;
@@ -8335,16 +8365,24 @@ mdb_env_copyfd2(MDB_env *env, HANDLE fd)
 	}
 	my.mc_wlen[0] = env->me_psize * 2;
 	my.mc_txn = txn;
-	pthread_create(&thr, NULL, mdb_env_copythr, &my);
+	THREAD_CREATE(thr, mdb_env_copythr, &my);
 	rc = mdb_env_cwalk(&my, &txn->mt_dbs[1].md_root, 0);
 	if (rc == MDB_SUCCESS && my.mc_wlen[my.mc_toggle])
 		rc = mdb_env_cthr_toggle(&my);
 	my.mc_wlen[my.mc_toggle] = 0;
 	pthread_mutex_unlock(&my.mc_mutex[my.mc_toggle]);
-	pthread_join(thr, NULL);
+	THREAD_FINISH(thr);
 leave:
 	mdb_txn_abort(txn);
-	free(my.mc_free);
+#ifdef _WIN32
+	CloseHandle(my.mc_mutex[1]);
+	CloseHandle(my.mc_mutex[0]);
+	_aligned_free(my.mc_wbuf[0]);
+#else
+	pthread_mutex_destroy(&my.mc_mutex[1]);
+	pthread_mutex_destroy(&my.mc_mutex[0]);
+	free(my.mc_wbuf[0]);
+#endif
 	return rc;
 }
 
