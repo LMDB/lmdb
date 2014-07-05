@@ -150,6 +150,13 @@
 # error "Two's complement, reasonably sized integer types, please"
 #endif
 
+#ifdef __GNUC__
+/** Put infrequently used env functions in separate section */
+#define	ESECT	__attribute__ ((section("text_env")))
+#else
+#define ESECT
+#endif
+
 /** @defgroup internal	LMDB Internals
  *	@{
  */
@@ -3256,7 +3263,7 @@ fail:
  * @param[out] meta address of where to store the meta information
  * @return 0 on success, non-zero on failure.
  */
-static int
+static int ESECT
 mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 {
 	MDB_metabuf	pbuf;
@@ -3314,7 +3321,7 @@ mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 	return 0;
 }
 
-static void
+static void ESECT
 mdb_env_init_meta0(MDB_env *env, MDB_meta *meta)
 {
 	meta->mm_magic = MDB_MAGIC;
@@ -3333,7 +3340,7 @@ mdb_env_init_meta0(MDB_env *env, MDB_meta *meta)
  * @param[out] meta address of where to store the meta information
  * @return 0 on success, non-zero on failure.
  */
-static int
+static int ESECT
 mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 {
 	MDB_page *p, *q;
@@ -3513,7 +3520,7 @@ mdb_env_pick_meta(const MDB_env *env)
 	return (env->me_metas[0]->mm_txnid < env->me_metas[1]->mm_txnid);
 }
 
-int
+int ESECT
 mdb_env_create(MDB_env **env)
 {
 	MDB_env *e;
@@ -3538,7 +3545,7 @@ mdb_env_create(MDB_env **env)
 	return MDB_SUCCESS;
 }
 
-static int
+static int ESECT
 mdb_env_map(MDB_env *env, void *addr, int newsize)
 {
 	MDB_page *p;
@@ -3621,7 +3628,7 @@ mdb_env_map(MDB_env *env, void *addr, int newsize)
 	return MDB_SUCCESS;
 }
 
-int
+int ESECT
 mdb_env_set_mapsize(MDB_env *env, size_t size)
 {
 	/* If env is already open, caller is responsible for making
@@ -3655,7 +3662,7 @@ mdb_env_set_mapsize(MDB_env *env, size_t size)
 	return MDB_SUCCESS;
 }
 
-int
+int ESECT
 mdb_env_set_maxdbs(MDB_env *env, MDB_dbi dbs)
 {
 	if (env->me_map)
@@ -3664,7 +3671,7 @@ mdb_env_set_maxdbs(MDB_env *env, MDB_dbi dbs)
 	return MDB_SUCCESS;
 }
 
-int
+int ESECT
 mdb_env_set_maxreaders(MDB_env *env, unsigned int readers)
 {
 	if (env->me_map || readers < 1)
@@ -3673,7 +3680,7 @@ mdb_env_set_maxreaders(MDB_env *env, unsigned int readers)
 	return MDB_SUCCESS;
 }
 
-int
+int ESECT
 mdb_env_get_maxreaders(MDB_env *env, unsigned int *readers)
 {
 	if (!env || !readers)
@@ -3684,7 +3691,7 @@ mdb_env_get_maxreaders(MDB_env *env, unsigned int *readers)
 
 /** Further setup required for opening an LMDB environment
  */
-static int
+static int ESECT
 mdb_env_open2(MDB_env *env)
 {
 	unsigned int flags = env->me_flags;
@@ -3841,7 +3848,7 @@ PIMAGE_TLS_CALLBACK mdb_tls_cbp = mdb_tls_callback;
 #endif
 
 /** Downgrade the exclusive lock on the region back to shared */
-static int
+static int ESECT
 mdb_env_share_locks(MDB_env *env, int *excl)
 {
 	int rc = 0, toggle = mdb_env_pick_meta(env);
@@ -3883,7 +3890,7 @@ mdb_env_share_locks(MDB_env *env, int *excl)
 /** Try to get exlusive lock, otherwise shared.
  *	Maintain *excl = -1: no/unknown lock, 0: shared, 1: exclusive.
  */
-static int
+static int ESECT
 mdb_env_excl_lock(MDB_env *env, int *excl)
 {
 	int rc = 0;
@@ -4025,7 +4032,7 @@ mdb_hash_enc(MDB_val *val, char *encbuf)
  * @param[in,out] excl In -1, out lock type: -1 none, 0 shared, 1 exclusive
  * @return 0 on success, non-zero on failure.
  */
-static int
+static int ESECT
 mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 {
 #ifdef _WIN32
@@ -4255,7 +4262,7 @@ fail:
 # error "Persistent DB flags & env flags overlap, but both go in mm_flags"
 #endif
 
-int
+int ESECT
 mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode)
 {
 	int		oflags, rc, len, excl = -1;
@@ -4383,7 +4390,7 @@ leave:
 }
 
 /** Destroy resources from mdb_env_open(), clear our readers & DBIs */
-static void
+static void ESECT
 mdb_env_close0(MDB_env *env, int excl)
 {
 	int i;
@@ -4472,7 +4479,7 @@ mdb_env_close0(MDB_env *env, int excl)
 }
 
 
-void
+void ESECT
 mdb_env_close(MDB_env *env)
 {
 	MDB_page *dp;
@@ -8055,7 +8062,7 @@ typedef struct mdb_copy {
 } mdb_copy;
 
 	/** Dedicated writer thread for compacting copy. */
-static THREAD_RET
+static THREAD_RET ESECT
 mdb_env_copythr(void *arg)
 {
 	mdb_copy *my = arg;
@@ -8120,7 +8127,7 @@ again:
 }
 
 	/** Tell the writer thread there's a buffer ready to write */
-static int
+static int ESECT
 mdb_env_cthr_toggle(mdb_copy *my, int st)
 {
 	int toggle = my->mc_toggle ^ 1;
@@ -8139,7 +8146,7 @@ mdb_env_cthr_toggle(mdb_copy *my, int st)
 }
 
 	/** Depth-first tree traversal for compacting copy. */
-static int
+static int ESECT
 mdb_env_cwalk(mdb_copy *my, pgno_t *pg, int flags)
 {
 	MDB_cursor mc;
@@ -8297,7 +8304,7 @@ done:
 }
 
 	/** Copy environment with compaction. */
-static int
+static int ESECT
 mdb_env_copyfd1(MDB_env *env, HANDLE fd)
 {
 	MDB_meta *mm;
@@ -8418,7 +8425,7 @@ leave:
 }
 
 	/** Copy environment as-is. */
-static int
+static int ESECT
 mdb_env_copyfd0(MDB_env *env, HANDLE fd)
 {
 	MDB_txn *txn = NULL;
@@ -8522,7 +8529,7 @@ leave:
 	return rc;
 }
 
-int
+int ESECT
 mdb_env_copyfd2(MDB_env *env, HANDLE fd, unsigned int flags)
 {
 	if (flags & MDB_CP_COMPACT)
@@ -8531,13 +8538,13 @@ mdb_env_copyfd2(MDB_env *env, HANDLE fd, unsigned int flags)
 		return mdb_env_copyfd0(env, fd);
 }
 
-int
+int ESECT
 mdb_env_copyfd(MDB_env *env, HANDLE fd)
 {
 	return mdb_env_copyfd2(env, fd, 0);
 }
 
-int
+int ESECT
 mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
 {
 	int rc, len;
@@ -8595,13 +8602,13 @@ leave:
 	return rc;
 }
 
-int
+int ESECT
 mdb_env_copy(MDB_env *env, const char *path)
 {
 	return mdb_env_copy2(env, path, 0);
 }
 
-int
+int ESECT
 mdb_env_set_flags(MDB_env *env, unsigned int flag, int onoff)
 {
 	if ((flag & CHANGEABLE) != flag)
@@ -8613,7 +8620,7 @@ mdb_env_set_flags(MDB_env *env, unsigned int flag, int onoff)
 	return MDB_SUCCESS;
 }
 
-int
+int ESECT
 mdb_env_get_flags(MDB_env *env, unsigned int *arg)
 {
 	if (!env || !arg)
@@ -8623,7 +8630,7 @@ mdb_env_get_flags(MDB_env *env, unsigned int *arg)
 	return MDB_SUCCESS;
 }
 
-int
+int ESECT
 mdb_env_set_userctx(MDB_env *env, void *ctx)
 {
 	if (!env)
@@ -8632,13 +8639,13 @@ mdb_env_set_userctx(MDB_env *env, void *ctx)
 	return MDB_SUCCESS;
 }
 
-void *
+void * ESECT
 mdb_env_get_userctx(MDB_env *env)
 {
 	return env ? env->me_userctx : NULL;
 }
 
-int
+int ESECT
 mdb_env_set_assert(MDB_env *env, MDB_assert_func *func)
 {
 	if (!env)
@@ -8649,7 +8656,7 @@ mdb_env_set_assert(MDB_env *env, MDB_assert_func *func)
 	return MDB_SUCCESS;
 }
 
-int
+int ESECT
 mdb_env_get_path(MDB_env *env, const char **arg)
 {
 	if (!env || !arg)
@@ -8659,7 +8666,7 @@ mdb_env_get_path(MDB_env *env, const char **arg)
 	return MDB_SUCCESS;
 }
 
-int
+int ESECT
 mdb_env_get_fd(MDB_env *env, mdb_filehandle_t *arg)
 {
 	if (!env || !arg)
@@ -8675,7 +8682,7 @@ mdb_env_get_fd(MDB_env *env, mdb_filehandle_t *arg)
  * @param[out] arg the address of an #MDB_stat structure to receive the stats.
  * @return 0, this function always succeeds.
  */
-static int
+static int ESECT
 mdb_stat0(MDB_env *env, MDB_db *db, MDB_stat *arg)
 {
 	arg->ms_psize = env->me_psize;
@@ -8687,7 +8694,8 @@ mdb_stat0(MDB_env *env, MDB_db *db, MDB_stat *arg)
 
 	return MDB_SUCCESS;
 }
-int
+
+int ESECT
 mdb_env_stat(MDB_env *env, MDB_stat *arg)
 {
 	int toggle;
@@ -8700,7 +8708,7 @@ mdb_env_stat(MDB_env *env, MDB_stat *arg)
 	return mdb_stat0(env, &env->me_metas[toggle]->mm_dbs[MAIN_DBI], arg);
 }
 
-int
+int ESECT
 mdb_env_info(MDB_env *env, MDB_envinfo *arg)
 {
 	int toggle;
@@ -9057,12 +9065,14 @@ int mdb_set_relctx(MDB_txn *txn, MDB_dbi dbi, void *ctx)
 	return MDB_SUCCESS;
 }
 
-int mdb_env_get_maxkeysize(MDB_env *env)
+int ESECT
+mdb_env_get_maxkeysize(MDB_env *env)
 {
 	return ENV_MAXKEY(env);
 }
 
-int mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx)
+int ESECT
+mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx)
 {
 	unsigned int i, rdrs;
 	MDB_reader *mr;
@@ -9102,7 +9112,8 @@ int mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx)
 /** Insert pid into list if not already present.
  * return -1 if already present.
  */
-static int mdb_pid_insert(MDB_PID_T *ids, MDB_PID_T pid)
+static int ESECT
+mdb_pid_insert(MDB_PID_T *ids, MDB_PID_T pid)
 {
 	/* binary search of pid in list */
 	unsigned base = 0;
@@ -9138,7 +9149,8 @@ static int mdb_pid_insert(MDB_PID_T *ids, MDB_PID_T pid)
 	return 0;
 }
 
-int mdb_reader_check(MDB_env *env, int *dead)
+int ESECT
+mdb_reader_check(MDB_env *env, int *dead)
 {
 	unsigned int i, j, rdrs;
 	MDB_reader *mr;
