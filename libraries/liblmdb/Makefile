@@ -17,7 +17,7 @@
 # read mdb.c before changing any of them.
 #
 CC	= gcc
-W	= -W -Wall -Wno-unused-parameter -Wbad-function-cast
+W	= -W -Wall -Wno-unused-parameter -Wbad-function-cast -Wuninitialized
 THREADS = -pthread
 OPT = -O2 -g
 CFLAGS	= $(THREADS) $(OPT) $(W) $(XCFLAGS)

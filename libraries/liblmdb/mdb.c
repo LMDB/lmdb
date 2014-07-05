@@ -8036,6 +8036,7 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 #define MDB_WBUF	(1024*1024)
 #endif
 
+	/** State needed for a compacting copy. */
 typedef struct mdb_copy {
 	pthread_mutex_t mc_mutex;
 	pthread_cond_t mc_cond;
@@ -8050,8 +8051,10 @@ typedef struct mdb_copy {
 	int mc_status;
 	volatile int mc_new;
 	int mc_toggle;
+
 } mdb_copy;
 
+	/** Dedicated writer thread for compacting copy. */
 static THREAD_RET
 mdb_env_copythr(void *arg)
 {
@@ -8116,6 +8119,7 @@ again:
 #undef DO_WRITE
 }
 
+	/** Tell the writer thread there's a buffer ready to write */
 static int
 mdb_env_cthr_toggle(mdb_copy *my, int st)
 {
@@ -8134,6 +8138,7 @@ mdb_env_cthr_toggle(mdb_copy *my, int st)
 	return 0;
 }
 
+	/** Depth-first tree traversal for compacting copy. */
 static int
 mdb_env_cwalk(mdb_copy *my, pgno_t *pg, int flags)
 {
@@ -8255,6 +8260,9 @@ again:
 				mc.mc_snum++;
 				mc.mc_ki[mc.mc_top] = 0;
 				if (IS_BRANCH(mp)) {
+					/* Whenever we advance to a sibling branch page,
+					 * we must proceed all the way down to its first leaf.
+					 */
 					mdb_page_copy(mc.mc_pg[mc.mc_top], mp, my->mc_env->me_psize);
 					goto again;
 				} else
@@ -8288,8 +8296,9 @@ done:
 	return rc;
 }
 
-int
-mdb_env_copyfd2(MDB_env *env, HANDLE fd)
+	/** Copy environment with compaction. */
+static int
+mdb_env_copyfd1(MDB_env *env, HANDLE fd)
 {
 	MDB_meta *mm;
 	MDB_page *mp;
@@ -8408,8 +8417,9 @@ leave:
 	return rc;
 }
 
-int
-mdb_env_copyfd(MDB_env *env, HANDLE fd)
+	/** Copy environment as-is. */
+static int
+mdb_env_copyfd0(MDB_env *env, HANDLE fd)
 {
 	MDB_txn *txn = NULL;
 	int rc;
@@ -8512,8 +8522,23 @@ leave:
 	return rc;
 }
 
-static int
-mdb_env_copy0(MDB_env *env, const char *path, int flag)
+int
+mdb_env_copyfd2(MDB_env *env, HANDLE fd, unsigned int flags)
+{
+	if (flags & MDB_CP_COMPACT)
+		return mdb_env_copyfd1(env, fd);
+	else
+		return mdb_env_copyfd0(env, fd);
+}
+
+int
+mdb_env_copyfd(MDB_env *env, HANDLE fd)
+{
+	return mdb_env_copyfd2(env, fd, 0);
+}
+
+int
+mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
 {
 	int rc, len;
 	char *lpath;
@@ -8558,10 +8583,7 @@ mdb_env_copy0(MDB_env *env, const char *path, int flag)
 	}
 #endif
 
-	if (flag)
-		rc = mdb_env_copyfd2(env, newfd);
-	else
-		rc = mdb_env_copyfd(env, newfd);
+	rc = mdb_env_copyfd2(env, newfd, flags);
 
 leave:
 	if (!(env->me_flags & MDB_NOSUBDIR))
@@ -8576,13 +8598,7 @@ leave:
 int
 mdb_env_copy(MDB_env *env, const char *path)
 {
-	return mdb_env_copy0(env, path, 0);
-}
-
-int
-mdb_env_copy2(MDB_env *env, const char *path)
-{
-	return mdb_env_copy0(env, path, 1);
+	return mdb_env_copy2(env, path, 0);
 }
 
 int
