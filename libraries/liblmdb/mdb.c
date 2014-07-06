@@ -408,7 +408,7 @@ static txnid_t mdb_debug_start;
 #define MDB_MAGIC	 0xBEEFC0DE
 
 	/**	The version number for a database's datafile format. */
-#define MDB_DATA_VERSION	 1
+#define MDB_DATA_VERSION	 2
 	/**	The version number for a database's lockfile format. */
 #define MDB_LOCK_VERSION	 1
 
@@ -684,6 +684,7 @@ typedef struct MDB_page {
 		} pb;
 		uint32_t	pb_pages;	/**< number of overflow pages */
 	} mp_pb;
+	txnid_t		mp_txnid;		/**< ID of txn that wrote this page */
 	indx_t		mp_ptrs[1];		/**< dynamic size */
 } MDB_page;
 
@@ -868,7 +869,7 @@ typedef struct MDB_meta {
 		/** Stamp identifying this as an LMDB file. It must be set
 		 *	to #MDB_MAGIC. */
 	uint32_t	mm_magic;
-		/** Version number of this lock file. Must be set to #MDB_DATA_VERSION. */
+		/** Version number of this data file. Must be set to #MDB_DATA_VERSION. */
 	uint32_t	mm_version;
 	void		*mm_address;		/**< address for fixed mapping */
 	size_t		mm_mapsize;			/**< size of mmap region */
@@ -878,7 +879,6 @@ typedef struct MDB_meta {
 	/** Any persistent environment flags. @ref mdb_env */
 #define	mm_flags	mm_dbs[0].md_flags
 	pgno_t		mm_last_pg;			/**< last used page in file */
-	txnid_t		mm_txnid;			/**< txnid that committed this page */
 } MDB_meta;
 
 	/** Buffer for a stack-allocated meta page.
@@ -1074,6 +1074,7 @@ struct MDB_env {
 	char		*me_map;		/**< the memory map of the data file */
 	MDB_txninfo	*me_txns;		/**< the memory map of the lock file or NULL */
 	MDB_meta	*me_metas[2];	/**< pointers to the two meta pages */
+	MDB_page	*me_mpage[2];	/**< pointers to the two meta pages */
 	void		*me_pbuf;		/**< scratch area for DUPSORT put() */
 	MDB_txn		*me_txn;		/**< current write transaction */
 	size_t		me_mapsize;		/**< size of the data memory map */
@@ -1346,7 +1347,7 @@ mdb_page_list(MDB_page *mp)
 		return;
 	case P_META:
 		fprintf(stderr, "Meta-page %"Z"u txnid %"Z"u\n",
-			pgno, ((MDB_meta *)METADATA(mp))->mm_txnid);
+			pgno, mp->mp_txnid);
 		return;
 	default:
 		fprintf(stderr, "Bad page %"Z"u flags 0x%u\n", pgno, mp->mp_flags);
@@ -2014,6 +2015,7 @@ search_done:
 		txn->mt_next_pgno = pgno + num;
 	}
 	np->mp_pgno = pgno;
+	np->mp_txnid = txn->mt_txnid;
 	mdb_page_dirty(txn, np);
 	*mp = np;
 
@@ -2180,6 +2182,7 @@ mdb_page_touch(MDB_cursor *mc)
 
 	mdb_page_copy(np, mp, txn->mt_env->me_psize);
 	np->mp_pgno = pgno;
+	np->mp_txnid = txn->mt_txnid;
 	np->mp_flags |= P_DIRTY;
 
 done:
@@ -2388,7 +2391,7 @@ mdb_txn_renew0(MDB_txn *txn)
 	MDB_meta *meta;
 	unsigned int i, nr;
 	uint16_t x;
-	int rc, new_notls = 0;
+	int rc, new_notls = 0, mtoggle;
 
 	/* Setup db info */
 	txn->mt_numdbs = env->me_numdbs;
@@ -2396,8 +2399,9 @@ mdb_txn_renew0(MDB_txn *txn)
 
 	if (txn->mt_flags & MDB_TXN_RDONLY) {
 		if (!ti) {
-			meta = env->me_metas[ mdb_env_pick_meta(env) ];
-			txn->mt_txnid = meta->mm_txnid;
+			mtoggle = mdb_env_pick_meta(env);
+			meta = env->me_metas[mtoggle];
+			txn->mt_txnid = env->me_mpage[mtoggle]->mp_txnid;
 			txn->mt_u.reader = NULL;
 		} else {
 			MDB_reader *r = (env->me_flags & MDB_NOTLS) ? txn->mt_u.reader :
@@ -2442,17 +2446,20 @@ mdb_txn_renew0(MDB_txn *txn)
 			}
 			txn->mt_txnid = r->mr_txnid = ti->mti_txnid;
 			txn->mt_u.reader = r;
-			meta = env->me_metas[txn->mt_txnid & 1];
+			mtoggle = txn->mt_txnid & 1;
+			meta = env->me_metas[mtoggle];
 		}
 	} else {
 		if (ti) {
 			LOCK_MUTEX_W(env);
 
 			txn->mt_txnid = ti->mti_txnid;
-			meta = env->me_metas[txn->mt_txnid & 1];
+			mtoggle = txn->mt_txnid & 1;
+			meta = env->me_metas[mtoggle];
 		} else {
-			meta = env->me_metas[ mdb_env_pick_meta(env) ];
-			txn->mt_txnid = meta->mm_txnid;
+			mtoggle = mdb_env_pick_meta(env);
+			meta = env->me_metas[mtoggle];
+			txn->mt_txnid = env->me_mpage[mtoggle]->mp_txnid;
 		}
 		txn->mt_txnid++;
 #if MDB_DEBUG
@@ -3271,6 +3278,7 @@ mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 	MDB_meta	*m;
 	int			i, rc, off;
 	enum { Size = sizeof(pbuf) };
+	txnid_t		txnid = 0;
 
 	/* We don't know the page size yet, so use a minimum value.
 	 * Read both meta pages so we can use the latest one.
@@ -3315,8 +3323,10 @@ mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 			return MDB_VERSION_MISMATCH;
 		}
 
-		if (off == 0 || m->mm_txnid > meta->mm_txnid)
+		if (off == 0 || p->mp_txnid > txnid) {
 			*meta = *m;
+			txnid = p->mp_txnid;
+		}
 	}
 	return 0;
 }
@@ -3395,7 +3405,9 @@ static int
 mdb_env_write_meta(MDB_txn *txn)
 {
 	MDB_env *env;
-	MDB_meta	meta, metab, *mp;
+	char pbuf0[PAGEHDRSZ + sizeof(MDB_meta)], pbuf1[PAGEHDRSZ + sizeof(MDB_meta)];
+	MDB_meta	*meta, *metab, *mp;
+	MDB_page	*mmp, *mb0, *mb1;
 	off_t off;
 	int rc, len, toggle;
 	char *ptr;
@@ -3412,6 +3424,7 @@ mdb_env_write_meta(MDB_txn *txn)
 
 	env = txn->mt_env;
 	mp = env->me_metas[toggle];
+	mmp = env->me_mpage[toggle];
 
 	if (env->me_flags & MDB_WRITEMAP) {
 		/* Persist any increases of mapsize config */
@@ -3420,7 +3433,7 @@ mdb_env_write_meta(MDB_txn *txn)
 		mp->mm_dbs[0] = txn->mt_dbs[0];
 		mp->mm_dbs[1] = txn->mt_dbs[1];
 		mp->mm_last_pg = txn->mt_next_pgno - 1;
-		mp->mm_txnid = txn->mt_txnid;
+		mmp->mp_txnid = txn->mt_txnid;
 		if (!(env->me_flags & (MDB_NOMETASYNC|MDB_NOSYNC))) {
 			unsigned meta_size = env->me_psize;
 			rc = (env->me_flags & MDB_MAPASYNC) ? MS_ASYNC : MS_SYNC;
@@ -3440,28 +3453,25 @@ mdb_env_write_meta(MDB_txn *txn)
 		}
 		goto done;
 	}
-	metab.mm_txnid = env->me_metas[toggle]->mm_txnid;
-	metab.mm_last_pg = env->me_metas[toggle]->mm_last_pg;
+	mb0 = (MDB_page *)pbuf0;
+	mb1 = (MDB_page *)pbuf1;
+	metab = METADATA(mb0);
+	meta = METADATA(mb1);
+	mb0->mp_txnid = mmp->mp_txnid;
+	*metab = *mp;
+	*meta = *mp;
 
-	ptr = (char *)&meta;
-	if (env->me_mapsize > mp->mm_mapsize) {
-		/* Persist any increases of mapsize config */
-		meta.mm_mapsize = env->me_mapsize;
-		off = offsetof(MDB_meta, mm_mapsize);
-	} else {
-		off = offsetof(MDB_meta, mm_dbs[0].md_depth);
-	}
-	len = sizeof(MDB_meta) - off;
+	len = sizeof(MDB_meta) + sizeof(txnid_t);
+	off = offsetof(MDB_page, mp_txnid);
+	ptr = pbuf1 + off;
 
-	ptr += off;
-	meta.mm_dbs[0] = txn->mt_dbs[0];
-	meta.mm_dbs[1] = txn->mt_dbs[1];
-	meta.mm_last_pg = txn->mt_next_pgno - 1;
-	meta.mm_txnid = txn->mt_txnid;
+	meta->mm_dbs[0] = txn->mt_dbs[0];
+	meta->mm_dbs[1] = txn->mt_dbs[1];
+	meta->mm_last_pg = txn->mt_next_pgno - 1;
+	mb1->mp_txnid = txn->mt_txnid;
 
 	if (toggle)
 		off += env->me_psize;
-	off += PAGEHDRSZ;
 
 	/* Write to the SYNC fd */
 	mfd = env->me_flags & (MDB_NOSYNC|MDB_NOMETASYNC) ?
@@ -3483,8 +3493,7 @@ mdb_env_write_meta(MDB_txn *txn)
 		 * Write some old data back, to prevent it from being used.
 		 * Use the non-SYNC fd; we know it will fail anyway.
 		 */
-		meta.mm_last_pg = metab.mm_last_pg;
-		meta.mm_txnid = metab.mm_txnid;
+		ptr = pbuf0 + off;
 #ifdef _WIN32
 		memset(&ov, 0, sizeof(ov));
 		ov.Offset = off;
@@ -3517,7 +3526,7 @@ done:
 static int
 mdb_env_pick_meta(const MDB_env *env)
 {
-	return (env->me_metas[0]->mm_txnid < env->me_metas[1]->mm_txnid);
+	return (env->me_mpage[0]->mp_txnid < env->me_mpage[1]->mp_txnid);
 }
 
 int ESECT
@@ -3622,8 +3631,10 @@ mdb_env_map(MDB_env *env, void *addr, int newsize)
 		return EBUSY;	/* TODO: Make a new MDB_* error code? */
 
 	p = (MDB_page *)env->me_map;
+	env->me_mpage[0] = p;
+	env->me_mpage[1] = (MDB_page *)((char *)p + env->me_psize);
 	env->me_metas[0] = METADATA(p);
-	env->me_metas[1] = (MDB_meta *)((char *)env->me_metas[0] + env->me_psize);
+	env->me_metas[1] = METADATA(env->me_mpage[1]);
 
 	return MDB_SUCCESS;
 }
@@ -3853,7 +3864,7 @@ mdb_env_share_locks(MDB_env *env, int *excl)
 {
 	int rc = 0, toggle = mdb_env_pick_meta(env);
 
-	env->me_txns->mti_txnid = env->me_metas[toggle]->mm_txnid;
+	env->me_txns->mti_txnid = env->me_mpage[toggle]->mp_txnid;
 
 #ifdef _WIN32
 	{
@@ -8286,6 +8297,7 @@ again:
 		mo = (MDB_page *)(my->mc_wbuf[toggle] + my->mc_wlen[toggle]);
 		mdb_page_copy(mo, mp, my->mc_env->me_psize);
 		mo->mp_pgno = my->mc_next_pgno++;
+		mo->mp_txnid = 1;
 		my->mc_wlen[toggle] += my->mc_env->me_psize;
 		if (mc.mc_top) {
 			/* Update parent if there is one */
@@ -8393,7 +8405,7 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
 		mm->mm_last_pg = txn->mt_next_pgno - freecount - 1;
 		mm->mm_dbs[1] = txn->mt_dbs[1];
 		mm->mm_dbs[1].md_root = mm->mm_last_pg;
-		mm->mm_txnid = 1;
+		mp->mp_txnid = 1;
 	}
 	my.mc_wlen[0] = env->me_psize * 2;
 	my.mc_txn = txn;
@@ -8727,7 +8739,7 @@ mdb_env_info(MDB_env *env, MDB_envinfo *arg)
 	arg->me_numreaders = env->me_txns ? env->me_txns->mti_numreaders : env->me_numreaders;
 
 	arg->me_last_pgno = env->me_metas[toggle]->mm_last_pg;
-	arg->me_last_txnid = env->me_metas[toggle]->mm_txnid;
+	arg->me_last_txnid = env->me_mpage[toggle]->mp_txnid;
 	return MDB_SUCCESS;
 }
 
