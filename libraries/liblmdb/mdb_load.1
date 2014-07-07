@@ -11,6 +11,8 @@ mdb_load \- LMDB environment import tool
 [\c
 .BI \-f \ file\fR]
 [\c
+.BR \-i ]
+[\c
 .BR \-n ]
 [\c
 .BI \-s \ subdb\fR]
@@ -39,6 +41,9 @@ Write the library version number to the standard output, and exit.
 .TP
 .BR \-f \ file
 Read from the specified file instead of from the standard input.
+.TP
+.BR \-i
+Load an incremental backup.
 .TP
 .BR \-n
 Load an LMDB database which does not use subdirectories.

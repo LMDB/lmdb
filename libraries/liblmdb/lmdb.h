@@ -674,6 +674,55 @@ int  mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags);
 	 */
 int  mdb_env_copyfd2(MDB_env *env, mdb_filehandle_t fd, unsigned int flags);
 
+	/** @brief Perform incremental dump of an LMDB environment to the
+	 *	specified file descriptor.
+	 *
+	 * This function may be used to make an incremental backup of an
+	 * existing environment.
+	 * @note This call can trigger significant file size growth if run in
+	 * parallel with write transactions, because it employs a read-only
+	 * transaction. See long-lived transactions under @ref caveats_sec.
+	 * @param[in] env An environment handle returned by #mdb_env_create(). It
+	 * must have already been opened successfully.
+	 * @param[in] fd The filedescriptor to write the copy to. It must
+	 * have already been opened for Write access.
+	 * @param[in] txnid The transaction ID of a previous backup. It must
+	 * be greater than zero.
+	 * @return A non-zero error value on failure and 0 on success.
+	 */
+int  mdb_env_incr_dumpfd(MDB_env *env, mdb_filehandle_t fd, size_t txnid);
+
+	/** @brief Perform incremental dump of an LMDB environment to the
+	 *	specified file.
+	 *
+	 * This function may be used to make an incremental backup of an
+	 * existing environment.
+	 * @note This call can trigger significant file size growth if run in
+	 * parallel with write transactions, because it employs a read-only
+	 * transaction. See long-lived transactions under @ref caveats_sec.
+	 * @param[in] env An environment handle returned by #mdb_env_create(). It
+	 * must have already been opened successfully.
+	 * @param[in] path The name of the file to write the copy to. It must
+	 * not already exist.
+	 * @param[in] txnid The transaction ID of a previous backup. It must
+	 * be greater than zero.
+	 * @return A non-zero error value on failure and 0 on success.
+	 */
+int  mdb_env_incr_dump(MDB_env *env, const char *path, size_t txnid);
+
+	/** @brief Reload an incremental dump of an LMDB environment from the
+	 *	specified file descriptor.
+	 *
+	 * This function may be used to load an incremental backup of an
+	 * existing environment.
+	 * @note No other tasks may access the environment while this runs.
+	 * @param[in] env An environment handle returned by #mdb_env_create(). It
+	 * must have already been opened successfully.
+	 * @param[in] fd The filedescriptor to read the backup from.
+	 * @return A non-zero error value on failure and 0 on success.
+	 */
+int  mdb_env_incr_loadfd(MDB_env *env, mdb_filehandle_t fd);
+
 	/** @brief Return statistics about the LMDB environment.
 	 *
 	 * @param[in] env An environment handle returned by #mdb_env_create()

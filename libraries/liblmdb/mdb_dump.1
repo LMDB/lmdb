@@ -11,6 +11,8 @@ mdb_dump \- LMDB environment export tool
 [\c
 .BI \-f \ file\fR]
 [\c
+.BI \-i \ txnid\fR]
+[\c
 .BR \-l ]
 [\c
 .BR \-n ]
@@ -34,6 +36,12 @@ Write the library version number to the standard output, and exit.
 .TP
 .BR \-f \ file
 Write to the specified file instead of to the standard output.
+.TP
+.BR \-i \ txnid
+Perform an incremental backup. Only pages that have been modified
+after the given transaction ID will be written in the dump.
+
+Note: This is a raw binary dump of the database pages, not the portable output format.
 .TP
 .BR \-l
 List the databases stored in the environment. Just the

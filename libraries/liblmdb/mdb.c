@@ -215,11 +215,13 @@
 #define MDB_PROCESS_QUERY_LIMITED_INFORMATION 0x1000
 #endif
 #define	Z	"I"
+#define	ALIGNED_FREE(x)	_aligned_free(x)
 #else
 #define THREAD_RET	void *
 #define THREAD_CREATE(thr,start,arg)	pthread_create(&thr,NULL,start,arg)
 #define THREAD_FINISH(thr)	pthread_join(thr,NULL)
 #define	Z	"z"			/**< printf format modifier for size_t */
+#define ALIGNED_FREE(x)	free(x)
 
 	/** For MDB_LOCK_FORMAT: True if readers take a pid lock in the lockfile */
 #define MDB_PIDLOCK			1
@@ -8072,6 +8074,12 @@ typedef struct mdb_copy {
 
 } mdb_copy;
 
+#ifdef _WIN32
+#define DO_WRITE(rc, fd, ptr, w2, len)	rc = WriteFile(fd, ptr, w2, &len, NULL)
+#else
+#define DO_WRITE(rc, fd, ptr, w2, len)	len = write(fd, ptr, w2); rc = (len >= 0)
+#endif
+
 	/** Dedicated writer thread for compacting copy. */
 static THREAD_RET ESECT
 mdb_env_copythr(void *arg)
@@ -8081,10 +8089,8 @@ mdb_env_copythr(void *arg)
 	int toggle = 0, wsize, rc;
 #ifdef _WIN32
 	DWORD len;
-#define DO_WRITE(rc, fd, ptr, w2, len)	rc = WriteFile(fd, ptr, w2, &len, NULL)
 #else
 	int len;
-#define DO_WRITE(rc, fd, ptr, w2, len)	len = write(fd, ptr, w2); rc = (len >= 0)
 #endif
 
 	pthread_mutex_lock(&my->mc_mutex);
@@ -8134,7 +8140,6 @@ again:
 	pthread_cond_signal(&my->mc_cond);
 	pthread_mutex_unlock(&my->mc_mutex);
 	return (THREAD_RET)0;
-#undef DO_WRITE
 }
 
 	/** Tell the writer thread there's a buffer ready to write */
@@ -8350,29 +8355,12 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
 	my.mc_toggle = 0;
 	my.mc_env = env;
 	my.mc_fd = fd;
+	THREAD_CREATE(thr, mdb_env_copythr, &my);
 
-	/* Do the lock/unlock of the reader mutex before starting the
-	 * write txn.  Otherwise other read txns could block writers.
-	 */
 	rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
 	if (rc)
 		return rc;
 
-	if (env->me_txns) {
-		/* We must start the actual read txn after blocking writers */
-		mdb_txn_reset0(txn, "reset-stage1");
-
-		/* Temporarily block writers until we snapshot the meta pages */
-		LOCK_MUTEX_W(env);
-
-		rc = mdb_txn_renew0(txn);
-		if (rc) {
-			UNLOCK_MUTEX_W(env);
-			goto leave;
-		}
-	}
-
-	THREAD_CREATE(thr, mdb_env_copythr, &my);
 	mp = (MDB_page *)my.mc_wbuf[0];
 	memset(mp, 0, 2*env->me_psize);
 	mp->mp_pgno = 0;
@@ -8422,17 +8410,16 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
 		pthread_cond_wait(&my.mc_cond, &my.mc_mutex);
 	pthread_mutex_unlock(&my.mc_mutex);
 	THREAD_FINISH(thr);
-leave:
+
 	mdb_txn_abort(txn);
 #ifdef _WIN32
 	CloseHandle(my.mc_cond);
 	CloseHandle(my.mc_mutex);
-	_aligned_free(my.mc_wbuf[0]);
 #else
 	pthread_cond_destroy(&my.mc_cond);
 	pthread_mutex_destroy(&my.mc_mutex);
-	free(my.mc_wbuf[0]);
 #endif
+	ALIGNED_FREE(my.mc_wbuf[0]);
 	return rc;
 }
 
@@ -8446,11 +8433,9 @@ mdb_env_copyfd0(MDB_env *env, HANDLE fd)
 	char *ptr;
 #ifdef _WIN32
 	DWORD len, w2;
-#define DO_WRITE(rc, fd, ptr, w2, len)	rc = WriteFile(fd, ptr, w2, &len, NULL)
 #else
 	ssize_t len;
 	size_t w2;
-#define DO_WRITE(rc, fd, ptr, w2, len)	len = write(fd, ptr, w2); rc = (len >= 0)
 #endif
 
 	/* Do the lock/unlock of the reader mutex before starting the
@@ -8556,8 +8541,8 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
 	return mdb_env_copyfd2(env, fd, 0);
 }
 
-int ESECT
-mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
+static int ESECT
+mdb_env_copy_open(MDB_env *env, const char *path, HANDLE *retfd)
 {
 	int rc, len;
 	char *lpath;
@@ -8584,10 +8569,10 @@ mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
 #else
 	newfd = open(lpath, O_WRONLY|O_CREAT|O_EXCL, 0666);
 #endif
-	if (newfd == INVALID_HANDLE_VALUE) {
-		rc = ErrCode();
-		goto leave;
-	}
+	if (!(env->me_flags & MDB_NOSUBDIR))
+		free(lpath);
+	if (newfd == INVALID_HANDLE_VALUE)
+		return ErrCode();
 
 #ifdef O_DIRECT
 	/* Set O_DIRECT if the file system supports it */
@@ -8595,22 +8580,26 @@ mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
 		(void) fcntl(newfd, F_SETFL, rc | O_DIRECT);
 #endif
 #ifdef F_NOCACHE	/* __APPLE__ */
-	rc = fcntl(newfd, F_NOCACHE, 1);
-	if (rc) {
-		rc = ErrCode();
-		goto leave;
-	}
+	(void) fcntl(newfd, F_NOCACHE, 1);
 #endif
+	*retfd = newfd;
+	return MDB_SUCCESS;
+}
 
+int ESECT
+mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
+{
+	HANDLE newfd = INVALID_HANDLE_VALUE;
+	int rc;
+
+	rc = mdb_env_copy_open(env, path, &newfd);
+	if (rc)
+		return rc;
 	rc = mdb_env_copyfd2(env, newfd, flags);
 
-leave:
-	if (!(env->me_flags & MDB_NOSUBDIR))
-		free(lpath);
 	if (newfd != INVALID_HANDLE_VALUE)
 		if (close(newfd) < 0 && rc == MDB_SUCCESS)
 			rc = ErrCode();
-
 	return rc;
 }
 
@@ -8618,6 +8607,178 @@ int ESECT
 mdb_env_copy(MDB_env *env, const char *path)
 {
 	return mdb_env_copy2(env, path, 0);
+}
+
+int ESECT
+mdb_env_incr_dumpfd(MDB_env *env, HANDLE fd, size_t txnid)
+{
+	int rc;
+	MDB_page *mp, *mend;
+	MDB_txn *txn;
+	size_t wsize;
+	char *buf = NULL;
+#ifdef _WIN32
+	DWORD len, w2;
+#else
+	ssize_t len;
+	size_t w2;
+#endif
+
+#ifdef _WIN32
+	buf = _aligned_malloc(2*env->me_psize, env->me_psize);
+	if (buf == NULL)
+		return errno;
+#else
+	rc = posix_memalign((void **)&buf, env->me_psize, 2*env->me_psize);
+	if (rc)
+		return rc;
+#endif
+
+	/* Do the lock/unlock of the reader mutex before starting the
+	 * write txn.  Otherwise other read txns could block writers.
+	 */
+	rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
+	if (rc) {
+		ALIGNED_FREE(buf);
+		return rc;
+	}
+
+	if (env->me_txns) {
+		/* We must start the actual read txn after blocking writers */
+		mdb_txn_reset0(txn, "reset-stage1");
+
+		/* Temporarily block writers until we snapshot the meta pages */
+		LOCK_MUTEX_W(env);
+
+		rc = mdb_txn_renew0(txn);
+		if (rc) {
+			UNLOCK_MUTEX_W(env);
+			goto leave;
+		}
+	}
+
+	memcpy(buf, env->me_map, env->me_psize*2);
+
+	if (env->me_txns)
+		UNLOCK_MUTEX_W(env);
+
+	mp = (MDB_page *)buf;
+	if (mp->mp_txnid > txnid) {
+		DO_WRITE(rc, fd, mp, env->me_psize, len);
+		if (!rc) {
+			rc = ErrCode();
+			goto leave;
+		}
+	}
+	mp = (MDB_page *)((char *)mp + env->me_psize);
+	if (mp->mp_txnid > txnid) {
+		DO_WRITE(rc, fd, mp, env->me_psize, len);
+		if (!rc) {
+			rc = ErrCode();
+			goto leave;
+		}
+	}
+	ALIGNED_FREE(buf);
+	buf = NULL;
+
+	mp = (MDB_page *)((char *)env->me_map + 2*env->me_psize);
+	mend = (MDB_page *)((char *)env->me_map + txn->mt_next_pgno * env->me_psize);
+	while (mp < mend) {
+		wsize = env->me_psize;
+		if (IS_OVERFLOW(mp))
+			wsize *= mp->mp_pages;
+		if (mp->mp_txnid > txnid) {
+			char *ptr = (char *)mp;
+			w2 = wsize;
+			while (w2 > 0) {
+				DO_WRITE(rc, fd, ptr, w2, len);
+				if (!rc) {
+					rc = ErrCode();
+					goto leave;
+				} else if (len > 0) {
+					rc = MDB_SUCCESS;
+					ptr += len;
+					w2 -= len;
+					continue;
+				} else {
+					rc = EIO;
+					goto leave;
+				}
+			}
+		}
+		mp = (MDB_page *)((char *)mp + wsize);
+	}
+
+leave:
+	mdb_txn_abort(txn);
+	if (buf != NULL)
+		ALIGNED_FREE(buf);
+	return rc;
+}
+
+int ESECT
+mdb_env_incr_dump(MDB_env *env, const char *path, size_t txnid)
+{
+	HANDLE newfd = INVALID_HANDLE_VALUE;
+	int rc;
+
+	/* Output is just a plain file, not an environment */
+	env->me_flags |= MDB_NOSUBDIR;
+
+	rc = mdb_env_copy_open(env, path, &newfd);
+	if (rc)
+		return rc;
+	rc = mdb_env_incr_dumpfd(env, newfd, txnid);
+
+	if (newfd != INVALID_HANDLE_VALUE)
+		if (close(newfd) < 0 && rc == MDB_SUCCESS)
+			rc = ErrCode();
+	return rc;
+}
+
+int ESECT
+mdb_env_incr_loadfd(MDB_env *env, HANDLE fd)
+{
+	size_t rsize;
+	ssize_t rlen;
+	char buf[PAGEHDRSZ], *ptr;
+	MDB_page *rp = (MDB_page *)buf, *mp;
+
+	if (!(env->me_flags & MDB_WRITEMAP))
+		return EINVAL;
+
+	for (;;) {
+#ifdef _WIN32
+		int rc = ReadFile(fd, buf, sizeof(buf), &rlen, NULL) ? (int)rlen : -1;
+		if (rc == -1 && ErrCode() == ERROR_HANDLE_EOF)
+			rc = 0;
+#else
+		rlen = read(fd, buf, sizeof(buf));
+#endif
+		if (rlen != sizeof(buf))
+			break;
+		rsize = env->me_psize;
+		if (IS_OVERFLOW(rp))
+			rsize *= rp->mp_pages;
+		rsize -= rlen;
+		mp = (MDB_page *)(env->me_map + rp->mp_pgno * env->me_psize);
+		ptr = METADATA(mp);
+		memcpy(mp, rp, sizeof(buf));
+		while (rsize > 0) {
+#ifdef _WIN32
+			rc = ReadFile(fd, ptr, rsize, &rlen, NULL) ? (int)rlen : -1;
+			if (rc == -1)
+				rlen = -1;
+#else
+			rlen = read(fd, ptr, rsize);
+#endif
+			if (rlen == -1)
+				return ErrCode();
+			ptr += rlen;
+			rsize -= rlen;
+		}
+	}
+	return MDB_SUCCESS;
 }
 
 int ESECT

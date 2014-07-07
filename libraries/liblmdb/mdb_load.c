@@ -19,6 +19,15 @@
 #include <unistd.h>
 #include "lmdb.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#define Z	"I"
+#define	MDB_STDIN	GetStdHandle(STD_INPUT_HANDLE)
+#else
+#define Z	"z"
+#define	MDB_STDIN	0
+#endif
+
 #define PRINT	1
 #define NOHDR	2
 static int mode;
@@ -37,12 +46,6 @@ static int Eof;
 static MDB_envinfo info;
 
 static MDB_val kbuf, dbuf;
-
-#ifdef _WIN32
-#define Z	"I"
-#else
-#define Z	"z"
-#endif
 
 #define STRLENOF(s)	(sizeof(s)-1)
 
@@ -276,7 +279,7 @@ badend:
 
 static void usage()
 {
-	fprintf(stderr, "usage: %s dbpath [-V] [-f input] [-n] [-s name] [-N] [-T]\n", prog);
+	fprintf(stderr, "usage: %s dbpath [-V] [-f input] [-i] [-n] [-s name] [-N] [-T]\n", prog);
 	exit(EXIT_FAILURE);
 }
 
@@ -290,6 +293,7 @@ int main(int argc, char *argv[])
 	char *envname;
 	int envflags = 0, putflags = 0;
 	int dohdr = 0;
+	int incr = 0;
 
 	prog = argv[0];
 
@@ -298,13 +302,14 @@ int main(int argc, char *argv[])
 	}
 
 	/* -f: load file instead of stdin
+	 * -i: load an incremental dump
 	 * -n: use NOSUBDIR flag on env_open
 	 * -s: load into named subDB
 	 * -N: use NOOVERWRITE on puts
 	 * -T: read plaintext
 	 * -V: print version and exit
 	 */
-	while ((i = getopt(argc, argv, "f:ns:NTV")) != EOF) {
+	while ((i = getopt(argc, argv, "f:ins:NTV")) != EOF) {
 		switch(i) {
 		case 'V':
 			printf("%s\n", MDB_VERSION_STRING);
@@ -316,6 +321,9 @@ int main(int argc, char *argv[])
 					prog, optarg, strerror(errno));
 				exit(EXIT_FAILURE);
 			}
+			break;
+		case 'i':
+			incr = 1;
 			break;
 		case 'n':
 			envflags |= MDB_NOSUBDIR;
@@ -336,6 +344,21 @@ int main(int argc, char *argv[])
 
 	if (optind != argc - 1)
 		usage(prog);
+	envname = argv[optind];
+
+	if (incr) {
+		rc = mdb_env_create(&env);
+		envflags |= MDB_WRITEMAP;
+		rc = mdb_env_open(env, envname, envflags, 0664);
+		if (rc) {
+			fprintf(stderr, "mdb_env_open failed, error %d %s\n", rc, mdb_strerror(rc));
+			goto env_close;
+		}
+		rc = mdb_env_incr_loadfd(env, MDB_STDIN);
+		if (rc)
+			fprintf(stderr, "mdb_env_incr_load failed, error %d %s\n", rc, mdb_strerror(rc));
+		goto env_close;
+	}
 
 	dbuf.mv_size = 4096;
 	dbuf.mv_data = malloc(dbuf.mv_size);
@@ -343,7 +366,6 @@ int main(int argc, char *argv[])
 	if (!(mode & NOHDR))
 		readhdr();
 
-	envname = argv[optind];
 	rc = mdb_env_create(&env);
 
 	mdb_env_set_maxdbs(env, 2);
