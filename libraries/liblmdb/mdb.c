@@ -8338,29 +8338,12 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
 	my.mc_toggle = 0;
 	my.mc_env = env;
 	my.mc_fd = fd;
+	THREAD_CREATE(thr, mdb_env_copythr, &my);
 
-	/* Do the lock/unlock of the reader mutex before starting the
-	 * write txn.  Otherwise other read txns could block writers.
-	 */
 	rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
 	if (rc)
 		return rc;
 
-	if (env->me_txns) {
-		/* We must start the actual read txn after blocking writers */
-		mdb_txn_reset0(txn, "reset-stage1");
-
-		/* Temporarily block writers until we snapshot the meta pages */
-		LOCK_MUTEX_W(env);
-
-		rc = mdb_txn_renew0(txn);
-		if (rc) {
-			UNLOCK_MUTEX_W(env);
-			goto leave;
-		}
-	}
-
-	THREAD_CREATE(thr, mdb_env_copythr, &my);
 	mp = (MDB_page *)my.mc_wbuf[0];
 	memset(mp, 0, 2*env->me_psize);
 	mp->mp_pgno = 0;
@@ -8410,7 +8393,7 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
 		pthread_cond_wait(&my.mc_cond, &my.mc_mutex);
 	pthread_mutex_unlock(&my.mc_mutex);
 	THREAD_FINISH(thr);
-leave:
+
 	mdb_txn_abort(txn);
 #ifdef _WIN32
 	CloseHandle(my.mc_cond);
