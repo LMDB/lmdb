@@ -655,7 +655,7 @@ typedef struct MDB_page {
 #define	mp_next	mp_p.p_next
 	union {
 		pgno_t		p_pgno;	/**< page number */
-		void *		p_next;	/**< for in-memory list of freed structs */
+		struct MDB_page *p_next; /**< for in-memory list of freed pages */
 	} mp_p;
 	uint16_t	mp_pad;
 /**	@defgroup mdb_page	Page Flags
@@ -731,7 +731,7 @@ typedef struct MDB_page {
 #define OVPAGES(size, psize)	((PAGEHDRSZ-1 + (size)) / (psize) + 1)
 
 	/** Link in #MDB_txn.%mt_loose_pages list */
-#define NEXT_LOOSE_PAGE(p)		(*(MDB_page **)METADATA(p))
+#define NEXT_LOOSE_PAGE(p)		(*(MDB_page **)((p) + 2))
 
 	/** Header for a single key/data pair within a page.
 	 * Used in pages of type #P_BRANCH and #P_LEAF without #P_LEAF2.
@@ -1601,6 +1601,8 @@ mdb_page_loose(MDB_cursor *mc, MDB_page *mp)
 		}
 	}
 	if (loose) {
+		DPRINTF(("loosen db %d page %"Z"u", DDBI(mc),
+			mp->mp_pgno));
 		NEXT_LOOSE_PAGE(mp) = mc->mc_txn->mt_loose_pgs;
 		mc->mc_txn->mt_loose_pgs = mp;
 		mp->mp_flags |= P_LOOSE;
@@ -1623,7 +1625,7 @@ mdb_page_loose(MDB_cursor *mc, MDB_page *mp)
 static int
 mdb_pages_xkeep(MDB_cursor *mc, unsigned pflags, int all)
 {
-	enum { Mask = P_SUBP|P_DIRTY|P_KEEP };
+	enum { Mask = P_SUBP|P_DIRTY|P_LOOSE|P_KEEP };
 	MDB_txn *txn = mc->mc_txn;
 	MDB_cursor *m3;
 	MDB_xcursor *mx;
@@ -1659,12 +1661,6 @@ mdb_pages_xkeep(MDB_cursor *mc, unsigned pflags, int all)
 		}
 		if (i == 0)
 			break;
-	}
-
-	/* Loose pages shouldn't be spilled */
-	for (dp = txn->mt_loose_pgs; dp; dp = NEXT_LOOSE_PAGE(dp)) {
-		if ((dp->mp_flags & Mask) == pflags)
-			dp->mp_flags ^= P_KEEP;
 	}
 
 	if (all) {
@@ -1780,7 +1776,7 @@ mdb_page_spill(MDB_cursor *m0, MDB_val *key, MDB_val *data)
 	for (i=dl[0].mid; i && need; i--) {
 		MDB_ID pn = dl[i].mid << 1;
 		dp = dl[i].mptr;
-		if (dp->mp_flags & P_KEEP)
+		if (dp->mp_flags & (P_LOOSE|P_KEEP))
 			continue;
 		/* Can't spill twice, make sure it's not already in a parent's
 		 * spill list.
@@ -1898,6 +1894,8 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 	if (num == 1 && txn->mt_loose_pgs) {
 		np = txn->mt_loose_pgs;
 		txn->mt_loose_pgs = NEXT_LOOSE_PAGE(np);
+		DPRINTF(("db %d use loose page %"Z"u", DDBI(mc),
+				np->mp_pgno));
 		*mp = np;
 		return MDB_SUCCESS;
 	}
@@ -2951,8 +2949,8 @@ mdb_page_flush(MDB_txn *txn, int keep)
 		while (++i <= pagecount) {
 			dp = dl[i].mptr;
 			/* Don't flush this page yet */
-			if (dp->mp_flags & P_KEEP) {
-				dp->mp_flags ^= P_KEEP;
+			if (dp->mp_flags & (P_LOOSE|P_KEEP)) {
+				dp->mp_flags &= ~P_KEEP;
 				dl[++j] = dl[i];
 				continue;
 			}
@@ -2966,8 +2964,8 @@ mdb_page_flush(MDB_txn *txn, int keep)
 		if (++i <= pagecount) {
 			dp = dl[i].mptr;
 			/* Don't flush this page yet */
-			if (dp->mp_flags & P_KEEP) {
-				dp->mp_flags ^= P_KEEP;
+			if (dp->mp_flags & (P_LOOSE|P_KEEP)) {
+				dp->mp_flags &= ~P_KEEP;
 				dl[i].mid = 0;
 				continue;
 			}
@@ -3096,6 +3094,7 @@ mdb_txn_commit(MDB_txn *txn)
 
 	if (txn->mt_parent) {
 		MDB_txn *parent = txn->mt_parent;
+		MDB_page **lp;
 		MDB_ID2L dst, src;
 		MDB_IDL pspill;
 		unsigned x, y, len, ps_len;
@@ -3192,6 +3191,11 @@ mdb_txn_commit(MDB_txn *txn)
 				parent->mt_spill_pgs = txn->mt_spill_pgs;
 			}
 		}
+
+		/* Append our loose page list to parent's */
+		for (lp = &parent->mt_loose_pgs; *lp; lp = &NEXT_LOOSE_PAGE(lp))
+			;
+		*lp = txn->mt_loose_pgs;
 
 		parent->mt_child = NULL;
 		mdb_midl_free(((MDB_ntxn *)txn)->mnt_pgstate.mf_pghead);
