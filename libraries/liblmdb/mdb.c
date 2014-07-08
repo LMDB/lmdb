@@ -6343,6 +6343,7 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 				return rc;
 			}
 			/* otherwise fall thru and delete the sub-DB */
+			mc->mc_xcursor->mx_cursor.mc_flags |= C_EOF;
 		}
 
 		if (leaf->mn_flags & F_SUBDATA) {
