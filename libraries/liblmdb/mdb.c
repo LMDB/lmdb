@@ -152,7 +152,11 @@
 
 #ifdef __GNUC__
 /** Put infrequently used env functions in separate section */
-#define	ESECT	__attribute__ ((section("text_env")))
+# ifdef __APPLE__
+#  define	ESECT	__attribute__ ((section("__TEXT,text_env")))
+# else
+#  define	ESECT	__attribute__ ((section("text_env")))
+# endif
 #else
 #define ESECT
 #endif
