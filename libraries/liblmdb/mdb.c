@@ -6352,7 +6352,6 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 				return rc;
 			}
 			/* otherwise fall thru and delete the sub-DB */
-			mc->mc_xcursor->mx_cursor.mc_flags |= C_EOF;
 		}
 
 		if (leaf->mn_flags & F_SUBDATA) {
@@ -7537,8 +7536,10 @@ mdb_cursor_del0(MDB_cursor *mc)
 		/* if mc points past last node in page, find next sibling */
 		if (mc->mc_ki[mc->mc_top] >= nkeys) {
 			rc = mdb_cursor_sibling(mc, 1);
-			if (rc == MDB_NOTFOUND)
+			if (rc == MDB_NOTFOUND) {
+				mc->mc_flags |= C_EOF;
 				rc = MDB_SUCCESS;
+			}
 		}
 
 		/* Adjust other cursors pointing to mp */
@@ -7556,8 +7557,10 @@ mdb_cursor_del0(MDB_cursor *mc)
 				}
 				if (m3->mc_ki[mc->mc_top] >= nkeys) {
 					rc = mdb_cursor_sibling(m3, 1);
-					if (rc == MDB_NOTFOUND)
+					if (rc == MDB_NOTFOUND) {
+						m3->mc_flags |= C_EOF;
 						rc = MDB_SUCCESS;
+					}
 				}
 			}
 		}
