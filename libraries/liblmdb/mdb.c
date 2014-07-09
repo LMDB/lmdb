@@ -7659,6 +7659,8 @@ mdb_cursor_del0(MDB_cursor *mc)
 					m3->mc_flags |= C_DEL;
 					if (m3->mc_ki[mc->mc_top] > ki)
 						m3->mc_ki[mc->mc_top]--;
+					else if (mc->mc_db->md_flags & MDB_DUPSORT)
+						m3->mc_xcursor->mx_cursor.mc_flags |= C_EOF;
 				}
 				if (m3->mc_ki[mc->mc_top] >= nkeys) {
 					rc = mdb_cursor_sibling(m3, 1);
