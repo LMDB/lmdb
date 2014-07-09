@@ -421,7 +421,10 @@ typedef enum MDB_cursor_op {
 #define MDB_BAD_TXN			(-30782)
 	/** Unsupported size of key/DB name/data, or wrong DUPFIXED size */
 #define MDB_BAD_VALSIZE		(-30781)
-#define MDB_LAST_ERRCODE	MDB_BAD_VALSIZE
+	/** The specified DBI was changed unexpectedly */
+#define MDB_BAD_DBI		(-30780)
+	/** The last defined error code */
+#define MDB_LAST_ERRCODE	MDB_BAD_DBI
 /** @} */
 
 /** @brief Statistics for a database in the environment */
