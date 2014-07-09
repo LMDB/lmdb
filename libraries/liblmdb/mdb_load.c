@@ -239,7 +239,7 @@ badend:
 				if (c2[1] == '\\') {
 					c1++; c2 += 2;
 				} else {
-					if (c2+3 >= end || !isxdigit(c2[1]) || !isxdigit(c2[2])) {
+					if (c2+3 > end || !isxdigit(c2[1]) || !isxdigit(c2[2])) {
 						Eof = 1;
 						badend();
 						return EOF;
