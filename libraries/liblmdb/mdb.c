@@ -427,13 +427,14 @@ static txnid_t mdb_debug_start;
 	 *	Define this as 0 to compute the max from the page size.  511
 	 *	is default for backwards compat: liblmdb <= 0.9.10 can break
 	 *	when modifying a DB with keys/dupsort data bigger than its max.
+	 *	#MDB_DEVEL sets the default to 0.
 	 *
 	 *	Data items in an #MDB_DUPSORT database are also limited to
 	 *	this size, since they're actually keys of a sub-DB.  Keys and
 	 *	#MDB_DUPSORT data items must fit on a node in a regular page.
 	 */
 #ifndef MDB_MAXKEYSIZE
-#define MDB_MAXKEYSIZE	 511
+#define MDB_MAXKEYSIZE	 ((MDB_DEVEL) ? 0 : 511)
 #endif
 
 	/**	The maximum size of a key we can write to the environment. */
