@@ -782,7 +782,10 @@ int  mdb_env_get_fd(MDB_env *env, mdb_filehandle_t *fd);
 	 * This function should be called after #mdb_env_create() and before #mdb_env_open().
 	 * It may be called at later times if no transactions are active in
 	 * this process. Note that the library does not check for this condition,
-	 * the caller must ensure it explicitly.
+	 * the caller must ensure it explicitly. The new size takes effect
+	 * immediately for the current process but will not be persisted to
+	 * any others until a write transaction has been committed by the
+	 * current process.
 	 *
 	 * If the mapsize is changed by another process, #mdb_txn_begin() will
 	 * return #MDB_MAP_RESIZED. This function may be called with a size

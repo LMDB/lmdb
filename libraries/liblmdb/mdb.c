@@ -1071,6 +1071,8 @@ struct MDB_env {
 	HANDLE		me_mfd;			/**< just for writing the meta pages */
 	/** Failed to update the meta page. Probably an I/O error. */
 #define	MDB_FATAL_ERROR	0x80000000U
+	/** We're explicitly changing the mapsize. */
+#define	MDB_RESIZING	0x40000000U
 	/** Some fields are initialized. */
 #define	MDB_ENV_ACTIVE	0x20000000U
 	/** me_txkey is set */
@@ -2492,7 +2494,9 @@ mdb_txn_renew0(MDB_txn *txn)
 	}
 	txn->mt_dbflags[0] = txn->mt_dbflags[1] = DB_VALID;
 
-	if (env->me_maxpg < txn->mt_next_pgno) {
+	/* If we didn't ask for a resize, but the size changed, fail */
+	if (!(env->me_flags & MDB_RESIZING)
+		&& env->me_mapsize != meta->mm_mapsize) {
 		mdb_txn_reset0(txn, "renew0-mapfail");
 		if (new_notls) {
 			txn->mt_u.reader->mr_pid = 0;
@@ -3216,8 +3220,13 @@ mdb_txn_commit(MDB_txn *txn)
 	mdb_cursors_close(txn, 0);
 
 	if (!txn->mt_u.dirty_list[0].mid &&
-		!(txn->mt_flags & (MDB_TXN_DIRTY|MDB_TXN_SPILLS)))
+		!(txn->mt_flags & (MDB_TXN_DIRTY|MDB_TXN_SPILLS))) {
+		if ((env->me_flags & MDB_RESIZING)
+			&& (rc = mdb_env_write_meta(txn))) {
+			goto fail;
+		}
 		goto done;
+	}
 
 	DPRINTF(("committing txn %"Z"u %p on mdbenv %p, root page %"Z"u",
 	    txn->mt_txnid, (void*)txn, (void*)env, txn->mt_dbs[MAIN_DBI].md_root));
@@ -3431,9 +3440,11 @@ mdb_env_write_meta(MDB_txn *txn)
 	mp = env->me_metas[toggle];
 
 	if (env->me_flags & MDB_WRITEMAP) {
-		/* Persist any increases of mapsize config */
-		if (env->me_mapsize > mp->mm_mapsize)
+		/* Persist any changes of mapsize config */
+		if (env->me_flags & MDB_RESIZING) {
 			mp->mm_mapsize = env->me_mapsize;
+			env->me_flags ^= MDB_RESIZING;
+		}
 		mp->mm_dbs[0] = txn->mt_dbs[0];
 		mp->mm_dbs[1] = txn->mt_dbs[1];
 		mp->mm_last_pg = txn->mt_next_pgno - 1;
@@ -3461,10 +3472,11 @@ mdb_env_write_meta(MDB_txn *txn)
 	metab.mm_last_pg = env->me_metas[toggle]->mm_last_pg;
 
 	ptr = (char *)&meta;
-	if (env->me_mapsize > mp->mm_mapsize) {
-		/* Persist any increases of mapsize config */
+	if (env->me_flags & MDB_RESIZING) {
+		/* Persist any changes of mapsize config */
 		meta.mm_mapsize = env->me_mapsize;
 		off = offsetof(MDB_meta, mm_mapsize);
+		env->me_flags ^= MDB_RESIZING;
 	} else {
 		off = offsetof(MDB_meta, mm_dbs[0].md_depth);
 	}
@@ -3652,19 +3664,25 @@ mdb_env_set_mapsize(MDB_env *env, size_t size)
 	 * sure there are no active txns.
 	 */
 	if (env->me_map) {
-		int rc;
+		int rc, change = 0;
 		void *old;
 		if (env->me_txn)
 			return EINVAL;
 		if (!size)
 			size = env->me_metas[mdb_env_pick_meta(env)]->mm_mapsize;
-		else if (size < env->me_mapsize) {
-			/* If the configured size is smaller, make sure it's
-			 * still big enough. Silently round up to minimum if not.
-			 */
-			size_t minsize = (env->me_metas[mdb_env_pick_meta(env)]->mm_last_pg + 1) * env->me_psize;
-			if (size < minsize)
-				size = minsize;
+		else {
+			if (size < env->me_mapsize) {
+				/* If the configured size is smaller, make sure it's
+				 * still big enough. Silently round up to minimum if not.
+				 */
+				size_t minsize = (env->me_metas[mdb_env_pick_meta(env)]->mm_last_pg + 1) * env->me_psize;
+				if (size < minsize)
+					size = minsize;
+			}
+			/* nothing actually changed */
+			if (size == env->me_mapsize)
+				return MDB_SUCCESS;
+			change = 1;
 		}
 		munmap(env->me_map, env->me_mapsize);
 		env->me_mapsize = size;
@@ -3672,6 +3690,8 @@ mdb_env_set_mapsize(MDB_env *env, size_t size)
 		rc = mdb_env_map(env, old, 1);
 		if (rc)
 			return rc;
+		if (change)
+			env->me_flags |= MDB_RESIZING;
 	}
 	env->me_mapsize = size;
 	if (env->me_psize)
