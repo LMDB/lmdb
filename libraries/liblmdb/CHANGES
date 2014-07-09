@@ -2,8 +2,10 @@ LMDB 0.9 Change Log
 
 LMDB 0.9.14 Engineering
 	Fix to support 64K page size (ITS#7713)
+	Fix to persist decreased as well as increased mapsizes (ITS#7789)
 	Fix cursor bug when deleting last node of a DUPSORT key
 	Fix mdb_env_info to return FIXEDMAP address
+	Fix ambiguous error code from writing to closed DBI (ITS#7825)
 	Fix mdb_copy copying past end of file (ITS#7886)
 	Fix cursor bugs from page_merge/rebalance
 	Fix to dirty fewer pages in deletes (mdb_page_loose()
