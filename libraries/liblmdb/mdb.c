@@ -1259,6 +1259,14 @@ static char *const mdb_errstr[] = {
 char *
 mdb_strerror(int err)
 {
+#ifdef _WIN32
+	/** HACK: pad 4KB on stack over the buf. Return system msgs in buf.
+	 *	This works as long as no function between the call to mdb_strerror
+	 *	and the actual use of the message uses more than 4K of stack.
+	 */
+	char pad[4096];
+	char buf[1024], *ptr = buf;
+#endif
 	int i;
 	if (!err)
 		return ("Successful return: 0");
@@ -1268,7 +1276,32 @@ mdb_strerror(int err)
 		return mdb_errstr[i];
 	}
 
+#ifdef _WIN32
+	/* These are the C-runtime error codes we use. The comment indicates
+	 * their numeric value, and the Win32 error they would correspond to
+	 * if the error actually came from a Win32 API. A major mess, we should
+	 * have used LMDB-specific error codes for everything.
+	 */
+	switch(err) {
+	case ENOENT:	/* 2, FILE_NOT_FOUND */
+	case EIO:		/* 5, ACCESS_DENIED */
+	case ENOMEM:	/* 12, INVALID_ACCESS */
+	case EACCES:	/* 13, INVALID_DATA */
+	case EBUSY:		/* 16, CURRENT_DIRECTORY */
+	case EINVAL:	/* 22, BAD_COMMAND */
+	case ENOSPC:	/* 28, OUT_OF_PAPER */
+		return strerror(err);
+	default:
+		;
+	}
+	buf[0] = 0;
+	FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM |
+		FORMAT_MESSAGE_IGNORE_INSERTS,
+		NULL, err, 0, ptr, sizeof(buf), pad);
+	return ptr;
+#else
 	return strerror(err);
+#endif
 }
 
 /** assert(3) variant in cursor context */
@@ -2572,7 +2605,7 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 	}
 
 	if ((txn = calloc(1, size)) == NULL) {
-		DPRINTF(("calloc: %s", strerror(ErrCode())));
+		DPRINTF(("calloc: %s", strerror(errno)));
 		return ENOMEM;
 	}
 	txn->mt_dbs = (MDB_db *) ((char *)txn + tsize);
