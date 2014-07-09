@@ -8410,13 +8410,13 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
 #ifdef _WIN32
 	my.mc_mutex = CreateMutex(NULL, FALSE, NULL);
 	my.mc_cond = CreateEvent(NULL, FALSE, FALSE, NULL);
-	my.mc_wbuf[0] = _aligned_malloc(MDB_WBUF*2, env->me_psize);
+	my.mc_wbuf[0] = _aligned_malloc(MDB_WBUF*2, env->me_os_psize);
 	if (my.mc_wbuf[0] == NULL)
 		return errno;
 #else
 	pthread_mutex_init(&my.mc_mutex, NULL);
 	pthread_cond_init(&my.mc_cond, NULL);
-	rc = posix_memalign((void **)&my.mc_wbuf[0], env->me_psize, MDB_WBUF*2);
+	rc = posix_memalign((void **)&my.mc_wbuf[0], env->me_os_psize, MDB_WBUF*2);
 	if (rc)
 		return rc;
 #endif
@@ -8654,6 +8654,7 @@ mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
 		goto leave;
 	}
 
+	if (env->me_psize >= env->me_os_psize) {
 #ifdef O_DIRECT
 	/* Set O_DIRECT if the file system supports it */
 	if ((rc = fcntl(newfd, F_GETFL)) != -1)
@@ -8666,6 +8667,7 @@ mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
 		goto leave;
 	}
 #endif
+	}
 
 	rc = mdb_env_copyfd2(env, newfd, flags);
 
