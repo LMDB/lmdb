@@ -8445,6 +8445,7 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
 	if (rc)
 		return rc;
 #endif
+	memset(my.mc_wbuf[0], 0, MDB_WBUF*2);
 	my.mc_wbuf[1] = my.mc_wbuf[0] + MDB_WBUF;
 	my.mc_wlen[0] = 0;
 	my.mc_wlen[1] = 0;
