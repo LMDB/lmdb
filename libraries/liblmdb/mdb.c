@@ -172,7 +172,7 @@
  *	@{
  */
 
-/* Features under development */
+	/** Features under development */
 #ifndef MDB_DEVEL
 #define MDB_DEVEL 0
 #endif
