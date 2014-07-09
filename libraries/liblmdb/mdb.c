@@ -3635,7 +3635,7 @@ mdb_env_create(MDB_env **env)
 }
 
 static int ESECT
-mdb_env_map(MDB_env *env, void *addr, int newsize)
+mdb_env_map(MDB_env *env, void *addr)
 {
 	MDB_page *p;
 	unsigned int flags = env->me_flags;
@@ -3646,6 +3646,7 @@ mdb_env_map(MDB_env *env, void *addr, int newsize)
 	size_t msize;
 
 	if (flags & MDB_RDONLY) {
+		/* Don't set explicit map size, use whatever exists */
 		msize = 0;
 		sizelo = 0;
 		sizehi = 0;
@@ -3653,17 +3654,17 @@ mdb_env_map(MDB_env *env, void *addr, int newsize)
 		msize = env->me_mapsize;
 		sizelo = msize & 0xffffffff;
 		sizehi = msize >> 16 >> 16; /* only needed on Win64 */
-	}
 
-	/* Windows won't create mappings for zero length files.
-	 * Just allocate the maxsize right now.
-	 */
-	if (newsize) {
+		/* Windows won't create mappings for zero length files.
+		 * and won't map more than the file size.
+		 * Just set the maxsize right now.
+		 */
 		if (SetFilePointer(env->me_fd, sizelo, &sizehi, 0) != (DWORD)sizelo
 			|| !SetEndOfFile(env->me_fd)
 			|| SetFilePointer(env->me_fd, 0, NULL, 0) != 0)
 			return ErrCode();
 	}
+
 	mh = CreateFileMapping(env->me_fd, NULL, flags & MDB_WRITEMAP ?
 		PAGE_READWRITE : PAGE_READONLY,
 		sizehi, sizelo, NULL);
@@ -3747,7 +3748,7 @@ mdb_env_set_mapsize(MDB_env *env, size_t size)
 		munmap(env->me_map, env->me_mapsize);
 		env->me_mapsize = size;
 		old = (env->me_flags & MDB_FIXEDMAP) ? env->me_map : NULL;
-		rc = mdb_env_map(env, old, 1);
+		rc = mdb_env_map(env, old);
 		if (rc)
 			return rc;
 		if (change)
@@ -3837,7 +3838,7 @@ mdb_env_open2(MDB_env *env)
 			env->me_flags |= MDB_RESIZING;
 	}
 
-	rc = mdb_env_map(env, meta.mm_address, newenv || env->me_mapsize != meta.mm_mapsize);
+	rc = mdb_env_map(env, meta.mm_address);
 	if (rc)
 		return rc;
 
