@@ -3791,13 +3791,17 @@ mdb_env_open2(MDB_env *env)
 		 * else use the size recorded in the existing env.
 		 */
 		env->me_mapsize = newenv ? DEFAULT_MAPSIZE : meta.mm_mapsize;
-	} else if (env->me_mapsize < meta.mm_mapsize) {
-		/* If the configured size is smaller, make sure it's
-		 * still big enough. Silently round up to minimum if not.
-		 */
-		size_t minsize = (meta.mm_last_pg + 1) * meta.mm_psize;
-		if (env->me_mapsize < minsize)
-			env->me_mapsize = minsize;
+	} else {
+		if (env->me_mapsize < meta.mm_mapsize) {
+			/* If the configured size is smaller, make sure it's
+			 * still big enough. Silently round up to minimum if not.
+			 */
+			size_t minsize = (meta.mm_last_pg + 1) * meta.mm_psize;
+			if (env->me_mapsize < minsize)
+				env->me_mapsize = minsize;
+		}
+		if (env->me_mapsize != meta.mm_mapsize)
+			env->me_flags |= MDB_RESIZING;
 	}
 
 	rc = mdb_env_map(env, meta.mm_address, newenv || env->me_mapsize != meta.mm_mapsize);
