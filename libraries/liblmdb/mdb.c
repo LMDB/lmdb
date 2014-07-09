@@ -1241,7 +1241,7 @@ static char *const mdb_errstr[] = {
 	"MDB_TXN_FULL: Transaction has too many dirty pages - transaction too big",
 	"MDB_CURSOR_FULL: Internal error - cursor stack limit reached",
 	"MDB_PAGE_FULL: Internal error - page has no more space",
-	"MDB_MAP_RESIZED: Database contents grew beyond environment mapsize",
+	"MDB_MAP_RESIZED: Environment mapsize was changed by another process",
 	"MDB_INCOMPATIBLE: Operation and DB incompatible, or DB flags changed",
 	"MDB_BAD_RSLOT: Invalid reuse of reader locktable slot",
 	"MDB_BAD_TXN: Transaction cannot recover - it must be aborted",
