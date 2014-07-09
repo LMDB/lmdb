@@ -8893,7 +8893,9 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 		txn->mt_dbxs[slot].md_name.mv_size = len;
 		txn->mt_dbxs[slot].md_rel = NULL;
 		txn->mt_dbflags[slot] = dbflag;
-		txn->mt_dbiseqs[slot] = ++txn->mt_env->me_dbiseqs[slot];
+		/* read txns don't track sequence numbers */
+		if (!(txn->mt_flags & MDB_TXN_RDONLY))
+			txn->mt_dbiseqs[slot] = ++txn->mt_env->me_dbiseqs[slot];
 		memcpy(&txn->mt_dbs[slot], data.mv_data, sizeof(MDB_db));
 		*dbi = slot;
 		mdb_default_cmp(txn, slot);
