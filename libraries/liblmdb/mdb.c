@@ -2414,7 +2414,6 @@ mdb_txn_renew0(MDB_txn *txn)
 	/* Setup db info */
 	txn->mt_numdbs = env->me_numdbs;
 	txn->mt_dbxs = env->me_dbxs;	/* mostly static anyway */
-	memcpy(txn->mt_dbiseqs, env->me_dbiseqs, env->me_maxdbs * sizeof(unsigned int));
 
 	if (txn->mt_flags & MDB_TXN_RDONLY) {
 		if (!ti) {
@@ -2488,6 +2487,7 @@ mdb_txn_renew0(MDB_txn *txn)
 		txn->mt_free_pgs[0] = 0;
 		txn->mt_spill_pgs = NULL;
 		env->me_txn = txn;
+		memcpy(txn->mt_dbiseqs, env->me_dbiseqs, env->me_maxdbs * sizeof(unsigned int));
 	}
 
 	/* Copy the DB info and flags */
@@ -2563,22 +2563,22 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 		}
 		tsize = sizeof(MDB_ntxn);
 	}
-	size = tsize + env->me_maxdbs * (sizeof(MDB_db)+sizeof(unsigned int)+1);
+	size = tsize + env->me_maxdbs * (sizeof(MDB_db)+1);
 	if (!(flags & MDB_RDONLY))
-		size += env->me_maxdbs * sizeof(MDB_cursor *);
+		size += env->me_maxdbs * (sizeof(MDB_cursor *)+sizeof(unsigned int));
 
 	if ((txn = calloc(1, size)) == NULL) {
 		DPRINTF(("calloc: %s", strerror(ErrCode())));
 		return ENOMEM;
 	}
 	txn->mt_dbs = (MDB_db *) ((char *)txn + tsize);
-	txn->mt_dbiseqs = (unsigned int *) (txn->mt_dbs + env->me_maxdbs);
 	if (flags & MDB_RDONLY) {
 		txn->mt_flags |= MDB_TXN_RDONLY;
-		txn->mt_dbflags = (unsigned char *)(txn->mt_dbiseqs + env->me_maxdbs);
+		txn->mt_dbflags = (unsigned char *)(txn->mt_dbs + env->me_maxdbs);
 	} else {
-		txn->mt_cursors = (MDB_cursor **)(txn->mt_dbiseqs + env->me_maxdbs);
-		txn->mt_dbflags = (unsigned char *)(txn->mt_cursors + env->me_maxdbs);
+		txn->mt_cursors = (MDB_cursor **)(txn->mt_dbs + env->me_maxdbs);
+		txn->mt_dbiseqs = (unsigned int *)(txn->mt_cursors + env->me_maxdbs);
+		txn->mt_dbflags = (unsigned char *)(txn->mt_dbiseqs + env->me_maxdbs);
 	}
 	txn->mt_env = env;
 
