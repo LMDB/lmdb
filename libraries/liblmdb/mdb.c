@@ -3323,7 +3323,6 @@ mdb_txn_commit(MDB_txn *txn)
 #endif
 
 	if ((rc = mdb_page_flush(txn, 0)) ||
-		(rc = mdb_env_sync(env, 0)) ||
 		(rc = mdb_env_write_meta(txn)))
 		goto fail;
 
@@ -3480,7 +3479,7 @@ mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 static int
 mdb_env_write_meta(MDB_txn *txn)
 {
-	MDB_env *env;
+	MDB_env *env = txn->mt_env;
 	MDB_meta	meta, metab, *mp;
 	off_t off;
 	int rc, len, toggle;
@@ -3492,11 +3491,14 @@ mdb_env_write_meta(MDB_txn *txn)
 	int r2;
 #endif
 
+	/* Sync data and previous metapage before writing a new metapage */
+	if ((rc = mdb_env_sync(env, 0)) != MDB_SUCCESS)
+		return rc;
+
 	toggle = txn->mt_txnid & 1;
 	DPRINTF(("writing meta page %d for root page %"Z"u",
 		toggle, txn->mt_dbs[MAIN_DBI].md_root));
 
-	env = txn->mt_env;
 	mp = env->me_metas[toggle];
 
 	if (env->me_flags & MDB_WRITEMAP) {

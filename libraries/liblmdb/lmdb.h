@@ -411,7 +411,7 @@ typedef enum MDB_cursor_op {
 #define MDB_CURSOR_FULL	(-30787)
 	/** Page has not enough space - internal error */
 #define MDB_PAGE_FULL	(-30786)
-	/** Database contents grew beyond environment mapsize */
+	/** Environment mapsize was changed by another process */
 #define MDB_MAP_RESIZED	(-30785)
 	/** MDB_INCOMPATIBLE: Operation and DB incompatible, or DB flags changed */
 #define MDB_INCOMPATIBLE	(-30784)
