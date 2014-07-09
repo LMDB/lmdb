@@ -1248,7 +1248,7 @@ static char *const mdb_errstr[] = {
 	"MDB_TXN_FULL: Transaction has too many dirty pages - transaction too big",
 	"MDB_CURSOR_FULL: Internal error - cursor stack limit reached",
 	"MDB_PAGE_FULL: Internal error - page has no more space",
-	"MDB_MAP_RESIZED: Environment mapsize was changed by another process",
+	"MDB_MAP_RESIZED: Database contents grew beyond environment mapsize",
 	"MDB_INCOMPATIBLE: Operation and DB incompatible, or DB flags changed",
 	"MDB_BAD_RSLOT: Invalid reuse of reader locktable slot",
 	"MDB_BAD_TXN: Transaction cannot recover - it must be aborted",
@@ -2503,9 +2503,9 @@ mdb_txn_renew0(MDB_txn *txn)
 	}
 	txn->mt_dbflags[0] = txn->mt_dbflags[1] = DB_VALID;
 
-	/* If we didn't ask for a resize, but the size changed, fail */
+	/* If we didn't ask for a resize, but the size grew, fail */
 	if (!(env->me_flags & MDB_RESIZING)
-		&& env->me_mapsize != meta->mm_mapsize) {
+		&& env->me_mapsize < meta->mm_mapsize) {
 		mdb_txn_reset0(txn, "renew0-mapfail");
 		if (new_notls) {
 			txn->mt_u.reader->mr_pid = 0;
