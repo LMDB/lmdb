@@ -3841,7 +3841,7 @@ mdb_env_open2(MDB_env *env)
 			env->me_flags |= MDB_RESIZING;
 	}
 
-	rc = mdb_env_map(env, meta.mm_address);
+	rc = mdb_env_map(env, (flags & MDB_FIXEDMAP) ? meta.mm_address : NULL);
 	if (rc)
 		return rc;
 
