@@ -8,7 +8,7 @@ LMDB 0.9.14 Engineering
 	Fix ambiguous error code from writing to closed DBI (ITS#7825)
 	Fix mdb_copy copying past end of file (ITS#7886)
 	Fix cursor bugs from page_merge/rebalance
-	Fix to dirty fewer pages in deletes (mdb_page_loose()
+	Fix to dirty fewer pages in deletes (mdb_page_loose())
 	Fix Windows compat issues in mtests (ITS#7879)
 	Add compacting variant of mdb_copy
 	Add BigEndian integer key compare code
