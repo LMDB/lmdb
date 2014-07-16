@@ -2774,12 +2774,26 @@ mdb_txn_reset0(MDB_txn *txn, const char *act)
 		txn->mt_numdbs = 0;		/* close nothing if called again */
 		txn->mt_dbxs = NULL;	/* mark txn as reset */
 	} else {
+		pgno_t *pghead = env->me_pghead;
+		env->me_pghead = NULL;
+		env->me_pglast = 0;
+
+		if (!txn->mt_parent) {
+			if (mdb_midl_shrink(&txn->mt_free_pgs))
+				env->me_free_pgs = txn->mt_free_pgs;
+
+			env->me_txn = NULL;
+			/* The writer mutex was locked in mdb_txn_begin. */
+			if (env->me_txns)
+				UNLOCK_MUTEX_W(env);
+		}
+
 		mdb_cursors_close(txn, 0);
 
 		if (!(env->me_flags & MDB_WRITEMAP)) {
 			mdb_dlist_free(txn);
 		}
-		mdb_midl_free(env->me_pghead);
+		mdb_midl_free(pghead);
 
 		if (txn->mt_parent) {
 			txn->mt_parent->mt_child = NULL;
@@ -2787,18 +2801,7 @@ mdb_txn_reset0(MDB_txn *txn, const char *act)
 			mdb_midl_free(txn->mt_free_pgs);
 			mdb_midl_free(txn->mt_spill_pgs);
 			free(txn->mt_u.dirty_list);
-			return;
 		}
-
-		if (mdb_midl_shrink(&txn->mt_free_pgs))
-			env->me_free_pgs = txn->mt_free_pgs;
-		env->me_pghead = NULL;
-		env->me_pglast = 0;
-
-		env->me_txn = NULL;
-		/* The writer mutex was locked in mdb_txn_begin. */
-		if (env->me_txns)
-			UNLOCK_MUTEX_W(env);
 	}
 }
 
