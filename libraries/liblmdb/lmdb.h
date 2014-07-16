@@ -49,7 +49,9 @@
  *	  stale locks can block further operation.
  *
  *	  Fix: Check for stale readers periodically, using the
- *	  #mdb_reader_check function or the \ref mdb_stat_1 "mdb_stat" tool. Or just
+ *	  #mdb_reader_check function or the \ref mdb_stat_1 "mdb_stat" tool.
+ *	  Catch stale
+ *	  locks with option MDB_ROBUST if supported (non-BSD). Or just
  *	  make all programs using the database close it; the lockfile
  *	  is always reset on first open of the environment.
  *
@@ -105,6 +107,7 @@
  *	  The transaction becomes "long-lived" as above until a check
  *	  for stale readers is performed or the lockfile is reset,
  *	  since the process may not remove it from the lockfile.
+ *	  Except write-transactions on Unix with MDB_ROBUST or on Windows.
  *
  *	- If you do that anyway, do a periodic check for stale readers. Or
  *	  close the environment once in a while, so the lockfile can get reset.
@@ -287,6 +290,8 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
 #define MDB_NORDAHEAD	0x800000
 	/** don't initialize malloc'd memory before writing to datafile */
 #define MDB_NOMEMINIT	0x1000000
+	/** catch stale locks if supported (not on BSD, needs robust mutexes) */
+#define MDB_ROBUST		0x2000000
 /** @} */
 
 /**	@defgroup	mdb_dbi_open	Database Flags
@@ -391,7 +396,7 @@ typedef enum MDB_cursor_op {
 #define MDB_PAGE_NOTFOUND	(-30797)
 	/** Located page was wrong type */
 #define MDB_CORRUPTED	(-30796)
-	/** Update of meta page failed, probably I/O error */
+	/** Update of meta page failed or environment had fatal error */
 #define MDB_PANIC		(-30795)
 	/** Environment version mismatch */
 #define MDB_VERSION_MISMATCH	(-30794)
@@ -511,6 +516,12 @@ int  mdb_env_create(MDB_env **env);
 	 *		Open the environment in read-only mode. No write operations will be
 	 *		allowed. LMDB will still modify the lock file - except on read-only
 	 *		filesystems, where LMDB does not use locks.
+	 *	<li>#MDB_ROBUST
+	 *		Initialize the lockfile to catch stale locks if robust mutexes
+	 *		are supported, so aborted processes will not block others.
+	 *		Ignored when another process has the environment open. Unsupported
+	 *		by liblmdb built with MDB_USE_POSIX_SEM (such as BSD systems).
+	 *		Enabled by default on Windows. Some locking slowdown on Unix.
 	 *	<li>#MDB_WRITEMAP
 	 *		Use a writeable memory map unless MDB_RDONLY is set. This is faster
 	 *		and uses fewer mallocs, but loses protection from application bugs
@@ -727,6 +738,7 @@ void mdb_env_close(MDB_env *env);
 	 * This may be used to set some flags in addition to those from
 	 * #mdb_env_open(), or to unset these flags.  If several threads
 	 * change the flags at the same time, the result is undefined.
+	 * Most flags cannot be changed after #mdb_env_open().
 	 * @param[in] env An environment handle returned by #mdb_env_create()
 	 * @param[in] flags The flags to change, bitwise OR'ed together
 	 * @param[in] onoff A non-zero value sets the flags, zero clears them.
