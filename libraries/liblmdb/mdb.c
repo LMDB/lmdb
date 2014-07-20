@@ -2550,8 +2550,7 @@ mdb_txn_renew0(MDB_txn *txn)
 		}
 	} else {
 		if (ti) {
-			mdb_mutex_t wmutex = MDB_MUTEX(env, w);
-			if (LOCK_MUTEX(rc, env, wmutex))
+			if (LOCK_MUTEX(rc, env, MDB_MUTEX(env, w)))
 				return rc;
 
 			txn->mt_txnid = ti->mti_txnid;
@@ -9418,7 +9417,7 @@ static int mdb_reader_check0(MDB_env *env, int rlocked, int *dead)
 	mdb_mutex_t rmutex = rlocked ? NULL : MDB_MUTEX(env, r);
 	unsigned int i, j, rdrs;
 	MDB_reader *mr;
-	pid_t *pids, pid;
+	MDB_PID_T *pids, pid;
 	int rc = MDB_SUCCESS, count = 0;
 
 	rdrs = env->me_txns->mti_numreaders;
