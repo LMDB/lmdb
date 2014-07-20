@@ -2778,6 +2778,10 @@ mdb_txn_reset0(MDB_txn *txn, const char *act)
 		env->me_pghead = NULL;
 		env->me_pglast = 0;
 
+		if (!(env->me_flags & MDB_WRITEMAP)) {
+			mdb_dlist_free(txn);
+		}
+
 		if (!txn->mt_parent) {
 			if (mdb_midl_shrink(&txn->mt_free_pgs))
 				env->me_free_pgs = txn->mt_free_pgs;
@@ -2790,9 +2794,6 @@ mdb_txn_reset0(MDB_txn *txn, const char *act)
 
 		mdb_cursors_close(txn, 0);
 
-		if (!(env->me_flags & MDB_WRITEMAP)) {
-			mdb_dlist_free(txn);
-		}
 		mdb_midl_free(pghead);
 
 		if (txn->mt_parent) {
