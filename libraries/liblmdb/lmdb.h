@@ -727,6 +727,7 @@ void mdb_env_close(MDB_env *env);
 	 * This may be used to set some flags in addition to those from
 	 * #mdb_env_open(), or to unset these flags.  If several threads
 	 * change the flags at the same time, the result is undefined.
+	 * Most flags cannot be changed after #mdb_env_open().
 	 * @param[in] env An environment handle returned by #mdb_env_create()
 	 * @param[in] flags The flags to change, bitwise OR'ed together
 	 * @param[in] onoff A non-zero value sets the flags, zero clears them.
