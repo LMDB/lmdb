@@ -519,7 +519,7 @@ int  mdb_env_create(MDB_env **env);
 	 *	<li>#MDB_ROBUST
 	 *		Initialize the lockfile to catch stale locks if robust mutexes
 	 *		are supported, so aborted processes will not block others.
-	 *		Ignored when another process has the environment open, and
+	 *		Ignored when another process has the environment open. Unsupported
 	 *		by liblmdb built with MDB_USE_POSIX_SEM (such as BSD systems).
 	 *		Enabled by default on Windows. Some locking slowdown on Unix.
 	 *	<li>#MDB_WRITEMAP
