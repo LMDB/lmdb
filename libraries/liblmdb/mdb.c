@@ -643,6 +643,10 @@ typedef struct MDB_txbody {
 		 *	when readers release their slots.
 		 */
 	unsigned	mtb_numreaders;
+#ifdef MDB_ROBUST_SUPPORTED
+		/** Flags which the lock file was initialized with. */
+	unsigned	mtb_flags;
+#endif
 } MDB_txbody;
 
 	/** The actual reader table definition. */
@@ -655,6 +659,7 @@ typedef struct MDB_txninfo {
 #define mti_rmname	mt1.mtb.mtb_rmname
 #define mti_txnid	mt1.mtb.mtb_txnid
 #define mti_numreaders	mt1.mtb.mtb_numreaders
+#define mti_flags	mt1.mtb.mtb_flags
 		char pad[(sizeof(MDB_txbody)+CACHELINE-1) & ~(CACHELINE-1)];
 	} mt1;
 	union {
@@ -675,6 +680,7 @@ typedef struct MDB_txninfo {
 	((uint32_t) \
 	 ((MDB_LOCK_VERSION) \
 	  /* Flags which describe functionality */ \
+	  + (((ROBUST_FLAG) != 0) << 17) \
 	  + (((MDB_PIDLOCK) != 0) << 16)))
 /** @} */
 
@@ -4288,6 +4294,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		if (!env->me_rmutex) goto fail_errno;
 		env->me_wmutex = CreateMutex(&mdb_all_sa, FALSE, env->me_txns->mti_wmname);
 		if (!env->me_wmutex) goto fail_errno;
+		env->me_flags |= MDB_ROBUST;
 #elif defined(MDB_USE_POSIX_SEM)
 		struct stat stbuf;
 		struct {
@@ -4341,6 +4348,11 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		env->me_txns->mti_format = MDB_LOCK_FORMAT;
 		env->me_txns->mti_txnid = 0;
 		env->me_txns->mti_numreaders = 0;
+#ifdef MDB_ROBUST_SUPPORTED
+		env->me_txns->mti_flags = env->me_flags;
+#else
+		env->me_flags &= ~MDB_ROBUST;
+#endif
 
 	} else {
 		if (env->me_txns->mti_magic != MDB_MAGIC) {
@@ -4358,6 +4370,10 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		if (rc && rc != EACCES && rc != EAGAIN) {
 			goto fail;
 		}
+#ifdef MDB_ROBUST_SUPPORTED
+		env->me_flags = (env->me_flags & ~MDB_ROBUST) |
+			(env->me_txns->mti_flags & MDB_ROBUST);
+#endif
 #ifdef _WIN32
 		env->me_rmutex = OpenMutex(SYNCHRONIZE, FALSE, env->me_txns->mti_rmname);
 		if (!env->me_rmutex) goto fail_errno;
