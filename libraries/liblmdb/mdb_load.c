@@ -66,7 +66,7 @@ flagbit dbflags[] = {
 
 static const char hexc[] = "0123456789abcdef";
 
-static void readhdr()
+static void readhdr(void)
 {
 	char *ptr;
 
@@ -155,7 +155,7 @@ static void readhdr()
 	}
 }
 
-static void badend()
+static void badend(void)
 {
 	fprintf(stderr, "%s: line %" Z "d: unexpected end of input\n",
 		prog, lineno);
@@ -274,7 +274,7 @@ badend:
 	return 0;
 }
 
-static void usage()
+static void usage(void)
 {
 	fprintf(stderr, "usage: %s dbpath [-V] [-f input] [-n] [-s name] [-N] [-T]\n", prog);
 	exit(EXIT_FAILURE);
@@ -294,7 +294,7 @@ int main(int argc, char *argv[])
 	prog = argv[0];
 
 	if (argc < 2) {
-		usage(prog);
+		usage();
 	}
 
 	/* -f: load file instead of stdin
@@ -330,12 +330,12 @@ int main(int argc, char *argv[])
 			mode |= NOHDR;
 			break;
 		default:
-			usage(prog);
+			usage();
 		}
 	}
 
 	if (optind != argc - 1)
-		usage(prog);
+		usage();
 
 	dbuf.mv_size = 4096;
 	dbuf.mv_data = malloc(dbuf.mv_size);
