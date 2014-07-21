@@ -177,6 +177,10 @@
 #define MDB_DEVEL 0
 #endif
 
+#if MDB_DEVEL && (defined(_WIN32) || (defined(EOWNERDEAD) && !defined(MDB_USE_POSIX_SEM)))
+#define MDB_ROBUST_SUPPORTED	1
+#endif
+
 	/** Wrapper around __func__, which is a C99 feature */
 #if __STDC_VERSION__ >= 199901L
 # define mdb_func_	__func__
@@ -202,6 +206,7 @@ typedef HANDLE mdb_mutex_t;
 #define pthread_key_delete(x)	TlsFree(x)
 #define pthread_getspecific(x)	TlsGetValue(x)
 #define pthread_setspecific(x,y)	(TlsSetValue(x,y) ? 0 : ErrCode())
+#define pthread_mutex_consistent(mutex) 0
 #define pthread_mutex_unlock(x)	ReleaseMutex(*x)
 #define pthread_mutex_lock(x)	WaitForSingleObject(*x, INFINITE)
 #define pthread_cond_signal(x)	SetEvent(*x)
@@ -256,6 +261,7 @@ typedef pthread_mutex_t *mdb_mutex_t;
 	 */
 #define MDB_MUTEX(env, rw)	(&(env)->me_txns->mti_##rw##mutex)
 	/** Lock the reader or writer mutex.
+	 *	Returns 0 or a code to give #mdb_mutex_failed(), as in #LOCK_MUTEX().
 	 */
 #define LOCK_MUTEX0(mutex)	pthread_mutex_lock(mutex)
 	/** Unlock the reader or writer mutex.
@@ -294,7 +300,18 @@ typedef pthread_mutex_t *mdb_mutex_t;
 
 /** @} */
 
+#ifdef MDB_ROBUST_SUPPORTED
+	/** Lock mutex, handle any error, set rc = result.
+	 *	Return 0 on success, nonzero (not rc) on error.
+	 */
+#define LOCK_MUTEX(rc, env, mutex) \
+	(((rc) = LOCK_MUTEX0(mutex)) && \
+	 ((rc) = mdb_mutex_failed(env, mutex, rc)))
+static int mdb_mutex_failed(MDB_env *env, mdb_mutex_t mutex, int rc);
+#else
 #define LOCK_MUTEX(rc, env, mutex) ((rc) = LOCK_MUTEX0(mutex))
+#define mdb_mutex_failed(env, mutex, rc) (rc)
+#endif
 
 #ifndef _WIN32
 /**	A flag for opening a file and requesting synchronous data writes.
@@ -1211,6 +1228,7 @@ static void	mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node);
 
 static int	mdb_drop0(MDB_cursor *mc, int subs);
 static void mdb_default_cmp(MDB_txn *txn, MDB_dbi dbi);
+static int mdb_reader_check0(MDB_env *env, int rlocked, int *dead);
 
 /** @cond */
 static MDB_cmp_func	mdb_cmp_memn, mdb_cmp_memnr, mdb_cmp_int, mdb_cmp_cint, mdb_cmp_long;
@@ -1238,7 +1256,7 @@ static char *const mdb_errstr[] = {
 	"MDB_NOTFOUND: No matching key/data pair found",
 	"MDB_PAGE_NOTFOUND: Requested page not found",
 	"MDB_CORRUPTED: Located page was wrong type",
-	"MDB_PANIC: Update of meta page failed",
+	"MDB_PANIC: Update of meta page failed or environment had fatal error",
 	"MDB_VERSION_MISMATCH: Database environment version mismatch",
 	"MDB_INVALID: File is not an LMDB file",
 	"MDB_MAP_FULL: Environment mapsize limit reached",
@@ -4304,6 +4322,10 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 
 		if ((rc = pthread_mutexattr_init(&mattr))
 			|| (rc = pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED))
+#ifdef MDB_ROBUST_SUPPORTED
+			|| ((env->me_flags & MDB_ROBUST) &&
+				(rc = pthread_mutexattr_setrobust(&mattr, PTHREAD_MUTEX_ROBUST)))
+#endif
 			|| (rc = pthread_mutex_init(&env->me_txns->mti_rmutex, &mattr))
 			|| (rc = pthread_mutex_init(&env->me_txns->mti_wmutex, &mattr)))
 			goto fail;
@@ -4362,8 +4384,8 @@ fail:
 	 *	environment and re-opening it with the new flags.
 	 */
 #define	CHANGEABLE	(MDB_NOSYNC|MDB_NOMETASYNC|MDB_MAPASYNC|MDB_NOMEMINIT)
-#define	CHANGELESS	(MDB_FIXEDMAP|MDB_NOSUBDIR|MDB_RDONLY|MDB_WRITEMAP| \
-	MDB_NOTLS|MDB_NOLOCK|MDB_NORDAHEAD)
+#define	CHANGELESS	(MDB_FIXEDMAP|MDB_NOSUBDIR|MDB_RDONLY|MDB_ROBUST| \
+	MDB_WRITEMAP|MDB_NOTLS|MDB_NOLOCK|MDB_NORDAHEAD)
 
 #if VALID_FLAGS & PERSISTENT_FLAGS & (CHANGEABLE|CHANGELESS)
 # error "Persistent DB flags & env flags overlap, but both go in mm_flags"
@@ -9273,17 +9295,22 @@ mdb_pid_insert(MDB_PID_T *ids, MDB_PID_T pid)
 int ESECT
 mdb_reader_check(MDB_env *env, int *dead)
 {
+	if (!env)
+		return EINVAL;
+	if (dead)
+		*dead = 0;
+	return env->me_txns ? mdb_reader_check0(env, 0, dead) : MDB_SUCCESS;
+}
+
+/** As #mdb_reader_check(). rlocked = <caller locked the reader mutex>. */
+static int mdb_reader_check0(MDB_env *env, int rlocked, int *dead)
+{
+	mdb_mutex_t rmutex = rlocked ? NULL : MDB_MUTEX(env, r);
 	unsigned int i, j, rdrs;
 	MDB_reader *mr;
 	MDB_PID_T *pids, pid;
 	int rc = MDB_SUCCESS, count = 0;
 
-	if (!env)
-		return EINVAL;
-	if (dead)
-		*dead = 0;
-	if (!env->me_txns)
-		return MDB_SUCCESS;
 	rdrs = env->me_txns->mti_numreaders;
 	pids = malloc((rdrs+1) * sizeof(MDB_PID_T));
 	if (!pids)
@@ -9291,24 +9318,32 @@ mdb_reader_check(MDB_env *env, int *dead)
 	pids[0] = 0;
 	mr = env->me_txns->mti_readers;
 	for (i=0; i<rdrs; i++) {
-		if (mr[i].mr_pid && mr[i].mr_pid != env->me_pid) {
-			pid = mr[i].mr_pid;
+		pid = mr[i].mr_pid;
+		if (pid && pid != env->me_pid) {
 			if (mdb_pid_insert(pids, pid) == 0) {
 				if (!mdb_reader_pid(env, Pidcheck, pid)) {
-					mdb_mutex_t rmutex = MDB_MUTEX(env, r);
-					if (LOCK_MUTEX(rc, env, rmutex))
-						break;
-					/* Recheck, a new process may have reused pid */
-					if (!mdb_reader_pid(env, Pidcheck, pid)) {
-						for (j=i; j<rdrs; j++)
+					/* Stale reader found */
+					j = i;
+					if (rmutex) {
+						if ((rc = LOCK_MUTEX0(rmutex)) != 0) {
+							if ((rc = mdb_mutex_failed(env, rmutex, rc)))
+								break;
+							rdrs = 0; /* the above checked all readers */
+						} else {
+							/* Recheck, a new process may have reused pid */
+							if (mdb_reader_pid(env, Pidcheck, pid))
+								j = rdrs;
+						}
+					}
+					for (; j<rdrs; j++)
 							if (mr[j].mr_pid == pid) {
 								DPRINTF(("clear stale reader pid %u txn %"Z"d",
 									(unsigned) pid, mr[j].mr_txnid));
 								mr[j].mr_pid = 0;
 								count++;
 							}
-					}
-					UNLOCK_MUTEX(rmutex);
+					if (rmutex)
+						UNLOCK_MUTEX(rmutex);
 				}
 			}
 		}
@@ -9318,4 +9353,56 @@ mdb_reader_check(MDB_env *env, int *dead)
 		*dead = count;
 	return rc;
 }
+
+#ifdef MDB_ROBUST_SUPPORTED
+/** Handle #LOCK_MUTEX0() failure.
+ * With #MDB_ROBUST, try to repair the lock file if the mutex owner died.
+ * @param[in] env	the environment handle
+ * @param[in] mutex	LOCK_MUTEX0() mutex
+ * @param[in] rc	LOCK_MUTEX0() error (nonzero)
+ * @return 0 on success with the mutex locked, or an error code on failure.
+ */
+static int mdb_mutex_failed(MDB_env *env, mdb_mutex_t mutex, int rc)
+{
+	int toggle, rlocked, rc2;
+#ifndef _WIN32
+	enum { WAIT_ABANDONED = EOWNERDEAD };
+#endif
+
+	if (rc == (int) WAIT_ABANDONED) {
+		/* We own the mutex. Clean up after dead previous owner. */
+		rc = MDB_SUCCESS;
+		rlocked = (mutex == MDB_MUTEX(env, r));
+		if (!rlocked) {
+			/* Keep mti_txnid updated, otherwise next writer can
+			 * overwrite data which latest meta page refers to.
+			 */
+			toggle = mdb_env_pick_meta(env);
+			env->me_txns->mti_txnid = env->me_metas[toggle]->mm_txnid;
+			/* env is hosed if the dead thread was ours */
+			if (env->me_txn) {
+				env->me_flags |= MDB_FATAL_ERROR;
+				env->me_txn = NULL;
+				rc = MDB_PANIC;
+			}
+		}
+		DPRINTF(("%cmutex owner died, %s", (rlocked ? 'r' : 'w'),
+			(rc ? "this process' env is hosed" : "recovering")));
+		rc2 = mdb_reader_check0(env, rlocked, NULL);
+		if (rc2 == 0)
+			rc2 = pthread_mutex_consistent(mutex);
+		if (rc || (rc = rc2)) {
+			DPRINTF(("LOCK_MUTEX recovery failed, %s", mdb_strerror(rc)));
+			UNLOCK_MUTEX(mutex);
+		}
+	} else {
+#ifdef _WIN32
+		rc = ErrCode();
+#endif
+		DPRINTF(("LOCK_MUTEX failed, %s", mdb_strerror(rc)));
+	}
+
+	return rc;
+}
+#endif	/* MDB_ROBUST_SUPPORTED */
 /** @} */
