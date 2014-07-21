@@ -180,6 +180,11 @@
 #if MDB_DEVEL && (defined(_WIN32) || (defined(EOWNERDEAD) && !defined(MDB_USE_POSIX_SEM)))
 #define MDB_ROBUST_SUPPORTED	1
 #endif
+#ifdef MDB_ROBUST_SUPPORTED
+#define ROBUST_FLAG MDB_ROBUST
+#else
+#define ROBUST_FLAG 0
+#endif
 
 	/** Wrapper around __func__, which is a C99 feature */
 #if __STDC_VERSION__ >= 199901L
