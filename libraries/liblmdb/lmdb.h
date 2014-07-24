@@ -787,7 +787,13 @@ int  mdb_env_get_fd(MDB_env *env, mdb_filehandle_t *fd);
 	 * this process. Note that the library does not check for this condition,
 	 * the caller must ensure it explicitly.
 	 *
-	 * If the mapsize is changed by another process, #mdb_txn_begin() will
+	 * The new size takes effect immediately for the current process but
+	 * will not be persisted to any others until a write transaction has been
+	 * committed by the current process. Also, only mapsize increases are
+	 * persisted into the environment.
+	 *
+	 * If the mapsize is increased by another process, and data has grown
+	 * beyond the range of the current mapsize, #mdb_txn_begin() will
 	 * return #MDB_MAP_RESIZED. This function may be called with a size
 	 * of zero to adopt the new size.
 	 *
