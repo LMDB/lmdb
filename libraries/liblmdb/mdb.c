@@ -3474,6 +3474,7 @@ mdb_env_write_meta(MDB_txn *txn)
 {
 	MDB_env *env;
 	MDB_meta	meta, metab, *mp;
+	size_t mapsize;
 	off_t off;
 	int rc, len, toggle;
 	char *ptr;
@@ -3490,11 +3491,13 @@ mdb_env_write_meta(MDB_txn *txn)
 
 	env = txn->mt_env;
 	mp = env->me_metas[toggle];
+	mapsize = env->me_metas[toggle ^ 1]->mm_mapsize;
+	/* Persist any increases of mapsize config */
+	if (mapsize < env->me_mapsize)
+		mapsize = env->me_mapsize;
 
 	if (env->me_flags & MDB_WRITEMAP) {
-		/* Persist any increases of mapsize config */
-		if (env->me_mapsize > mp->mm_mapsize)
-			mp->mm_mapsize = env->me_mapsize;
+		mp->mm_mapsize = mapsize;
 		mp->mm_dbs[0] = txn->mt_dbs[0];
 		mp->mm_dbs[1] = txn->mt_dbs[1];
 		mp->mm_last_pg = txn->mt_next_pgno - 1;
@@ -3521,22 +3524,15 @@ mdb_env_write_meta(MDB_txn *txn)
 	metab.mm_txnid = env->me_metas[toggle]->mm_txnid;
 	metab.mm_last_pg = env->me_metas[toggle]->mm_last_pg;
 
-	ptr = (char *)&meta;
-	if (env->me_mapsize > mp->mm_mapsize) {
-		/* Persist any increases of mapsize config */
-		meta.mm_mapsize = env->me_mapsize;
-		off = offsetof(MDB_meta, mm_mapsize);
-	} else {
-		off = offsetof(MDB_meta, mm_dbs[0].md_depth);
-	}
-	len = sizeof(MDB_meta) - off;
-
-	ptr += off;
+	meta.mm_mapsize = mapsize;
 	meta.mm_dbs[0] = txn->mt_dbs[0];
 	meta.mm_dbs[1] = txn->mt_dbs[1];
 	meta.mm_last_pg = txn->mt_next_pgno - 1;
 	meta.mm_txnid = txn->mt_txnid;
 
+	off = offsetof(MDB_meta, mm_mapsize);
+	ptr = (char *)&meta + off;
+	len = sizeof(MDB_meta) - off;
 	if (toggle)
 		off += env->me_psize;
 	off += PAGEHDRSZ;
