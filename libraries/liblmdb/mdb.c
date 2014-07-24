@@ -6962,6 +6962,9 @@ mdb_cursor_count(MDB_cursor *mc, size_t *countp)
 	if (!(mc->mc_flags & C_INITIALIZED))
 		return EINVAL;
 
+	if (!mc->mc_snum || (mc->mc_flags & C_EOF))
+		return MDB_NOTFOUND;
+
 	leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
 	if (!F_ISSET(leaf->mn_flags, F_DUPDATA)) {
 		*countp = 1;
