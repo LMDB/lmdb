@@ -70,6 +70,15 @@
 #include <fcntl.h>
 #endif
 
+#if defined(__mips) && defined(__linux)
+/* MIPS has cache coherency issues, requires explicit cache control */
+#include <asm/cachectl.h>
+extern int cacheflush(char *addr, int nbytes, int cache);
+#define CACHEFLUSH(addr, bytes, cache)	cacheflush(addr, bytes, cache)
+#else
+#define CACHEFLUSH(addr, bytes, cache)
+#endif
+
 #include <errno.h>
 #include <limits.h>
 #include <stddef.h>
@@ -3580,6 +3589,11 @@ done:
 	 */
 	if (env->me_txns)
 		env->me_txns->mti_txnid = txn->mt_txnid;
+
+	/* MIPS has cache coherency issues, this is a no-op everywhere else */
+	if (!(env->me_flags & MDB_WRITEMAP)) {
+		CACHEFLUSH(env->me_map, txn->mt_next_pgno * env->me_psize, DCACHE);
+	}
 
 	return MDB_SUCCESS;
 }
