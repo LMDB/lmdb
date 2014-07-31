@@ -5355,8 +5355,10 @@ mdb_cursor_prev(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 			if (op == MDB_PREV || op == MDB_PREV_DUP) {
 				rc = mdb_cursor_prev(&mc->mc_xcursor->mx_cursor, data, NULL, MDB_PREV);
 				if (op != MDB_PREV || rc != MDB_NOTFOUND) {
-					if (rc == MDB_SUCCESS)
+					if (rc == MDB_SUCCESS) {
 						MDB_GET_KEY(leaf, key);
+						mc->mc_flags &= ~C_EOF;
+					}
 					return rc;
 				}
 			} else {
@@ -5832,6 +5834,15 @@ fetchm:
 		if (mc->mc_xcursor == NULL) {
 			rc = MDB_INCOMPATIBLE;
 			break;
+		}
+		{
+			MDB_node *leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
+			if (!F_ISSET(leaf->mn_flags, F_DUPDATA)) {
+				MDB_GET_KEY(leaf, key);
+				if (data)
+					rc = mdb_node_read(mc->mc_txn, leaf, data);
+				break;
+			}
 		}
 		if (!(mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED)) {
 			rc = EINVAL;
