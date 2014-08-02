@@ -3581,6 +3581,10 @@ fail:
 		return rc;
 	}
 done:
+	/* MIPS has cache coherency issues, this is a no-op everywhere else */
+	if (!(env->me_flags & MDB_WRITEMAP)) {
+		CACHEFLUSH(env->me_map, txn->mt_next_pgno * env->me_psize, DCACHE);
+	}
 	/* Memory ordering issues are irrelevant; since the entire writer
 	 * is wrapped by wmutex, all of these changes will become visible
 	 * after the wmutex is unlocked. Since the DB is multi-version,
@@ -3589,11 +3593,6 @@ done:
 	 */
 	if (env->me_txns)
 		env->me_txns->mti_txnid = txn->mt_txnid;
-
-	/* MIPS has cache coherency issues, this is a no-op everywhere else */
-	if (!(env->me_flags & MDB_WRITEMAP)) {
-		CACHEFLUSH(env->me_map, txn->mt_next_pgno * env->me_psize, DCACHE);
-	}
 
 	return MDB_SUCCESS;
 }
