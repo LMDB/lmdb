@@ -6063,7 +6063,9 @@ fix_parent:
 			if (mc->mc_top && !mc->mc_ki[mc->mc_top]) {
 				unsigned short top = mc->mc_top;
 				mc->mc_top--;
-				/* slot 0 is always an empty key, needs no update */
+				/* slot 0 is always an empty key, find real slot */
+				while (mc->mc_top && !mc->mc_ki[mc->mc_top])
+					mc->mc_top--;
 				if (mc->mc_ki[mc->mc_top])
 					rc2 = mdb_update_key(mc, key);
 				else
