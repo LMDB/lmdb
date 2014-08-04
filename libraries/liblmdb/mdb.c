@@ -6056,6 +6056,22 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 				return MDB_BAD_VALSIZE;
 			ptr = LEAF2KEY(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top], ksize);
 			memcpy(ptr, key->mv_data, ksize);
+fix_parent:
+			/* if overwriting slot 0 of leaf, need to
+			 * update branch key if there is a parent page
+			 */
+			if (mc->mc_top && !mc->mc_ki[mc->mc_top]) {
+				unsigned short top = mc->mc_top;
+				mc->mc_top--;
+				/* slot 0 is always an empty key, needs no update */
+				if (mc->mc_ki[mc->mc_top])
+					rc2 = mdb_update_key(mc, key);
+				else
+					rc2 = MDB_SUCCESS;
+				mc->mc_top = top;
+				if (rc2)
+					return rc2;
+			}
 			return MDB_SUCCESS;
 		}
 
@@ -6261,8 +6277,10 @@ current:
 				data->mv_data = olddata.mv_data;
 			else if (!(mc->mc_flags & C_SUB))
 				memcpy(olddata.mv_data, data->mv_data, data->mv_size);
-			else
+			else {
 				memcpy(NODEKEY(leaf), key->mv_data, key->mv_size);
+				goto fix_parent;
+			}
 			return MDB_SUCCESS;
 		}
 		mdb_node_del(mc, 0);
