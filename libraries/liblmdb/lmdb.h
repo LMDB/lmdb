@@ -1410,7 +1410,10 @@ int  mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	 * <ul>
 	 *	<li>#MDB_CURRENT - replace the item at the current cursor position.
 	 *		The \b key parameter must still be provided, and must match it.
-	 *		So must \b data if using sorted duplicates (#MDB_DUPSORT).
+	 *		If using sorted duplicates (#MDB_DUPSORT) the data item must still
+	 *		sort into the same place. This is intended to be used when the
+	 *		new data is the same size as the old. Otherwise it will simply
+	 *		perform a delete of the old record followed by an insert.
 	 *	<li>#MDB_NODUPDATA - enter the new key/data pair only if it does not
 	 *		already appear in the database. This flag may only be specified
 	 *		if the database was opened with #MDB_DUPSORT. The function will
