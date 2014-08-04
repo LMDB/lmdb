@@ -3110,6 +3110,12 @@ mdb_page_flush(MDB_txn *txn, int keep)
 #endif	/* _WIN32 */
 	}
 
+	/* MIPS has cache coherency issues, this is a no-op everywhere else
+	 * Note: for any size >= on-chip cache size, entire on-chip cache is
+	 * flushed.
+	 */
+	CACHEFLUSH(env->me_map, txn->mt_next_pgno * env->me_psize, DCACHE);
+
 	for (i = keep; ++i <= pagecount; ) {
 		dp = dl[i].mptr;
 		/* This is a page we skipped above */
@@ -3583,7 +3589,7 @@ fail:
 done:
 	/* MIPS has cache coherency issues, this is a no-op everywhere else */
 	if (!(env->me_flags & MDB_WRITEMAP)) {
-		CACHEFLUSH(env->me_map, txn->mt_next_pgno * env->me_psize, DCACHE);
+		CACHEFLUSH(env->me_map + off, len, DCACHE);
 	}
 	/* Memory ordering issues are irrelevant; since the entire writer
 	 * is wrapped by wmutex, all of these changes will become visible
