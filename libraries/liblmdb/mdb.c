@@ -85,6 +85,7 @@ extern int cacheflush(char *addr, int nbytes, int cache);
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <malloc.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
@@ -8469,9 +8470,9 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
 #else
 	pthread_mutex_init(&my.mc_mutex, NULL);
 	pthread_cond_init(&my.mc_cond, NULL);
-	rc = posix_memalign((void **)&my.mc_wbuf[0], env->me_os_psize, MDB_WBUF*2);
-	if (rc)
-		return rc;
+	my.mc_wbuf[0] = memalign(env->me_os_psize, MDB_WBUF*2);
+	if (my.mc_wbuf[0] == NULL)
+		return errno;
 #endif
 	memset(my.mc_wbuf[0], 0, MDB_WBUF*2);
 	my.mc_wbuf[1] = my.mc_wbuf[0] + MDB_WBUF;
