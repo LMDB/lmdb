@@ -8892,6 +8892,7 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 	MDB_val key, data;
 	MDB_dbi i;
 	MDB_cursor mc;
+	MDB_db dummy;
 	int rc, dbflag, exact;
 	unsigned int unused = 0, seq;
 	size_t len;
@@ -8961,7 +8962,6 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 			return MDB_INCOMPATIBLE;
 	} else if (rc == MDB_NOTFOUND && (flags & MDB_CREATE)) {
 		/* Create if requested */
-		MDB_db dummy;
 		data.mv_size = sizeof(MDB_db);
 		data.mv_data = &dummy;
 		memset(&dummy, 0, sizeof(dummy));
