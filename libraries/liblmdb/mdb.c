@@ -1634,10 +1634,11 @@ mdb_page_loose(MDB_cursor *mc, MDB_page *mp)
 {
 	int loose = 0;
 	pgno_t pgno = mp->mp_pgno;
+	MDB_txn *txn = mc->mc_txn;
 
 	if ((mp->mp_flags & P_DIRTY) && mc->mc_dbi != FREE_DBI) {
-		if (mc->mc_txn->mt_parent) {
-			MDB_ID2 *dl = mc->mc_txn->mt_u.dirty_list;
+		if (txn->mt_parent) {
+			MDB_ID2 *dl = txn->mt_u.dirty_list;
 			/* If txn has a parent, make sure the page is in our
 			 * dirty list.
 			 */
@@ -1646,7 +1647,7 @@ mdb_page_loose(MDB_cursor *mc, MDB_page *mp)
 				if (x <= dl[0].mid && dl[x].mid == pgno) {
 					if (mp != dl[x].mptr) { /* bad cursor? */
 						mc->mc_flags &= ~(C_INITIALIZED|C_EOF);
-						mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
+						txn->mt_flags |= MDB_TXN_ERROR;
 						return MDB_CORRUPTED;
 					}
 					/* ok, it's ours */
@@ -1661,12 +1662,12 @@ mdb_page_loose(MDB_cursor *mc, MDB_page *mp)
 	if (loose) {
 		DPRINTF(("loosen db %d page %"Z"u", DDBI(mc),
 			mp->mp_pgno));
-		NEXT_LOOSE_PAGE(mp) = mc->mc_txn->mt_loose_pgs;
-		mc->mc_txn->mt_loose_pgs = mp;
-		mc->mc_txn->mt_loose_count++;
+		NEXT_LOOSE_PAGE(mp) = txn->mt_loose_pgs;
+		txn->mt_loose_pgs = mp;
+		txn->mt_loose_count++;
 		mp->mp_flags |= P_LOOSE;
 	} else {
-		int rc = mdb_midl_append(&mc->mc_txn->mt_free_pgs, pgno);
+		int rc = mdb_midl_append(&txn->mt_free_pgs, pgno);
 		if (rc)
 			return rc;
 	}
@@ -2827,7 +2828,7 @@ mdb_freelist_save(MDB_txn *txn)
 			return rc;
 	}
 
-	if (!env->me_pghead) {
+	if (!env->me_pghead && txn->mt_loose_pgs) {
 		/* Put loose page numbers in mt_free_pgs, since
 		 * we may be unable to return them to me_pghead.
 		 */
