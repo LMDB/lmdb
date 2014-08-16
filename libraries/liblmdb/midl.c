@@ -199,6 +199,20 @@ int mdb_midl_append_range( MDB_IDL *idp, MDB_ID id, unsigned n )
 	return 0;
 }
 
+void mdb_midl_xmerge( MDB_IDL idl, MDB_IDL merge )
+{
+	MDB_ID old_id, merge_id, i = merge[0], j = idl[0], k = i+j, total = k;
+	idl[0] = (MDB_ID)-1;		/* delimiter for idl scan below */
+	old_id = idl[j];
+	while (i) {
+		merge_id = merge[i--];
+		for (; old_id < merge_id; old_id = idl[--j])
+			idl[k--] = old_id;
+		idl[k--] = merge_id;
+	}
+	idl[0] = total;
+}
+
 /* Quicksort + Insertion sort for small arrays */
 
 #define SMALL	8

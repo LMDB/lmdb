@@ -1940,7 +1940,7 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 	MDB_txn *txn = mc->mc_txn;
 	MDB_env *env = txn->mt_env;
 	pgno_t pgno, *mop = env->me_pghead;
-	unsigned i, j, k, mop_len = mop ? mop[0] : 0, n2 = num-1;
+	unsigned i, j, mop_len = mop ? mop[0] : 0, n2 = num-1;
 	MDB_page *np;
 	txnid_t oldest = 0, last;
 	MDB_cursor_op op;
@@ -1967,7 +1967,7 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 	for (op = MDB_FIRST;; op = MDB_NEXT) {
 		MDB_val key, data;
 		MDB_node *leaf;
-		pgno_t *idl, old_id, new_id;
+		pgno_t *idl;
 
 		/* Seek a big enough contiguous page range. Prefer
 		 * pages at the tail, just truncating the list.
@@ -2033,21 +2033,12 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 #if (MDB_DEBUG) > 1
 		DPRINTF(("IDL read txn %"Z"u root %"Z"u num %u",
 			last, txn->mt_dbs[FREE_DBI].md_root, i));
-		for (k = i; k; k--)
-			DPRINTF(("IDL %"Z"u", idl[k]));
+		for (j = i; j; j--)
+			DPRINTF(("IDL %"Z"u", idl[j]));
 #endif
 		/* Merge in descending sorted order */
-		j = mop_len;
-		k = mop_len += i;
-		mop[0] = (pgno_t)-1;
-		old_id = mop[j];
-		while (i) {
-			new_id = idl[i--];
-			for (; old_id < new_id; old_id = mop[--j])
-				mop[k--] = old_id;
-			mop[k--] = new_id;
-		}
-		mop[0] = mop_len;
+		mdb_midl_xmerge(mop, idl);
+		mop_len = mop[0];
 	}
 
 	/* Use new pages from the map when nothing suitable in the freeDB */
