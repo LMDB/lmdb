@@ -79,16 +79,22 @@ extern int cacheflush(char *addr, int nbytes, int cache);
 #define CACHEFLUSH(addr, bytes, cache)
 #endif
 
+
 #include <errno.h>
 #include <limits.h>
 #include <stddef.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <malloc.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+
+#if defined(__sun)
+/* Most platforms have posix_memalign, older may only have memalign */
+#define HAVE_MEMALIGN	1
+#include <malloc.h>
+#endif
 
 #if !(defined(BYTE_ORDER) || defined(__BYTE_ORDER))
 #include <netinet/in.h>
@@ -8480,9 +8486,15 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
 #else
 	pthread_mutex_init(&my.mc_mutex, NULL);
 	pthread_cond_init(&my.mc_cond, NULL);
+#ifdef HAVE_MEMALIGN
 	my.mc_wbuf[0] = memalign(env->me_os_psize, MDB_WBUF*2);
 	if (my.mc_wbuf[0] == NULL)
 		return errno;
+#else
+	rc = posix_memalign((void **)&my.mc_wbuf[0], env->me_os_psize, MDB_WBUF*2);
+	if (rc)
+		return rc;
+#endif
 #endif
 	memset(my.mc_wbuf[0], 0, MDB_WBUF*2);
 	my.mc_wbuf[1] = my.mc_wbuf[0] + MDB_WBUF;
