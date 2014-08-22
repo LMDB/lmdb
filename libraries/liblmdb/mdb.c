@@ -3603,11 +3603,9 @@ fail:
 		env->me_flags |= MDB_FATAL_ERROR;
 		return rc;
 	}
-done:
 	/* MIPS has cache coherency issues, this is a no-op everywhere else */
-	if (!(env->me_flags & MDB_WRITEMAP)) {
-		CACHEFLUSH(env->me_map + off, len, DCACHE);
-	}
+	CACHEFLUSH(env->me_map + off, len, DCACHE);
+done:
 	/* Memory ordering issues are irrelevant; since the entire writer
 	 * is wrapped by wmutex, all of these changes will become visible
 	 * after the wmutex is unlocked. Since the DB is multi-version,
