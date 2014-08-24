@@ -5859,8 +5859,7 @@ fetchm:
 			MDB_node *leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
 			if (!F_ISSET(leaf->mn_flags, F_DUPDATA)) {
 				MDB_GET_KEY(leaf, key);
-				if (data)
-					rc = mdb_node_read(mc->mc_txn, leaf, data);
+				rc = mdb_node_read(mc->mc_txn, leaf, data);
 				break;
 			}
 		}
