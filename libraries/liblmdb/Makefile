@@ -44,7 +44,7 @@ clean:
 	rm -rf $(PROGS) *.[ao] *.so *~ testdb
 
 test:	all
-	mkdir testdb
+	rm -rf testdb && mkdir testdb
 	./mtest && ./mdb_stat testdb
 
 liblmdb.a:	mdb.o midl.o
