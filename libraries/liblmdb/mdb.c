@@ -1110,6 +1110,7 @@ struct MDB_env {
 	MDB_meta	*me_metas[2];	/**< pointers to the two meta pages */
 	void		*me_pbuf;		/**< scratch area for DUPSORT put() */
 	MDB_txn		*me_txn;		/**< current write transaction */
+	MDB_txn		*me_txn0;		/**< prealloc'd write transaction */
 	size_t		me_mapsize;		/**< size of the data memory map */
 	off_t		me_size;		/**< current file size */
 	pgno_t		me_maxpg;		/**< me_mapsize / me_psize */
@@ -2607,6 +2608,10 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 	}
 	size = tsize + env->me_maxdbs * (sizeof(MDB_db)+1);
 	if (!(flags & MDB_RDONLY)) {
+		if (!parent) {
+			txn = env->me_txn0;
+			goto ok;
+		}
 		size += env->me_maxdbs * sizeof(MDB_cursor *);
 		/* child txns use parent's dbiseqs */
 		if (!parent)
@@ -2634,6 +2639,7 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 	}
 	txn->mt_env = env;
 
+ok:
 	if (parent) {
 		unsigned int i;
 		txn->mt_u.dirty_list = malloc(sizeof(MDB_ID2)*MDB_IDL_UM_SIZE);
@@ -2676,9 +2682,10 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 	} else {
 		rc = mdb_txn_renew0(txn);
 	}
-	if (rc)
-		free(txn);
-	else {
+	if (rc) {
+		if (txn != env->me_txn0)
+			free(txn);
+	} else {
 		*ret = txn;
 		DPRINTF(("begin txn %"Z"u%c %p on mdbenv %p, root page %"Z"u",
 			txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w',
@@ -2805,7 +2812,8 @@ mdb_txn_abort(MDB_txn *txn)
 	if ((txn->mt_flags & MDB_TXN_RDONLY) && txn->mt_u.reader)
 		txn->mt_u.reader->mr_pid = 0;
 
-	free(txn);
+	if (txn != txn->mt_env->me_txn0)
+		free(txn);
 }
 
 /** Save the freelist as of this transaction to the freeDB.
@@ -3358,7 +3366,8 @@ done:
 
 	if (env->me_txns)
 		UNLOCK_MUTEX_W(env);
-	free(txn);
+	if (txn != env->me_txn0)
+		free(txn);
 
 	return MDB_SUCCESS;
 
@@ -4489,6 +4498,22 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 		if (!((flags & MDB_RDONLY) ||
 			  (env->me_pbuf = calloc(1, env->me_psize))))
 			rc = ENOMEM;
+		if (!(flags & MDB_RDONLY)) {
+			MDB_txn *txn;
+			int tsize = sizeof(MDB_txn), size = tsize + env->me_maxdbs *
+				(sizeof(MDB_db)+sizeof(MDB_cursor)+sizeof(unsigned int)+1);
+			txn = calloc(1, size);
+			if (txn) {
+				txn->mt_dbs = (MDB_db *)((char *)txn + tsize);
+				txn->mt_cursors = (MDB_cursor **)(txn->mt_dbs + env->me_maxdbs);
+				txn->mt_dbiseqs = (unsigned int *)(txn->mt_cursors + env->me_maxdbs);
+				txn->mt_dbflags = (unsigned char *)(txn->mt_dbiseqs + env->me_maxdbs);
+				txn->mt_env = env;
+				env->me_txn0 = txn;
+			} else {
+				rc = ENOMEM;
+			}
+		}
 	}
 
 leave:
