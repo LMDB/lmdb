@@ -1083,7 +1083,6 @@ typedef struct MDB_xcursor {
 typedef struct MDB_pgstate {
 	pgno_t		*mf_pghead;	/**< Reclaimed freeDB pages, or NULL before use */
 	txnid_t		mf_pglast;	/**< ID of last used record, or 0 if !mf_pghead */
-	txnid_t		mf_pgoldest;	/**< ID of oldest reader last time we looked */
 } MDB_pgstate;
 
 	/** The database environment. */
@@ -1119,10 +1118,10 @@ struct MDB_env {
 	uint16_t	*me_dbflags;	/**< array of flags from MDB_db.md_flags */
 	unsigned int	*me_dbiseqs;	/**< array of dbi sequence numbers */
 	pthread_key_t	me_txkey;	/**< thread-key for readers */
+	txnid_t		me_pgoldest;	/**< ID of oldest reader last time we looked */
 	MDB_pgstate	me_pgstate;		/**< state of old pages from freeDB */
 #	define		me_pglast	me_pgstate.mf_pglast
 #	define		me_pghead	me_pgstate.mf_pghead
-#	define		me_pgoldest	me_pgstate.mf_pgoldest
 	MDB_page	*me_dpages;		/**< list of malloc'd blocks for re-use */
 	/** IDL of pages that became unused in a write txn */
 	MDB_IDL		me_free_pgs;
