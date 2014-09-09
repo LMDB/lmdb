@@ -1083,6 +1083,7 @@ typedef struct MDB_xcursor {
 typedef struct MDB_pgstate {
 	pgno_t		*mf_pghead;	/**< Reclaimed freeDB pages, or NULL before use */
 	txnid_t		mf_pglast;	/**< ID of last used record, or 0 if !mf_pghead */
+	txnid_t		mf_pgoldest;	/**< ID of oldest reader last time we looked */
 } MDB_pgstate;
 
 	/** The database environment. */
@@ -1121,6 +1122,7 @@ struct MDB_env {
 	MDB_pgstate	me_pgstate;		/**< state of old pages from freeDB */
 #	define		me_pglast	me_pgstate.mf_pglast
 #	define		me_pghead	me_pgstate.mf_pghead
+#	define		me_pgoldest	me_pgstate.mf_pgoldest
 	MDB_page	*me_dpages;		/**< list of malloc'd blocks for re-use */
 	/** IDL of pages that became unused in a write txn */
 	MDB_IDL		me_free_pgs;
@@ -1956,6 +1958,7 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 	txnid_t oldest = 0, last;
 	MDB_cursor_op op;
 	MDB_cursor m2;
+	int found_old = 0;
 
 	/* If there are any loose pages, just use them */
 	if (num == 1 && txn->mt_loose_pgs) {
@@ -1997,8 +2000,8 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 
 		if (op == MDB_FIRST) {	/* 1st iteration */
 			/* Prepare to fetch more and coalesce */
-			oldest = mdb_find_oldest(txn);
 			last = env->me_pglast;
+			oldest = env->me_pgoldest;
 			mdb_cursor_init(&m2, txn, FREE_DBI, NULL);
 			if (last) {
 				op = MDB_SET_RANGE;
@@ -2013,8 +2016,15 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 
 		last++;
 		/* Do not fetch more if the record will be too recent */
-		if (oldest <= last)
-			break;
+		if (oldest <= last) {
+			if (!found_old) {
+				oldest = mdb_find_oldest(txn);
+				env->me_pgoldest = oldest;
+				found_old = 1;
+			}
+			if (oldest <= last)
+				break;
+		}
 		rc = mdb_cursor_get(&m2, &key, NULL, op);
 		if (rc) {
 			if (rc == MDB_NOTFOUND)
@@ -2022,8 +2032,15 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 			goto fail;
 		}
 		last = *(txnid_t*)key.mv_data;
-		if (oldest <= last)
-			break;
+		if (oldest <= last) {
+			if (!found_old) {
+				oldest = mdb_find_oldest(txn);
+				env->me_pgoldest = oldest;
+				found_old = 1;
+			}
+			if (oldest <= last)
+				break;
+		}
 		np = m2.mc_pg[m2.mc_top];
 		leaf = NODEPTR(np, m2.mc_ki[m2.mc_top]);
 		if ((rc = mdb_node_read(txn, leaf, &data)) != MDB_SUCCESS)
