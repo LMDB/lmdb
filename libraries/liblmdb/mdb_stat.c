@@ -105,6 +105,10 @@ int main(int argc, char *argv[])
 
 	envname = argv[optind];
 	rc = mdb_env_create(&env);
+	if (rc) {
+		fprintf(stderr, "mdb_env_create failed, error %d %s\n", rc, mdb_strerror(rc));
+		return EXIT_FAILURE;
+	}
 
 	if (alldbs || subname) {
 		mdb_env_set_maxdbs(env, 4);
@@ -117,8 +121,8 @@ int main(int argc, char *argv[])
 	}
 
 	if (envinfo) {
-		rc = mdb_env_stat(env, &mst);
-		rc = mdb_env_info(env, &mei);
+		(void)mdb_env_stat(env, &mst);
+		(void)mdb_env_info(env, &mei);
 		printf("Environment Info\n");
 		printf("  Map address: %p\n", mei.me_mapaddr);
 		printf("  Map size: %"Z"u\n", mei.me_mapsize);

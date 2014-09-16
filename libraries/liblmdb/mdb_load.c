@@ -64,8 +64,6 @@ flagbit dbflags[] = {
 	{ 0, NULL, 0 }
 };
 
-static const char hexc[] = "0123456789abcdef";
-
 static void readhdr(void)
 {
 	char *ptr;
@@ -345,6 +343,10 @@ int main(int argc, char *argv[])
 
 	envname = argv[optind];
 	rc = mdb_env_create(&env);
+	if (rc) {
+		fprintf(stderr, "mdb_env_create failed, error %d %s\n", rc, mdb_strerror(rc));
+		return EXIT_FAILURE;
+	}
 
 	mdb_env_set_maxdbs(env, 2);
 
