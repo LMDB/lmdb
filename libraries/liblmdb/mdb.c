@@ -4559,6 +4559,7 @@ mdb_env_close0(MDB_env *env, int excl)
 	free(env->me_dbxs);
 	free(env->me_path);
 	free(env->me_dirty_list);
+	free(env->me_txn0);
 	mdb_midl_free(env->me_free_pgs);
 
 	if (env->me_flags & MDB_ENV_TXKEY) {
