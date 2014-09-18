@@ -2298,6 +2298,20 @@ done:
 			}
 		}
 	}
+#ifdef VL32
+	{
+		MDB_ID2L rl = mc->mc_txn->mt_rpages;
+		unsigned x = mdb_mid2l_search(rl, mp->mp_pgno);
+		if (x <= rl[0].mid && rl[x].mid == mp->mp_pgno) {
+			munmap(mp, mc->mc_txn->mt_env->me_psize);
+			while (x < rl[0].mid) {
+				rl[x] = rl[x+1];
+				x++;
+			}
+			rl[0].mid--;
+		}
+	}
+#endif
 	return 0;
 
 fail:
@@ -2863,8 +2877,12 @@ mdb_txn_abort(MDB_txn *txn)
 	if ((txn->mt_flags & MDB_TXN_RDONLY) && txn->mt_u.reader)
 		txn->mt_u.reader->mr_pid = 0;
 
-	if (txn != txn->mt_env->me_txn0)
+	if (txn != txn->mt_env->me_txn0) {
+#ifdef VL32
+		free(txn->mt_rpages);
+#endif
 		free(txn);
+	}
 }
 
 /** Save the freelist as of this transaction to the freeDB.
@@ -5024,6 +5042,10 @@ mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret, int *lvl)
 				p = txn->mt_rpages[x].mptr;
 				goto done;
 			}
+			if (txn->mt_rpages[0].mid >= MDB_IDL_UM_MAX) {
+				/* unmap some other page */
+				mdb_tassert(txn, 0);
+			}
 			if (txn->mt_rpages[0].mid < MDB_IDL_UM_SIZE) {
 				MDB_ID2 id2;
 				size_t len = env->me_psize;
@@ -5403,6 +5425,21 @@ mdb_cursor_sibling(MDB_cursor *mc, int move_right)
 		return MDB_NOTFOUND;		/* root has no siblings */
 	}
 
+#ifdef VL32
+	mp = mc->mc_pg[mc->mc_top];
+	{
+		MDB_ID2L rl = mc->mc_txn->mt_rpages;
+		unsigned x = mdb_mid2l_search(rl, mp->mp_pgno);
+		if (x <= rl[0].mid && rl[x].mid == mp->mp_pgno) {
+			munmap(mp, mc->mc_txn->mt_env->me_psize);
+			while (x < rl[0].mid) {
+				rl[x] = rl[x+1];
+				x++;
+			}
+			rl[0].mid--;
+		}
+	}
+#endif
 	mdb_cursor_pop(mc);
 	DPRINTF(("parent page is page %"Z"u, index %u",
 		mc->mc_pg[mc->mc_top]->mp_pgno, mc->mc_ki[mc->mc_top]));
