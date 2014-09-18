@@ -24,6 +24,7 @@ CFLAGS	= $(THREADS) $(OPT) $(W) $(XCFLAGS)
 LDLIBS	=
 SOLIBS	=
 prefix	= /usr/local
+XCFLAGS = -DVL32
 
 ########################################################################
 

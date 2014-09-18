@@ -988,6 +988,10 @@ struct MDB_txn {
 	MDB_cursor	**mt_cursors;
 	/** Array of flags for each DB */
 	unsigned char	*mt_dbflags;
+#ifdef VL32
+	/** List of read-only pages */
+	MDB_ID2L	mt_rpages;
+#endif
 	/**	Number of DB records in use. This number only ever increments;
 	 *	we don't decrement it when individual DB handles are closed.
 	 */
@@ -1090,6 +1094,9 @@ struct MDB_env {
 	HANDLE		me_fd;		/**< The main data file */
 	HANDLE		me_lfd;		/**< The lock file */
 	HANDLE		me_mfd;			/**< just for writing the meta pages */
+#if defined(VL32) && defined(_WIN32)
+	HANDLE		me_fmh;		/**< File Mapping handle */
+#endif
 	/** Failed to update the meta page. Probably an I/O error. */
 #define	MDB_FATAL_ERROR	0x80000000U
 	/** Some fields are initialized. */
@@ -2638,6 +2645,15 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 		DPRINTF(("calloc: %s", strerror(errno)));
 		return ENOMEM;
 	}
+#ifdef VL32
+	if (!parent) {
+		txn->mt_rpages = calloc(MDB_IDL_UM_SIZE, sizeof(MDB_ID2));
+		if (!txn->mt_rpages) {
+			free(txn);
+			return ENOMEM;
+		}
+	}
+#endif
 	txn->mt_dbs = (MDB_db *) ((char *)txn + tsize);
 	if (flags & MDB_RDONLY) {
 		txn->mt_flags |= MDB_TXN_RDONLY;
@@ -2676,6 +2692,9 @@ ok:
 		txn->mt_numdbs = parent->mt_numdbs;
 		txn->mt_flags = parent->mt_flags;
 		txn->mt_dbxs = parent->mt_dbxs;
+#ifdef VL32
+		txn->mt_rpages = parent->mt_rpages;
+#endif
 		memcpy(txn->mt_dbs, parent->mt_dbs, txn->mt_numdbs * sizeof(MDB_db));
 		/* Copy parent's mt_dbflags, but clear DB_NEW */
 		for (i=0; i<txn->mt_numdbs; i++)
@@ -2799,6 +2818,22 @@ mdb_txn_reset0(MDB_txn *txn, const char *act)
 		if (env->me_txns)
 			UNLOCK_MUTEX_W(env);
 	}
+#ifdef VL32
+	{
+		unsigned i, n = txn->mt_rpages[0].mid;
+		for (i = 1; i <= n; i++) {
+#ifdef _WIN32
+			UnmapViewOfFile(txn->mt_rpages[i].mptr);)
+#else
+			MDB_page *mp = txn->mt_rpages[i].mptr;
+			int size = txn->mt_env->me_psize;
+			if (IS_OVERFLOW(mp)) size *= mp->mp_pages;
+			munmap(mp, size);
+#endif
+		}
+	}
+	txn->mt_rpages[0].mid = 0;
+#endif
 }
 
 void
@@ -3714,13 +3749,29 @@ mdb_env_map(MDB_env *env, void *addr)
 		sizehi, sizelo, NULL);
 	if (!mh)
 		return ErrCode();
+#ifdef VL32
+	msize = 2 * env->me_psize;
+#endif
 	env->me_map = MapViewOfFileEx(mh, flags & MDB_WRITEMAP ?
 		FILE_MAP_WRITE : FILE_MAP_READ,
 		0, 0, msize, addr);
 	rc = env->me_map ? 0 : ErrCode();
+#ifdef VL32
+	env->me_fmh = mh;
+#else
 	CloseHandle(mh);
+#endif
 	if (rc)
 		return rc;
+#else
+#ifdef VL32
+	(void) flags;
+	env->me_map = mmap(addr, 2 * env->me_psize, PROT_READ, MAP_SHARED,
+		env->me_fd, 0);
+	if (env->me_map == MAP_FAILED) {
+		env->me_map = NULL;
+		return ErrCode();
+	}
 #else
 	int prot = PROT_READ;
 	if (flags & MDB_WRITEMAP) {
@@ -3754,6 +3805,7 @@ mdb_env_map(MDB_env *env, void *addr)
 	 */
 	if (addr && env->me_map != addr)
 		return EBUSY;	/* TODO: Make a new MDB_* error code? */
+#endif
 
 	p = (MDB_page *)env->me_map;
 	env->me_metas[0] = METADATA(p);
@@ -4405,6 +4457,17 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 	if (env->me_fd!=INVALID_HANDLE_VALUE || (flags & ~(CHANGEABLE|CHANGELESS)))
 		return EINVAL;
 
+#ifdef VL32
+	if (flags & MDB_WRITEMAP) {
+		/* silently ignore WRITEMAP in 32 bit mode */
+		flags ^= MDB_WRITEMAP;
+	}
+	if (flags & MDB_FIXEDMAP) {
+		/* cannot support FIXEDMAP */
+		return EINVAL;
+	}
+#endif
+
 	len = strlen(path);
 	if (flags & MDB_NOSUBDIR) {
 		rc = len + sizeof(LOCKSUFF) + len + 1;
@@ -4525,6 +4588,13 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 				txn->mt_dbiseqs = (unsigned int *)(txn->mt_cursors + env->me_maxdbs);
 				txn->mt_dbflags = (unsigned char *)(txn->mt_dbiseqs + env->me_maxdbs);
 				txn->mt_env = env;
+#ifdef VL32
+				txn->mt_rpages = calloc(MDB_IDL_UM_SIZE, sizeof(MDB_ID2));
+				if (!txn->mt_rpages) {
+					free(txn);
+					rc = ENOMEM;
+				}
+#endif
 				env->me_txn0 = txn;
 			} else {
 				rc = ENOMEM;
@@ -4576,7 +4646,11 @@ mdb_env_close0(MDB_env *env, int excl)
 	}
 
 	if (env->me_map) {
+#ifdef VL32
+		munmap(env->me_map, 2*env->me_psize);
+#else
 		munmap(env->me_map, env->me_mapsize);
+#endif
 	}
 	if (env->me_mfd != env->me_fd && env->me_mfd != INVALID_HANDLE_VALUE)
 		(void) close(env->me_mfd);
@@ -4943,7 +5017,56 @@ mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret, int *lvl)
 
 	if (pgno < txn->mt_next_pgno) {
 		level = 0;
+#ifdef VL32
+		{
+			unsigned x = mdb_mid2l_search(txn->mt_rpages, pgno);
+			if (x <= txn->mt_rpages[0].mid && txn->mt_rpages[x].mid == pgno) {
+				p = txn->mt_rpages[x].mptr;
+				goto done;
+			}
+			if (txn->mt_rpages[0].mid < MDB_IDL_UM_SIZE) {
+				MDB_ID2 id2;
+				size_t len = env->me_psize;
+				int np;
+#ifdef _WIN32
+				size_t off = pgno * env->me_psize;
+				DWORD lo, hi;
+				lo = off & 0xffffffff;
+				hi = off >> 16 >> 16;
+				p = MapViewOfFile(env->me_fmh, FILE_MAP_READ, hi, lo, len);
+				if (p == NULL)
+					return ErrCode();
+				if (IS_OVERFLOW(p)) {
+					np = p->mp_pages;
+					UnmapViewOfFile(p);
+					len *= np;
+					p = MapViewOfFile(env->me_fmh, FILE_MAP_READ, hi, lo, len);
+					if (p == NULL)
+						return ErrCode();
+				}
+#else
+				off_t off = pgno * env->me_psize;
+				p = mmap(NULL, len, PROT_READ, MAP_SHARED, env->me_fd, off);
+				if (p == MAP_FAILED)
+					return errno;
+				if (IS_OVERFLOW(p)) {
+					np = p->mp_pages;
+					munmap(p, len);
+					len *= np;
+					p = mmap(NULL, len, PROT_READ, MAP_SHARED, env->me_fd, off);
+					if (p == MAP_FAILED)
+						return errno;
+				}
+#endif
+				id2.mid = pgno;
+				id2.mptr = p;
+				mdb_mid2l_insert(txn->mt_rpages, &id2);
+				goto done;
+			}
+		}
+#else
 		p = (MDB_page *)(env->me_map + env->me_psize * pgno);
+#endif
 	} else {
 		DPRINTF(("page %"Z"u not found", pgno));
 		txn->mt_flags |= MDB_TXN_ERROR;
