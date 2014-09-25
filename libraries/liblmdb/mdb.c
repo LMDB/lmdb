@@ -90,7 +90,7 @@ extern int cacheflush(char *addr, int nbytes, int cache);
 #include <time.h>
 #include <unistd.h>
 
-#if defined(__sun)
+#if defined(__sun) || defined(ANDROID)
 /* Most platforms have posix_memalign, older may only have memalign */
 #define HAVE_MEMALIGN	1
 #include <malloc.h>
