@@ -90,7 +90,7 @@ extern int cacheflush(char *addr, int nbytes, int cache);
 #include <time.h>
 #include <unistd.h>
 
-#if defined(__sun)
+#if defined(__sun) || defined(ANDROID)
 /* Most platforms have posix_memalign, older may only have memalign */
 #define HAVE_MEMALIGN	1
 #include <malloc.h>
@@ -2647,6 +2647,7 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 	if (!(flags & MDB_RDONLY)) {
 		if (!parent) {
 			txn = env->me_txn0;
+			txn->mt_flags = 0;
 			goto ok;
 		}
 		size += env->me_maxdbs * sizeof(MDB_cursor *);

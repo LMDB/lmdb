@@ -1,6 +1,6 @@
 LMDB 0.9 Change Log
 
-LMDB 0.9.14 Release (2014/09/15)
+LMDB 0.9.14 Release (2014/09/20)
 	Fix to support 64K page size (ITS#7713)
 	Fix to persist decreased as well as increased mapsizes (ITS#7789)
 	Fix cursor bug when deleting last node of a DUPSORT key
