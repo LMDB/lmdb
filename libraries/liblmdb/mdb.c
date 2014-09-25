@@ -5421,25 +5421,16 @@ mdb_cursor_sibling(MDB_cursor *mc, int move_right)
 	int		 rc;
 	MDB_node	*indx;
 	MDB_page	*mp;
+#ifdef VL32
+	MDB_page	*op;
+#endif
 
 	if (mc->mc_snum < 2) {
 		return MDB_NOTFOUND;		/* root has no siblings */
 	}
 
 #ifdef VL32
-	mp = mc->mc_pg[mc->mc_top];
-	{
-		MDB_ID2L rl = mc->mc_txn->mt_rpages;
-		unsigned x = mdb_mid2l_search(rl, mp->mp_pgno);
-		if (x <= rl[0].mid && rl[x].mid == mp->mp_pgno) {
-			munmap(mp, mc->mc_txn->mt_env->me_psize);
-			while (x < rl[0].mid) {
-				rl[x] = rl[x+1];
-				x++;
-			}
-			rl[0].mid--;
-		}
-	}
+	op = mc->mc_pg[mc->mc_top];
 #endif
 	mdb_cursor_pop(mc);
 	DPRINTF(("parent page is page %"Z"u, index %u",
@@ -5464,6 +5455,21 @@ mdb_cursor_sibling(MDB_cursor *mc, int move_right)
 		    move_right ? "right" : "left", mc->mc_ki[mc->mc_top]));
 	}
 	mdb_cassert(mc, IS_BRANCH(mc->mc_pg[mc->mc_top]));
+
+#ifdef VL32
+	{
+		MDB_ID2L rl = mc->mc_txn->mt_rpages;
+		unsigned x = mdb_mid2l_search(rl, op->mp_pgno);
+		if (x <= rl[0].mid && rl[x].mid == op->mp_pgno) {
+			munmap(op, mc->mc_txn->mt_env->me_psize);
+			while (x < rl[0].mid) {
+				rl[x] = rl[x+1];
+				x++;
+			}
+			rl[0].mid--;
+		}
+	}
+#endif
 
 	indx = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
 	if ((rc = mdb_page_get(mc->mc_txn, NODEPGNO(indx), &mp, NULL)) != 0) {
