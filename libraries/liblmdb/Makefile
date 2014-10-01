@@ -50,9 +50,9 @@ test:	all
 liblmdb.a:	mdb.o midl.o
 	ar rs $@ mdb.o midl.o
 
-liblmdb.so:	mdb.o midl.o
+liblmdb.so:	mdb.lo midl.lo
 #	$(CC) $(LDFLAGS) -pthread -shared -Wl,-Bsymbolic -o $@ mdb.o midl.o $(SOLIBS)
-	$(CC) $(LDFLAGS) -pthread -shared -o $@ mdb.o midl.o $(SOLIBS)
+	$(CC) $(LDFLAGS) -pthread -shared -o $@ mdb.lo midl.lo $(SOLIBS)
 
 mdb_stat: mdb_stat.o liblmdb.a
 mdb_copy: mdb_copy.o liblmdb.a
@@ -66,10 +66,16 @@ mtest5:	mtest5.o liblmdb.a
 mtest6:	mtest6.o liblmdb.a
 
 mdb.o: mdb.c lmdb.h midl.h
-	$(CC) $(CFLAGS) -fPIC $(CPPFLAGS) -c mdb.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c mdb.c
 
 midl.o: midl.c midl.h
-	$(CC) $(CFLAGS) -fPIC $(CPPFLAGS) -c midl.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c midl.c
+
+mdb.lo: mdb.c lmdb.h midl.h
+	$(CC) $(CFLAGS) -fPIC $(CPPFLAGS) -c mdb.c -o $@
+
+midl.lo: midl.c midl.h
+	$(CC) $(CFLAGS) -fPIC $(CPPFLAGS) -c midl.c -o $@
 
 %:	%.o
 	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LDLIBS) -o $@
