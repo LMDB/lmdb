@@ -50,12 +50,14 @@
  *
  *	  Fix: Check for stale readers periodically, using the
  *	  #mdb_reader_check function or the \ref mdb_stat_1 "mdb_stat" tool.
- *	  Catch stale
- *	  locks with option MDB_ROBUST if supported (non-BSD). Or just
- *	  make all programs using the database close it; the lockfile
- *	  is always reset on first open of the environment.
+ *	  Stale writers will be cleared automatically on most systems:
+ *	  - Windows - automatic
+ *	  - BSD, systems using SysV semaphores - automatic
+ *	  - Linux, systems using POSIX mutexes with Robust option - automatic
+ *	  Otherwise just make all programs using the database close it;
+ *	  the lockfile is always reset on first open of the environment.
  *
- *	- On BSD systems or others configured with MDB_USE_POSIX_SEM,
+ *	- On BSD systems or others configured with MDB_USE_SYSV_SEM,
  *	  startup can fail due to semaphores owned by another userid.
  *
  *	  Fix: Open and close the database as the user which owns the
@@ -290,8 +292,6 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
 #define MDB_NORDAHEAD	0x800000
 	/** don't initialize malloc'd memory before writing to datafile */
 #define MDB_NOMEMINIT	0x1000000
-	/** catch stale locks if supported (not on BSD, needs robust mutexes) */
-#define MDB_ROBUST		0x2000000
 /** @} */
 
 /**	@defgroup	mdb_dbi_open	Database Flags
@@ -516,12 +516,6 @@ int  mdb_env_create(MDB_env **env);
 	 *		Open the environment in read-only mode. No write operations will be
 	 *		allowed. LMDB will still modify the lock file - except on read-only
 	 *		filesystems, where LMDB does not use locks.
-	 *	<li>#MDB_ROBUST
-	 *		Initialize the lockfile to catch stale locks if robust mutexes
-	 *		are supported, so aborted processes will not block others.
-	 *		Ignored when another process has the environment open. Unsupported
-	 *		by liblmdb built with MDB_USE_POSIX_SEM (such as BSD systems).
-	 *		Enabled by default on Windows. Some locking slowdown on Unix.
 	 *	<li>#MDB_WRITEMAP
 	 *		Use a writeable memory map unless MDB_RDONLY is set. This is faster
 	 *		and uses fewer mallocs, but loses protection from application bugs
