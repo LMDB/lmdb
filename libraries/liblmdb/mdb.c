@@ -8589,8 +8589,12 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
 		/* Set metapage 1 */
 		mm->mm_last_pg = txn->mt_next_pgno - freecount - 1;
 		mm->mm_dbs[1] = txn->mt_dbs[1];
-		mm->mm_dbs[1].md_root = mm->mm_last_pg;
-		mm->mm_txnid = 1;
+		if (mm->mm_last_pg > 1) {
+			mm->mm_dbs[1].md_root = mm->mm_last_pg;
+			mm->mm_txnid = 1;
+		} else {
+			mm->mm_dbs[1].md_root = P_INVALID;
+		}
 	}
 	my.mc_wlen[0] = env->me_psize * 2;
 	my.mc_txn = txn;
