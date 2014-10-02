@@ -5457,11 +5457,11 @@ mdb_cursor_prev(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 					}
 					return rc;
 				}
-			} else {
-				mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
-				if (op == MDB_PREV_DUP)
-					return MDB_NOTFOUND;
 			}
+		} else {
+			mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
+			if (op == MDB_PREV_DUP)
+				return MDB_NOTFOUND;
 		}
 	}
 
