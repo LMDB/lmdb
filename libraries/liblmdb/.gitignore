@@ -3,6 +3,8 @@ mtest[23456]
 testdb
 mdb_copy
 mdb_stat
+mdb_dump
+mdb_load
 *.[ao]
 *.so
 *.exe
