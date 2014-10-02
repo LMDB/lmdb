@@ -5,6 +5,7 @@ mdb_copy
 mdb_stat
 mdb_dump
 mdb_load
+*.lo
 *.[ao]
 *.so
 *.exe
