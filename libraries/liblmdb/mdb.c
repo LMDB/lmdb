@@ -8692,14 +8692,23 @@ mdb_env_copyfd0(MDB_env *env, HANDLE fd)
 #ifdef WIN32
 	{
 		LARGE_INTEGER fsize;
-		GetFileSizeEx(env->me_fd, &fsize);
+
+		if (!GetFileSizeEx(env->me_fd, &fsize)) {
+			rc = ErrCode();
+			goto leave;
+		}
+
 		if (w2 > fsize.QuadPart)
 			w2 = fsize.QuadPart;
 	}
 #else
 	{
 		struct stat st;
-		fstat(env->me_fd, &st);
+
+		if ((rc = fstat(env->me_fd, &st))) {
+			goto leave;
+		}
+
 		if (w2 > (size_t)st.st_size)
 			w2 = st.st_size;
 	}
