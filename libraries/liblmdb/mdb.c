@@ -2472,11 +2472,10 @@ mdb_txn_renew0(MDB_txn *txn)
 	uint16_t x;
 	int rc, new_notls = 0;
 
-	/* Setup db info */
-	txn->mt_numdbs = env->me_numdbs;
-	txn->mt_dbxs = env->me_dbxs;	/* mostly static anyway */
-
 	if (txn->mt_flags & MDB_TXN_RDONLY) {
+		/* Setup db info */
+		txn->mt_numdbs = env->me_numdbs;
+		txn->mt_dbxs = env->me_dbxs;	/* mostly static anyway */
 		if (!ti) {
 			meta = env->me_metas[ mdb_env_pick_meta(env) ];
 			txn->mt_txnid = meta->mm_txnid;
@@ -2536,6 +2535,8 @@ mdb_txn_renew0(MDB_txn *txn)
 			meta = env->me_metas[ mdb_env_pick_meta(env) ];
 			txn->mt_txnid = meta->mm_txnid;
 		}
+		/* Setup db info */
+		txn->mt_numdbs = env->me_numdbs;
 		txn->mt_txnid++;
 #if MDB_DEBUG
 		if (txn->mt_txnid == mdb_debug_start)
@@ -2622,18 +2623,17 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 		}
 		tsize = sizeof(MDB_ntxn);
 	}
-	size = tsize + env->me_maxdbs * (sizeof(MDB_db)+1);
+	size = tsize;
 	if (!(flags & MDB_RDONLY)) {
 		if (!parent) {
-			txn = env->me_txn0;
+			txn = env->me_txn0;	/* just reuse preallocated write txn */
 			txn->mt_flags = 0;
 			goto ok;
 		}
+		/* child txns use own copy of cursors */
 		size += env->me_maxdbs * sizeof(MDB_cursor *);
-		/* child txns use parent's dbiseqs */
-		if (!parent)
-			size += env->me_maxdbs * sizeof(unsigned int);
 	}
+	size += env->me_maxdbs * (sizeof(MDB_db)+1);
 
 	if ((txn = calloc(1, size)) == NULL) {
 		DPRINTF(("calloc: %s", strerror(errno)));
@@ -4530,6 +4530,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 				txn->mt_dbiseqs = (unsigned int *)(txn->mt_cursors + env->me_maxdbs);
 				txn->mt_dbflags = (unsigned char *)(txn->mt_dbiseqs + env->me_maxdbs);
 				txn->mt_env = env;
+				txn->mt_dbxs = env->me_dbxs;
 				env->me_txn0 = txn;
 			} else {
 				rc = ENOMEM;
