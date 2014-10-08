@@ -3866,6 +3866,27 @@ mdb_env_get_maxreaders(MDB_env *env, unsigned int *readers)
 	return MDB_SUCCESS;
 }
 
+static int ESECT
+mdb_fsize(HANDLE fd, size_t *size)
+{
+#ifdef WIN32
+	LARGE_INTEGER fsize;
+
+	if (!GetFileSizeEx(fd, &fsize))
+		return ErrCode();
+
+	*size = fsize.QuadPart;
+#else
+	struct stat st;
+
+	if (fstat(fd, &st))
+		return ErrCode();
+
+	*size = st.st_size;
+#endif
+	return MDB_SUCCESS;
+}
+
 /** Further setup required for opening an LMDB environment
  */
 static int ESECT
@@ -8722,30 +8743,13 @@ mdb_env_copyfd0(MDB_env *env, HANDLE fd)
 		goto leave;
 
 	w2 = txn->mt_next_pgno * env->me_psize;
-#ifdef WIN32
 	{
-		LARGE_INTEGER fsize;
-
-		if (!GetFileSizeEx(env->me_fd, &fsize)) {
-			rc = ErrCode();
+		size_t fsize = 0;
+		if ((rc = mdb_fsize(env->me_fd, &fsize)))
 			goto leave;
-		}
-
-		if (w2 > fsize.QuadPart)
-			w2 = fsize.QuadPart;
+		if (w2 > fsize)
+			w2 = fsize;
 	}
-#else
-	{
-		struct stat st;
-
-		if ((rc = fstat(env->me_fd, &st))) {
-			goto leave;
-		}
-
-		if (w2 > (size_t)st.st_size)
-			w2 = st.st_size;
-	}
-#endif
 	wsize = w2 - wsize;
 	while (wsize > 0) {
 		if (wsize > MAX_WRITE)
