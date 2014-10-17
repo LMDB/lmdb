@@ -2543,15 +2543,16 @@ mdb_txn_renew0(MDB_txn *txn)
 					UNLOCK_MUTEX(rmutex);
 					return MDB_READERS_FULL;
 				}
-				ti->mti_readers[i].mr_pid = pid;
-				ti->mti_readers[i].mr_tid = tid;
+				r = &ti->mti_readers[i];
+				r->mr_txnid = (txnid_t)-1;
+				r->mr_tid = tid;
+				r->mr_pid = pid; /* should be written last, see ITS#7971. */
 				if (i == nr)
 					ti->mti_numreaders = ++nr;
 				/* Save numreaders for un-mutexed mdb_env_close() */
 				env->me_numreaders = nr;
 				UNLOCK_MUTEX(rmutex);
 
-				r = &ti->mti_readers[i];
 				new_notls = (env->me_flags & MDB_NOTLS);
 				if (!new_notls && (rc=pthread_setspecific(env->me_txkey, r))) {
 					r->mr_pid = 0;
