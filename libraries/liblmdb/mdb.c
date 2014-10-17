@@ -588,11 +588,11 @@ typedef struct MDB_rxbody {
 	 *	started from so we can avoid overwriting any data used in that
 	 *	particular version.
 	 */
-	txnid_t		mrb_txnid;
+	volatile txnid_t		mrb_txnid;
 	/** The process ID of the process owning this reader txn. */
-	MDB_PID_T	mrb_pid;
+	volatile MDB_PID_T	mrb_pid;
 	/** The thread ID of the thread owning this txn. */
-	MDB_THR_T	mrb_tid;
+	volatile MDB_THR_T	mrb_tid;
 } MDB_rxbody;
 
 	/** The actual reader record, with cacheline padding. */
@@ -640,12 +640,12 @@ typedef struct MDB_txbody {
 		 *	This is recorded here only for convenience; the value can always
 		 *	be determined by reading the main database meta pages.
 		 */
-	txnid_t		mtb_txnid;
+	volatile txnid_t		mtb_txnid;
 		/** The number of slots that have been used in the reader table.
 		 *	This always records the maximum count, it is not decremented
 		 *	when readers release their slots.
 		 */
-	unsigned	mtb_numreaders;
+	volatile unsigned	mtb_numreaders;
 } MDB_txbody;
 
 	/** The actual reader table definition. */
@@ -916,7 +916,7 @@ typedef struct MDB_meta {
 	/** Any persistent environment flags. @ref mdb_env */
 #define	mm_flags	mm_dbs[0].md_flags
 	pgno_t		mm_last_pg;			/**< last used page in file */
-	txnid_t		mm_txnid;			/**< txnid that committed this page */
+	volatile txnid_t	mm_txnid;	/**< txnid that committed this page */
 } MDB_meta;
 
 	/** Buffer for a stack-allocated meta page.
