@@ -2539,7 +2539,10 @@ mdb_txn_renew0(MDB_txn *txn)
 					return rc;
 				}
 			}
-			txn->mt_txnid = r->mr_txnid = ti->mti_txnid;
+			do /* LY: Retry on a race, ITS#7970. */
+				r->mr_txnid = ti->mti_txnid;
+			while(r->mr_txnid != ti->mti_txnid);
+			txn->mt_txnid = r->mr_txnid;
 			txn->mt_u.reader = r;
 			meta = env->me_metas[txn->mt_txnid & 1];
 		}
