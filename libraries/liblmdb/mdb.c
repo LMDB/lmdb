@@ -684,18 +684,20 @@ typedef struct MDB_txninfo {
 #define mti_numreaders	mt1.mtb.mtb_numreaders
 		char pad[(sizeof(MDB_txbody)+CACHELINE-1) & ~(CACHELINE-1)];
 	} mt1;
+#ifdef MDB_USE_SYSV_SEM
+#define	mti_semid	mt1.mtb.mtb_semid
+#else
 	union {
 #if defined(_WIN32)
 		char mt2_wmname[MNAME_LEN];
 #define	mti_wmname	mt2.mt2_wmname
-#elif defined(MDB_USE_SYSV_SEM)
-#define	mti_semid	mt1.mtb.mtb_semid
 #else
 		pthread_mutex_t	mt2_wmutex;
 #define mti_wmutex	mt2.mt2_wmutex
 #endif
 		char pad[(MNAME_LEN+CACHELINE-1) & ~(CACHELINE-1)];
 	} mt2;
+#endif
 	MDB_reader	mti_readers[1];
 } MDB_txninfo;
 
@@ -704,6 +706,7 @@ typedef struct MDB_txninfo {
 	((uint32_t) \
 	 ((MDB_LOCK_VERSION) \
 	  /* Flags which describe functionality */ \
+	  + (((MNAME_LEN) == 0)   << 18) /* MDB_USE_SYSV_SEM */ \
 	  + (((MDB_PIDLOCK) != 0) << 16)))
 /** @} */
 
