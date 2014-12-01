@@ -898,7 +898,7 @@ typedef struct MDB_meta {
 		/** Stamp identifying this as an LMDB file. It must be set
 		 *	to #MDB_MAGIC. */
 	uint32_t	mm_magic;
-		/** Version number of this lock file. Must be set to #MDB_DATA_VERSION. */
+		/** Version number of this file. Must be set to #MDB_DATA_VERSION. */
 	uint32_t	mm_version;
 	void		*mm_address;		/**< address for fixed mapping */
 	size_t		mm_mapsize;			/**< size of mmap region */
@@ -4048,7 +4048,7 @@ mdb_env_share_locks(MDB_env *env, int *excl)
 	return rc;
 }
 
-/** Try to get exlusive lock, otherwise shared.
+/** Try to get exclusive lock, otherwise shared.
  *	Maintain *excl = -1: no/unknown lock, 0: shared, 1: exclusive.
  */
 static int ESECT
@@ -4189,7 +4189,6 @@ mdb_hash_enc(MDB_val *val, char *encbuf)
  * @param[in] env The LMDB environment.
  * @param[in] lpath The pathname of the file used for the lock region.
  * @param[in] mode The Unix permissions for the file, if we create it.
- * @param[out] excl Resulting file lock type: -1 none, 0 shared, 1 exclusive
  * @param[in,out] excl In -1, out lock type: -1 none, 0 shared, 1 exclusive
  * @return 0 on success, non-zero on failure.
  */
