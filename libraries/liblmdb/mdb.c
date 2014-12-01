@@ -1316,7 +1316,7 @@ mdb_strerror(int err)
 	buf[0] = 0;
 	FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM |
 		FORMAT_MESSAGE_IGNORE_INSERTS,
-		NULL, err, 0, ptr, sizeof(buf), pad);
+		NULL, err, 0, ptr, sizeof(buf), (va_list *)pad);
 	return ptr;
 #else
 	return strerror(err);
