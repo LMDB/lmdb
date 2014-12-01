@@ -2778,11 +2778,8 @@ mdb_txn_reset0(MDB_txn *txn, const char *act)
 		txn->mt_dbxs = NULL;	/* mark txn as reset */
 	} else {
 		pgno_t *pghead = env->me_pghead;
-		env->me_pghead = NULL;
-		env->me_pglast = 0;
 
 		mdb_cursors_close(txn, 0);
-
 		if (!(env->me_flags & MDB_WRITEMAP)) {
 			mdb_dlist_free(txn);
 		}
@@ -2790,6 +2787,9 @@ mdb_txn_reset0(MDB_txn *txn, const char *act)
 		if (!txn->mt_parent) {
 			if (mdb_midl_shrink(&txn->mt_free_pgs))
 				env->me_free_pgs = txn->mt_free_pgs;
+			/* me_pgstate: */
+			env->me_pghead = NULL;
+			env->me_pglast = 0;
 
 			env->me_txn = NULL;
 			/* The writer mutex was locked in mdb_txn_begin. */
