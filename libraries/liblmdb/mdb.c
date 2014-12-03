@@ -3832,7 +3832,7 @@ mdb_env_get_maxreaders(MDB_env *env, unsigned int *readers)
 static int ESECT
 mdb_fsize(HANDLE fd, size_t *size)
 {
-#ifdef WIN32
+#ifdef _WIN32
 	LARGE_INTEGER fsize;
 
 	if (!GetFileSizeEx(fd, &fsize))
@@ -3998,7 +3998,7 @@ PIMAGE_TLS_CALLBACK mdb_tls_cbp __attribute__((section (".CRT$XLB"))) = mdb_tls_
 extern const PIMAGE_TLS_CALLBACK mdb_tls_cbp;
 const PIMAGE_TLS_CALLBACK mdb_tls_cbp = mdb_tls_callback;
 #pragma const_seg()
-#else	/* WIN32 */
+#else	/* _WIN32 */
 #pragma comment(linker, "/INCLUDE:__tls_used")
 #pragma comment(linker, "/INCLUDE:_mdb_tls_cbp")
 #pragma data_seg(".CRT$XLB")
