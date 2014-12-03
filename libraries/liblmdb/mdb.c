@@ -3513,6 +3513,7 @@ mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 	return 0;
 }
 
+/** Fill in most of the zeroed #MDB_meta for an empty database environment */
 static void ESECT
 mdb_env_init_meta0(MDB_env *env, MDB_meta *meta)
 {
@@ -3529,7 +3530,7 @@ mdb_env_init_meta0(MDB_env *env, MDB_meta *meta)
 
 /** Write the environment parameters of a freshly created DB environment.
  * @param[in] env the environment handle
- * @param[out] meta address of where to store the meta information
+ * @param[in] meta the #MDB_meta to write
  * @return 0 on success, non-zero on failure.
  */
 static int ESECT
@@ -3556,8 +3557,6 @@ mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 	DPUTS("writing new meta page");
 
 	psize = env->me_psize;
-
-	mdb_env_init_meta0(env, meta);
 
 	p = calloc(2, psize);
 	if (!p)
@@ -3836,16 +3835,16 @@ mdb_env_set_mapsize(MDB_env *env, size_t size)
 	 */
 	if (env->me_map) {
 		int rc;
+		MDB_meta *meta;
 		void *old;
 		if (env->me_txn)
 			return EINVAL;
+		meta = env->me_metas[mdb_env_pick_meta(env)];
 		if (!size)
-			size = env->me_metas[mdb_env_pick_meta(env)]->mm_mapsize;
-		else if (size < env->me_mapsize) {
-			/* If the configured size is smaller, make sure it's
-			 * still big enough. Silently round up to minimum if not.
-			 */
-			size_t minsize = (env->me_metas[mdb_env_pick_meta(env)]->mm_last_pg + 1) * env->me_psize;
+			size = meta->mm_mapsize;
+		{
+			/* Silently round up to minimum if the size is too small */
+			size_t minsize = (meta->mm_last_pg + 1) * env->me_psize;
 			if (size < minsize)
 				size = minsize;
 		}
@@ -3980,8 +3979,6 @@ mdb_env_open2(MDB_env *env)
 	}
 #endif
 
-	memset(&meta, 0, sizeof(meta));
-
 	if ((i = mdb_env_read_header(env, &meta)) != 0) {
 		if (i != ENOENT)
 			return i;
@@ -3990,24 +3987,26 @@ mdb_env_open2(MDB_env *env)
 		env->me_psize = env->me_os_psize;
 		if (env->me_psize > MAX_PAGESIZE)
 			env->me_psize = MAX_PAGESIZE;
+		memset(&meta, 0, sizeof(meta));
+		mdb_env_init_meta0(env, &meta);
+		meta.mm_mapsize = DEFAULT_MAPSIZE;
 	} else {
 		env->me_psize = meta.mm_psize;
 	}
 
 	/* Was a mapsize configured? */
 	if (!env->me_mapsize) {
-		/* If this is a new environment, take the default,
-		 * else use the size recorded in the existing env.
-		 */
-		env->me_mapsize = newenv ? DEFAULT_MAPSIZE : meta.mm_mapsize;
-	} else if (env->me_mapsize < meta.mm_mapsize) {
-		/* If the configured size is smaller, make sure it's
-		 * still big enough. Silently round up to minimum if not.
+		env->me_mapsize = meta.mm_mapsize;
+	}
+	{
+		/* Make sure mapsize >= committed data size.  Even when using
+		 * mm_mapsize, which could be broken in old files (ITS#7789).
 		 */
 		size_t minsize = (meta.mm_last_pg + 1) * meta.mm_psize;
 		if (env->me_mapsize < minsize)
 			env->me_mapsize = minsize;
 	}
+	meta.mm_mapsize = env->me_mapsize;
 
 	rc = mdb_env_map(env, (flags & MDB_FIXEDMAP) ? meta.mm_address : NULL);
 	if (rc)
