@@ -4543,7 +4543,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 		if (!(flags & MDB_RDONLY)) {
 			MDB_txn *txn;
 			int tsize = sizeof(MDB_txn), size = tsize + env->me_maxdbs *
-				(sizeof(MDB_db)+sizeof(MDB_cursor)+sizeof(unsigned int)+1);
+				(sizeof(MDB_db)+sizeof(MDB_cursor *)+sizeof(unsigned int)+1);
 			txn = calloc(1, size);
 			if (txn) {
 				txn->mt_dbs = (MDB_db *)((char *)txn + tsize);
