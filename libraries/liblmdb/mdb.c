@@ -2775,10 +2775,10 @@ mdb_txn_env(MDB_txn *txn)
 	return txn->mt_env;
 }
 
-MDB_txnid_t
+size_t
 mdb_txn_id(MDB_txn *txn)
 {
-    if(!txn) return (txnid_t)-1;
+    if(!txn) return 0;
     return txn->mt_txnid;
 }
 
