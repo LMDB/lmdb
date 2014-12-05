@@ -226,6 +226,9 @@ typedef struct MDB_env MDB_env;
  */
 typedef struct MDB_txn MDB_txn;
 
+/** @brief Unique identifier for an active or recent transaction. */
+typedef size_t MDB_txnid_t;
+
 /** @brief A handle for an individual database in the DB environment. */
 typedef unsigned int	MDB_dbi;
 
@@ -448,7 +451,7 @@ typedef struct MDB_envinfo {
 	void	*me_mapaddr;			/**< Address of map, if fixed */
 	size_t	me_mapsize;				/**< Size of the data memory map */
 	size_t	me_last_pgno;			/**< ID of the last used page */
-	size_t	me_last_txnid;			/**< ID of the last committed transaction */
+	MDB_txnid_t  me_last_txnid;		/**< ID of the last committed transaction */
 	unsigned int me_maxreaders;		/**< max reader slots in the environment */
 	unsigned int me_numreaders;		/**< max reader slots used in the environment */
 } MDB_envinfo;
@@ -949,6 +952,19 @@ int  mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 */
 MDB_env *mdb_txn_env(MDB_txn *txn);
+
+	/** @brief Return the transaction's #MDB_txnid_t
+	 *
+	 * This returns the identifier associated with this transaction. For a
+	 * read-only transaction, this corresponds to the snapshot being read;
+	 * concurrent readers will frequently have the same transaction ID. For
+	 * a write transaction, this is always the snapshot read plus one. When
+	 * a write transaction aborts, the next transaction ID will be reused.
+	 *
+	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
+	 * @return A transaction ID, valid if input is an active transaction.
+	 */
+MDB_txnid_t mdb_txn_id(MDB_txn *txn);
 
 	/** @brief Commit all the operations of a transaction into the database.
 	 *
