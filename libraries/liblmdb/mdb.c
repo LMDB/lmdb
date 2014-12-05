@@ -2573,9 +2573,17 @@ mdb_txn_renew0(MDB_txn *txn)
 		if (ti) {
 			if (LOCK_MUTEX(rc, env, MDB_MUTEX(env, w)))
 				return rc;
-
+#ifdef MDB_USE_SYSV_SEM
+			meta = env->me_metas[ mdb_env_pick_meta(env) ];
+			txn->mt_txnid = meta->mm_txnid;
+			/* Update mti_txnid like mdb_mutex_failed() would,
+			 * in case last writer crashed before updating it.
+			 */
+			ti->mti_txnid = txn->mt_txnid;
+#else
 			txn->mt_txnid = ti->mti_txnid;
 			meta = env->me_metas[txn->mt_txnid & 1];
+#endif
 		} else {
 			meta = env->me_metas[ mdb_env_pick_meta(env) ];
 			txn->mt_txnid = meta->mm_txnid;
