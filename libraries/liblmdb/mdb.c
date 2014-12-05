@@ -270,13 +270,18 @@ typedef struct mdb_mutex {
 
 #define MDB_MUTEX(env, rw)		(&(env)->me_##rw##mutex)
 #define LOCK_MUTEX0(mutex)		mdb_sem_wait(mutex)
-#define UNLOCK_MUTEX(mutex)		do { struct sembuf sb = { mutex->semnum, 1, SEM_UNDO }; semop(mutex->semid, &sb, 1); } while(0)
+#define UNLOCK_MUTEX(mutex)		do { \
+	struct sembuf sb = { 0, 1, SEM_UNDO }; \
+	sb.sem_num = (mutex)->semnum; \
+	semop((mutex)->semid, &sb, 1); \
+} while(0)
 
 static int
 mdb_sem_wait(mdb_mutex_t *sem)
 {
    int rc;
-   struct sembuf sb = { sem->semnum, -1, SEM_UNDO };
+   struct sembuf sb = { 0, -1, SEM_UNDO };
+   sb.sem_num = sem->semnum;
    while ((rc = semop(sem->semid, &sb, 1)) && (rc = errno) == EINTR) ;
    return rc;
 }
@@ -4417,6 +4422,11 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		env->me_txns->mti_numreaders = 0;
 
 	} else {
+#ifdef MDB_USE_SYSV_SEM
+		struct semid_ds buf;
+		union semun semu;
+		int semid;
+#endif
 		if (env->me_txns->mti_magic != MDB_MAGIC) {
 			DPUTS("lock region has invalid magic");
 			rc = MDB_INVALID;
@@ -4438,9 +4448,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		env->me_wmutex = OpenMutex(SYNCHRONIZE, FALSE, env->me_txns->mti_wmname);
 		if (!env->me_wmutex) goto fail_errno;
 #elif defined(MDB_USE_SYSV_SEM)
-		struct semid_ds buf;
-		union semun semu;
-		int semid = env->me_txns->mti_semid;
+		semid = env->me_txns->mti_semid;
 		semu.buf = &buf;
 
 		/* check for read access */
