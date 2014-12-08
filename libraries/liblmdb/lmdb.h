@@ -1042,9 +1042,9 @@ int  mdb_txn_renew(MDB_txn *txn);
 	 * After a successful commit the
 	 * handle will reside in the shared environment, and may be used
 	 * by other transactions. This function must not be called from
-	 * multiple concurrent transactions. A transaction that uses this function
-	 * must finish (either commit or abort) before any other transaction may
-	 * use this function.
+	 * multiple concurrent transactions in the same process. A transaction
+	 * that uses this function must finish (either commit or abort) before
+	 * any other transaction in the process may use this function.
 	 *
 	 * To use named databases (with name != NULL), #mdb_env_set_maxdbs()
 	 * must be called before opening the environment.  Database names
