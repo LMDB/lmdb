@@ -3965,6 +3965,20 @@ mdb_env_open2(MDB_env *env)
 	}
 	meta.mm_mapsize = env->me_mapsize;
 
+	if (newenv && !(flags & MDB_FIXEDMAP)) {
+		/* mdb_env_map() may grow the datafile.  Write the metapages
+		 * first, so the file will be valid if initialization fails.
+		 * Except with FIXEDMAP, since we do not yet know mm_address.
+		 * We could fill in mm_address later, but then a different
+		 * program might end up doing that - one with a memory layout
+		 * and map address which does not suit the main program.
+		 */
+		rc = mdb_env_init_meta(env, &meta);
+		if (rc)
+			return rc;
+		newenv = 0;
+	}
+
 	rc = mdb_env_map(env, (flags & MDB_FIXEDMAP) ? meta.mm_address : NULL);
 	if (rc)
 		return rc;
