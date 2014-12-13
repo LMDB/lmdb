@@ -41,7 +41,7 @@ install: $(ILIBS) $(IPROGS) $(IHDRS)
 	for f in $(IDOCS); do cp $$f $(DESTDIR)$(prefix)/man/man1; done
 
 clean:
-	rm -rf $(PROGS) *.[ao] *.so *~ testdb
+	rm -rf $(PROGS) *.[ao] *.[ls]o *~ testdb
 
 test:	all
 	rm -rf testdb && mkdir testdb
