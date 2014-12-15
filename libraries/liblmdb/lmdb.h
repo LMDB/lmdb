@@ -1287,10 +1287,9 @@ int  mdb_get(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data);
 	 *		LMDB does nothing else with this memory, the caller is expected
 	 *		to modify all of the space requested.
 	 *	<li>#MDB_APPEND - append the given key/data pair to the end of the
-	 *		database. No key comparisons are performed. This option allows
-	 *		fast bulk loading when keys are already known to be in the
-	 *		correct order. Loading unsorted keys with this flag will cause
-	 *		data corruption.
+	 *		database. This option allows fast bulk loading when keys are
+	 *		already known to be in the correct order. Loading unsorted keys
+	 *		with this flag will cause a #MDB_KEYEXIST error.
 	 *	<li>#MDB_APPENDDUP - as above, but for sorted dup data.
 	 * </ul>
 	 * @return A non-zero error value on failure and 0 on success. Some possible
