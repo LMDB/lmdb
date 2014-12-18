@@ -368,6 +368,7 @@ static int mdb_mutex_failed(MDB_env *env, mdb_mutex_t *mutex, int rc);
  */
 #ifndef MDB_FDATASYNC
 # define MDB_FDATASYNC	fdatasync
+# define HAVE_FDATASYNC	1
 #endif
 
 #ifndef MDB_MSYNC
@@ -1154,7 +1155,7 @@ struct MDB_env {
 	MDB_txn		*me_txn;		/**< current write transaction */
 	MDB_txn		*me_txn0;		/**< prealloc'd write transaction */
 	size_t		me_mapsize;		/**< size of the data memory map */
-	off_t		me_size;		/**< current file size */
+	size_t		me_size;		/**< current file size */
 	pgno_t		me_maxpg;		/**< me_mapsize / me_psize */
 	MDB_dbx		*me_dbxs;		/**< array of static DB info */
 	uint16_t	*me_dbflags;	/**< array of flags from MDB_db.md_flags */
@@ -2341,10 +2342,19 @@ fail:
 	return rc;
 }
 
-int
-mdb_env_sync(MDB_env *env, int force)
+/* internal env_sync flags: */
+#define FORCE	1		/* as before, force a flush */
+#define FGREW	0x8000	/* file has grown, do a full fsync instead of just
+	   fdatasync. We shouldn't have to do this, according to the POSIX spec.
+	   But common Linux FSs violate the spec and won't sync required metadata
+	   correctly when the file grows. This only makes a difference if the
+	   platform actually distinguishes fdatasync from fsync.
+	   http://www.openldap.org/lists/openldap-devel/201411/msg00000.html */
+
+static int
+mdb_env_sync0(MDB_env *env, int flag)
 {
-	int rc = 0;
+	int rc = 0, force = flag & FORCE;
 	if (force || !F_ISSET(env->me_flags, MDB_NOSYNC)) {
 		if (env->me_flags & MDB_WRITEMAP) {
 			int flags = ((env->me_flags & MDB_MAPASYNC) && !force)
@@ -2356,11 +2366,23 @@ mdb_env_sync(MDB_env *env, int force)
 				rc = ErrCode();
 #endif
 		} else {
+#ifdef HAVE_FDATASYNC
+			if (flag & FGREW) {
+				if (fsync(env->me_fd))	/* Avoid ext-fs bugs, do full sync */
+					rc = ErrCode();
+			} else
+#endif
 			if (MDB_FDATASYNC(env->me_fd))
 				rc = ErrCode();
 		}
 	}
 	return rc;
+}
+
+int
+mdb_env_sync(MDB_env *env, int force)
+{
+	return mdb_env_sync0(env, force != 0);
 }
 
 /** Back up parent txn's cursors, then grab the originals for tracking */
@@ -3437,8 +3459,15 @@ mdb_txn_commit(MDB_txn *txn)
 	mdb_audit(txn);
 #endif
 
+	i = 0;
+#ifdef HAVE_FDATASYNC
+	if (txn->mt_next_pgno * env->me_psize > env->me_size) {
+		i |= FGREW;
+		env->me_size = txn->mt_next_pgno * env->me_psize;
+	}
+#endif
 	if ((rc = mdb_page_flush(txn, 0)) ||
-		(rc = mdb_env_sync(env, 0)) ||
+		(rc = mdb_env_sync(env, i)) ||
 		(rc = mdb_env_write_meta(txn)))
 		goto fail;
 
@@ -3978,6 +4007,10 @@ mdb_env_open2(MDB_env *env)
 			return rc;
 		newenv = 0;
 	}
+
+	rc = mdb_fsize(env->me_fd, &env->me_size);
+	if (rc)
+		return rc;
 
 	rc = mdb_env_map(env, (flags & MDB_FIXEDMAP) ? meta.mm_address : NULL);
 	if (rc)
