@@ -4,6 +4,7 @@ LMDB 0.9.15 Release Engineering
 	Fix txn init (ITS#7961,#7987)
 	Fix MDB_PREV_DUP (ITS#7955,#7671)
 	Fix compact of empty env (ITS#7956)
+	Fix potential fdatasync bug on ext3fs
 	Build
 		Don't use -fPIC for static lib
 		Update .gitignore (ITS#7952,#7953)
