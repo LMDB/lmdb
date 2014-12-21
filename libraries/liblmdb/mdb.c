@@ -3402,7 +3402,7 @@ mdb_txn_commit(MDB_txn *txn)
 	}
 #endif
 	if ((rc = mdb_page_flush(txn, 0)) ||
-		(rc = mdb_env_sync(env, i)) ||
+		(rc = mdb_env_sync0(env, i)) ||
 		(rc = mdb_env_write_meta(txn)))
 		goto fail;
 
