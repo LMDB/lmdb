@@ -368,6 +368,12 @@ static int mdb_mutex_failed(MDB_env *env, mdb_mutex_t *mutex, int rc);
  */
 #ifndef MDB_FDATASYNC
 # define MDB_FDATASYNC	fdatasync
+# ifndef MDB_SAFE_FDATASYNC
+/** Linux ext3fs and ext4fs don't implement fdatasync correctly
+ *	on older kernels. xfs is known to be safe. https://lkml.org/lkml/2012/9/3/83
+ */
+#  define	MDB_BROKEN_FDATASYNC
+# endif
 #endif
 
 #ifndef MDB_MSYNC
@@ -1154,7 +1160,7 @@ struct MDB_env {
 	MDB_txn		*me_txn;		/**< current write transaction */
 	MDB_txn		*me_txn0;		/**< prealloc'd write transaction */
 	size_t		me_mapsize;		/**< size of the data memory map */
-	off_t		me_size;		/**< current file size */
+	size_t		me_size;		/**< current file size */
 	pgno_t		me_maxpg;		/**< me_mapsize / me_psize */
 	MDB_dbx		*me_dbxs;		/**< array of static DB info */
 	uint16_t	*me_dbflags;	/**< array of flags from MDB_db.md_flags */
@@ -2341,6 +2347,10 @@ fail:
 	return rc;
 }
 
+#ifdef MDB_BROKEN_FDATASYNC
+static int ESECT mdb_fsize(HANDLE fd, size_t *size);
+#endif
+
 int
 mdb_env_sync(MDB_env *env, int force)
 {
@@ -2356,6 +2366,15 @@ mdb_env_sync(MDB_env *env, int force)
 				rc = ErrCode();
 #endif
 		} else {
+#ifdef MDB_BROKEN_FDATASYNC
+			size_t sz = 0;
+			if (mdb_fsize(env->me_fd, &sz) != MDB_SUCCESS || sz != env->me_size) {
+				if (fsync(env->me_fd))
+					rc = ErrCode();
+				else if (sz)
+					env->me_size = sz;
+			} else
+#endif
 			if (MDB_FDATASYNC(env->me_fd))
 				rc = ErrCode();
 		}
