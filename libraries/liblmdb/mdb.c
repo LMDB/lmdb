@@ -1143,6 +1143,9 @@ struct MDB_env {
 	sem_t		*me_rmutex;		/* Shared mutexes are not supported */
 	sem_t		*me_wmutex;
 #endif
+#ifdef __linux
+	int		me_fsynconly;		/**< fdatasync is unreliable */
+#endif
 	void		*me_userctx;	 /**< User-settable context */
 	MDB_assert_func *me_assert_func; /**< Callback for assertion failures */
 };
@@ -2313,6 +2316,12 @@ mdb_env_sync(MDB_env *env, int force)
 				rc = ErrCode();
 #endif
 		} else {
+#ifdef __linux
+			if (env->me_fsynconly) {
+				if (fsync(env->me_fd))
+					rc = ErrCode();
+			} else
+#endif
 			if (MDB_FDATASYNC(env->me_fd))
 				rc = ErrCode();
 		}
@@ -3850,6 +3859,11 @@ mdb_fsize(HANDLE fd, size_t *size)
 	return MDB_SUCCESS;
 }
 
+#ifdef __linux
+#include <sys/utsname.h>
+#include <sys/vfs.h>
+#endif
+
 /** Further setup required for opening an LMDB environment
  */
 static int ESECT
@@ -3867,6 +3881,53 @@ mdb_env_open2(MDB_env *env)
 	else
 		env->me_pidquery = PROCESS_QUERY_INFORMATION;
 #endif /* _WIN32 */
+#ifdef __linux
+	/* ext3/ext4 fdatasync is broken on some older Linux kernels.
+	 * https://lkml.org/lkml/2012/9/3/83
+	 * Kernels after 3.6-rc6 are known good.
+	 * https://lkml.org/lkml/2012/9/10/556
+	 * See if the DB is on ext3/ext4, then check for new enough kernel
+	 * Kernels 2.6.32.60, 2.6.34.15, 3.2.30, and 3.5.4 are also known
+	 * to be patched.
+	 */
+	{
+		struct statfs st;
+		fstatfs(env->me_fd, &st);
+		while (st.f_type == 0xEF53) {
+			struct utsname uts;
+			int i;
+			uname(&uts);
+			if (uts.release[0] < '3') {
+				if (!strncmp(uts.release, "2.6.32.", 7)) {
+					i = atoi(uts.release+7);
+					if (i >= 60)
+						break;	/* 2.6.32.60 and newer is OK */
+				} else if (!strncmp(uts.release, "2.6.34.", 7)) {
+					i = atoi(uts.release+7);
+					if (i >= 15)
+						break;	/* 2.6.34.15 and newer is OK */
+				}
+			} else if (uts.release[0] == '3') {
+				i = atoi(uts.release+2);
+				if (i > 5)
+					break;	/* 3.6 and newer is OK */
+				if (i == 5) {
+					i = atoi(uts.release+4);
+					if (i >= 4)
+						break;	/* 3.5.4 and newer is OK */
+				} else if (i == 2) {
+					i = atoi(uts.release+4);
+					if (i >= 30)
+						break;	/* 3.2.30 and newer is OK */
+				}
+			} else {	/* 4.x and newer is OK */
+				break;
+			}
+			env->me_fsynconly = 1;
+			break;
+		}
+	}
+#endif
 
 	memset(&meta, 0, sizeof(meta));
 
