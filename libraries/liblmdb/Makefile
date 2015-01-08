@@ -11,7 +11,6 @@
 # - MDB_USE_POSIX_SEM
 # - MDB_DSYNC
 # - MDB_FDATASYNC
-# - MDB_SAFE_FDATASYNC
 # - MDB_USE_PWRITEV
 #
 # There may be other macros in mdb.c of interest. You should
