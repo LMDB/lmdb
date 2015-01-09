@@ -703,7 +703,8 @@ int  mdb_env_info(MDB_env *env, MDB_envinfo *stat);
 	 * Data is always written to disk when #mdb_txn_commit() is called,
 	 * but the operating system may keep it buffered. LMDB always flushes
 	 * the OS buffers upon commit as well, unless the environment was
-	 * opened with #MDB_NOSYNC or in part #MDB_NOMETASYNC.
+	 * opened with #MDB_NOSYNC or in part #MDB_NOMETASYNC. This call is
+	 * not valid if the environment was opened with #MDB_RDONLY.
 	 * @param[in] env An environment handle returned by #mdb_env_create()
 	 * @param[in] force If non-zero, force a synchronous flush.  Otherwise
 	 *  if the environment has the #MDB_NOSYNC flag set the flushes
@@ -711,6 +712,7 @@ int  mdb_env_info(MDB_env *env, MDB_envinfo *stat);
 	 * @return A non-zero error value on failure and 0 on success. Some possible
 	 * errors are:
 	 * <ul>
+	 *	<li>EACCES - the environment is read-only.
 	 *	<li>EINVAL - an invalid parameter was specified.
 	 *	<li>EIO - an error occurred during synchronization.
 	 * </ul>

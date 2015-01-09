@@ -2348,6 +2348,8 @@ int
 mdb_env_sync(MDB_env *env, int force)
 {
 	int rc = 0;
+	if (env->me_flags & MDB_RDONLY)
+		return EACCES;
 	if (force || !F_ISSET(env->me_flags, MDB_NOSYNC)) {
 		if (env->me_flags & MDB_WRITEMAP) {
 			int flags = ((env->me_flags & MDB_MAPASYNC) && !force)
