@@ -79,6 +79,12 @@ extern int cacheflush(char *addr, int nbytes, int cache);
 #define CACHEFLUSH(addr, bytes, cache)
 #endif
 
+#if defined(__linux) && !defined(MDB_FDATASYNC_WORKS)
+/** fdatasync is broken on ext3/ext4fs on older kernels, see
+ *	description in #mdb_env_open2 comments
+ */
+#define	BROKEN_FDATASYNC
+#endif
 
 #include <errno.h>
 #include <limits.h>
@@ -1143,7 +1149,7 @@ struct MDB_env {
 	sem_t		*me_rmutex;		/* Shared mutexes are not supported */
 	sem_t		*me_wmutex;
 #endif
-#ifdef __linux
+#ifdef BROKEN_FDATASYMC
 	int		me_fsynconly;		/**< fdatasync is unreliable */
 #endif
 	void		*me_userctx;	 /**< User-settable context */
@@ -2318,7 +2324,7 @@ mdb_env_sync(MDB_env *env, int force)
 				rc = ErrCode();
 #endif
 		} else {
-#ifdef __linux
+#ifdef BROKEN_FDATASYNC
 			if (env->me_fsynconly) {
 				if (fsync(env->me_fd))
 					rc = ErrCode();
@@ -3861,7 +3867,7 @@ mdb_fsize(HANDLE fd, size_t *size)
 	return MDB_SUCCESS;
 }
 
-#ifdef __linux
+#ifdef BROKEN_FDATASYNC
 #include <sys/utsname.h>
 #include <sys/vfs.h>
 #endif
@@ -3883,7 +3889,7 @@ mdb_env_open2(MDB_env *env)
 	else
 		env->me_pidquery = PROCESS_QUERY_INFORMATION;
 #endif /* _WIN32 */
-#ifdef __linux
+#ifdef BROKEN_FDATASYNC
 	/* ext3/ext4 fdatasync is broken on some older Linux kernels.
 	 * https://lkml.org/lkml/2012/9/3/83
 	 * Kernels after 3.6-rc6 are known good.
