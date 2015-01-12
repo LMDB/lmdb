@@ -516,8 +516,8 @@ int  mdb_env_create(MDB_env **env);
 	 *		and uses fewer mallocs, but loses protection from application bugs
 	 *		like wild pointer writes and other bad updates into the database.
 	 *		Incompatible with nested transactions.
-	 *		Processes with and without MDB_WRITEMAP on the same environment do
-	 *		not cooperate well.
+	 *		Do not mix processes with and without MDB_WRITEMAP on the same
+	 *		environment.  This can defeat durability (#mdb_env_sync etc).
 	 *	<li>#MDB_NOMETASYNC
 	 *		Flush system buffers to disk only once per transaction, omit the
 	 *		metadata flush. Defer that until the system flushes files to disk,
