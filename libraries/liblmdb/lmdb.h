@@ -450,7 +450,7 @@ typedef struct MDB_envinfo {
 	void	*me_mapaddr;			/**< Address of map, if fixed */
 	size_t	me_mapsize;				/**< Size of the data memory map */
 	size_t	me_last_pgno;			/**< ID of the last used page */
-	size_t  me_last_txnid;		/**< ID of the last committed transaction */
+	size_t	me_last_txnid;			/**< ID of the last committed transaction */
 	unsigned int me_maxreaders;		/**< max reader slots in the environment */
 	unsigned int me_numreaders;		/**< max reader slots used in the environment */
 } MDB_envinfo;
