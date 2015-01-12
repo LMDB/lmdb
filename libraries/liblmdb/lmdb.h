@@ -953,6 +953,17 @@ int  mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **
 	 */
 MDB_env *mdb_txn_env(MDB_txn *txn);
 
+	/** @brief Return the transaction's ID.
+	 *
+	 * This returns the identifier associated with this transaction. For a
+	 * read-only transaction, this corresponds to the snapshot being read;
+	 * concurrent readers will frequently have the same transaction ID.
+	 *
+	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
+	 * @return A transaction ID, valid if input is an active transaction.
+	 */
+size_t mdb_txn_id(MDB_txn *txn);
+
 	/** @brief Commit all the operations of a transaction into the database.
 	 *
 	 * The transaction handle is freed. It and its cursors must not be used

@@ -2766,6 +2766,13 @@ mdb_txn_env(MDB_txn *txn)
 	return txn->mt_env;
 }
 
+size_t
+mdb_txn_id(MDB_txn *txn)
+{
+    if(!txn) return 0;
+    return txn->mt_txnid;
+}
+
 /** Export or close DBI handles opened in this txn. */
 static void
 mdb_dbis_update(MDB_txn *txn, int keep)
