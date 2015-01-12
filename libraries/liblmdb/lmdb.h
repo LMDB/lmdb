@@ -109,7 +109,9 @@
  *	  The transaction becomes "long-lived" as above until a check
  *	  for stale readers is performed or the lockfile is reset,
  *	  since the process may not remove it from the lockfile.
- *	  Except write-transactions on Unix with MDB_ROBUST or on Windows.
+ *
+ *	  This does not apply to write transactions if the system clears
+ *	  stale writers, see above.
  *
  *	- If you do that anyway, do a periodic check for stale readers. Or
  *	  close the environment once in a while, so the lockfile can get reset.
