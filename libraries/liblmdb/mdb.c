@@ -81,7 +81,9 @@ extern int cacheflush(char *addr, int nbytes, int cache);
 
 #if defined(__linux) && !defined(MDB_FDATASYNC_WORKS)
 /** fdatasync is broken on ext3/ext4fs on older kernels, see
- *	description in #mdb_env_open2 comments
+ *	description in #mdb_env_open2 comments. You can safely
+ *	define MDB_FDATASYNC_WORKS if this code will only be run
+ *	on kernels 3.6 and newer.
  */
 #define	BROKEN_FDATASYNC
 #endif
@@ -1144,6 +1146,8 @@ struct MDB_env {
 #define	MDB_ENV_ACTIVE	0x20000000U
 	/** me_txkey is set */
 #define	MDB_ENV_TXKEY	0x10000000U
+	/** fdatasync is unreliable */
+#define	MDB_FSYNCONLY	0x08000000U
 	uint32_t 	me_flags;		/**< @ref mdb_env */
 	unsigned int	me_psize;	/**< DB page size, inited from me_os_psize */
 	unsigned int	me_os_psize;	/**< OS page size, from #GET_PAGESIZE */
@@ -1185,9 +1189,6 @@ struct MDB_env {
 	int		me_live_reader;		/**< have liveness lock in reader table */
 #ifdef _WIN32
 	int		me_pidquery;		/**< Used in OpenProcess */
-#endif
-#ifdef BROKEN_FDATASYNC
-	int		me_fsynconly;		/**< fdatasync is unreliable */
 #endif
 #if defined(_WIN32) || defined(MDB_USE_SYSV_SEM)
 	/* Windows mutexes/SysV semaphores do not reside in shared mem */
@@ -2368,7 +2369,7 @@ mdb_env_sync(MDB_env *env, int force)
 #endif
 		} else {
 #ifdef BROKEN_FDATASYNC
-			if (env->me_fsynconly) {
+			if (env->me_flags & MDB_FSYNCONLY) {
 				if (fsync(env->me_fd))
 					rc = ErrCode();
 			} else
@@ -4000,7 +4001,7 @@ mdb_env_open2(MDB_env *env)
 			} else {	/* 4.x and newer is OK */
 				break;
 			}
-			env->me_fsynconly = 1;
+			env->me_flags |= MDB_FSYNCONLY;
 			break;
 		}
 	}
