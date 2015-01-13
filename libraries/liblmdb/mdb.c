@@ -4647,13 +4647,15 @@ mdb_env_close0(MDB_env *env, int excl)
 		return;
 
 	/* Doing this here since me_dbxs may not exist during mdb_env_close */
-	for (i = env->me_maxdbs; --i > MAIN_DBI; )
-		free(env->me_dbxs[i].md_name.mv_data);
+	if (env->me_dbxs) {
+		for (i = env->me_maxdbs; --i > MAIN_DBI; )
+			free(env->me_dbxs[i].md_name.mv_data);
+		free(env->me_dbxs);
+	}
 
 	free(env->me_pbuf);
 	free(env->me_dbiseqs);
 	free(env->me_dbflags);
-	free(env->me_dbxs);
 	free(env->me_path);
 	free(env->me_dirty_list);
 	free(env->me_txn0);
@@ -7456,7 +7458,7 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 			cdst->mc_ki[cdst->mc_top] = 0;
 			rc = mdb_update_key(cdst, &nullkey);
 			cdst->mc_ki[cdst->mc_top] = ix;
-			mdb_cassert(csrc, rc == MDB_SUCCESS);
+			mdb_cassert(cdst, rc == MDB_SUCCESS);
 		}
 	}
 
