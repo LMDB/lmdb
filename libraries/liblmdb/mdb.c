@@ -9001,7 +9001,7 @@ mdb_env_copy(MDB_env *env, const char *path)
 int ESECT
 mdb_env_set_flags(MDB_env *env, unsigned int flag, int onoff)
 {
-	if (flag & (env->me_map ? ~CHANGEABLE : ~(CHANGEABLE|CHANGELESS)))
+	if ((flag & CHANGEABLE) != flag)
 		return EINVAL;
 	if (onoff)
 		env->me_flags |= flag;
