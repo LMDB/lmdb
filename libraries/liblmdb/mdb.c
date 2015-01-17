@@ -1121,7 +1121,8 @@ struct MDB_env {
 	unsigned int	me_psize;	/**< DB page size, inited from me_os_psize */
 	unsigned int	me_os_psize;	/**< OS page size, from #GET_PAGESIZE */
 	unsigned int	me_maxreaders;	/**< size of the reader table */
-	unsigned int	me_numreaders;	/**< max numreaders set by this env */
+	/** Max #MDB_txninfo.%mti_numreaders of interest to #mdb_env_close() */
+	volatile int	me_close_readers;
 	MDB_dbi		me_numdbs;		/**< number of DBs opened */
 	MDB_dbi		me_maxdbs;		/**< size of the DB table */
 	MDB_PID_T	me_pid;		/**< process ID of this env */
@@ -2545,15 +2546,22 @@ mdb_txn_renew0(MDB_txn *txn)
 					UNLOCK_MUTEX_R(env);
 					return MDB_READERS_FULL;
 				}
-				ti->mti_readers[i].mr_pid = pid;
-				ti->mti_readers[i].mr_tid = tid;
+				r = &ti->mti_readers[i];
+				/* Claim the reader slot, carefully since other code
+				 * uses the reader table un-mutexed: First reset the
+				 * slot, next publish it in mti_numreaders.  After
+				 * that, it is safe for mdb_env_close() to touch it.
+				 * When it will be closed, we can finally claim it.
+				 */
+				r->mr_pid = 0;
+				r->mr_txnid = (txnid_t)-1;
+				r->mr_tid = tid;
 				if (i == nr)
 					ti->mti_numreaders = ++nr;
-				/* Save numreaders for un-mutexed mdb_env_close() */
-				env->me_numreaders = nr;
+				env->me_close_readers = nr;
+				r->mr_pid = pid;
 				UNLOCK_MUTEX_R(env);
 
-				r = &ti->mti_readers[i];
 				new_notls = (env->me_flags & MDB_NOTLS);
 				if (!new_notls && (rc=pthread_setspecific(env->me_txkey, r))) {
 					r->mr_pid = 0;
@@ -4747,8 +4755,12 @@ mdb_env_close0(MDB_env *env, int excl)
 		MDB_PID_T pid = env->me_pid;
 		/* Clearing readers is done in this function because
 		 * me_txkey with its destructor must be disabled first.
+		 *
+		 * We skip the the reader mutex, so we touch only
+		 * data owned by this process (me_close_readers and
+		 * our readers), and clear each reader atomically.
 		 */
-		for (i = env->me_numreaders; --i >= 0; )
+		for (i = env->me_close_readers; --i >= 0; )
 			if (env->me_txns->mti_readers[i].mr_pid == pid)
 				env->me_txns->mti_readers[i].mr_pid = 0;
 #ifdef _WIN32
@@ -9181,11 +9193,7 @@ mdb_env_info(MDB_env *env, MDB_envinfo *arg)
 	arg->me_mapaddr = env->me_metas[toggle]->mm_address;
 	arg->me_mapsize = env->me_mapsize;
 	arg->me_maxreaders = env->me_maxreaders;
-
-	/* me_numreaders may be zero if this process never used any readers. Use
-	 * the shared numreader count if it exists.
-	 */
-	arg->me_numreaders = env->me_txns ? env->me_txns->mti_numreaders : env->me_numreaders;
+	arg->me_numreaders = env->me_txns ? env->me_txns->mti_numreaders : 0;
 
 	arg->me_last_pgno = env->me_metas[toggle]->mm_last_pg;
 	arg->me_last_txnid = env->me_metas[toggle]->mm_txnid;
