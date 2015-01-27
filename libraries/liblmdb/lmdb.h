@@ -1468,7 +1468,7 @@ int  mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	 * <ul>
 	 *	<li>#MDB_MAP_FULL - the database is full, see #mdb_env_set_mapsize().
 	 *	<li>#MDB_TXN_FULL - the transaction has too many dirty pages.
-	 *	<li>EACCES - an attempt was made to modify a read-only database.
+	 *	<li>EACCES - an attempt was made to write in a read-only transaction.
 	 *	<li>EINVAL - an invalid parameter was specified.
 	 * </ul>
 	 */
@@ -1488,7 +1488,7 @@ int  mdb_cursor_put(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	 * @return A non-zero error value on failure and 0 on success. Some possible
 	 * errors are:
 	 * <ul>
-	 *	<li>EACCES - an attempt was made to modify a read-only database.
+	 *	<li>EACCES - an attempt was made to write in a read-only transaction.
 	 *	<li>EINVAL - an invalid parameter was specified.
 	 * </ul>
 	 */
