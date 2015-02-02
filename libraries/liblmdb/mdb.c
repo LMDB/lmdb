@@ -1085,6 +1085,7 @@ struct MDB_txn {
 #define MDB_TXN_DIRTY		0x04		/**< must write, even if dirty list is empty */
 #define MDB_TXN_SPILLS		0x08		/**< txn or a parent has spilled pages */
 #define MDB_TXN_NOSYNC		0x10		/**< don't sync this txn on commit */
+#define MDB_TXN_NOMETASYNC	0x20		/**< don't sync meta for this txn on commit */
 /** @} */
 	unsigned int	mt_flags;		/**< @ref mdb_txn */
 	/** #dirty_list room: Array size - \#dirty pages visible to this txn.
@@ -2758,6 +2759,8 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 	} else {
 		if (flags & MDB_NOSYNC)
 			txn->mt_flags |= MDB_TXN_NOSYNC;
+		if (flags & MDB_NOMETASYNC)
+			txn->mt_flags |= MDB_TXN_NOMETASYNC;
 		txn->mt_cursors = (MDB_cursor **)(txn->mt_dbs + env->me_maxdbs);
 		if (parent) {
 			txn->mt_dbiseqs = parent->mt_dbiseqs;
@@ -3688,7 +3691,7 @@ mdb_env_write_meta(MDB_txn *txn)
 		__sync_synchronize();
 #endif
 		mp->mm_txnid = txn->mt_txnid;
-		if (F_ISSET(txn->mt_flags, MDB_TXN_NOSYNC))
+		if (txn->mt_flags & (MDB_TXN_NOSYNC|MDB_TXN_NOMETASYNC))
 			goto done;
 		if (!(env->me_flags & (MDB_NOMETASYNC|MDB_NOSYNC))) {
 			unsigned meta_size = env->me_psize;
@@ -3727,7 +3730,7 @@ mdb_env_write_meta(MDB_txn *txn)
 
 	/* Write to the SYNC fd */
 	mfd = ((env->me_flags & (MDB_NOSYNC|MDB_NOMETASYNC)) ||
-		(txn->mt_flags & MDB_TXN_NOSYNC)) ?
+		(txn->mt_flags & (MDB_TXN_NOSYNC|MDB_TXN_NOMETASYNC))) ?
 		env->me_fd : env->me_mfd;
 #ifdef _WIN32
 	{
