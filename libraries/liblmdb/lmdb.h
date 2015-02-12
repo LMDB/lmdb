@@ -126,7 +126,7 @@
  *
  *	@author	Howard Chu, Symas Corporation.
  *
- *	@copyright Copyright 2011-2014 Howard Chu, Symas Corp. All rights reserved.
+ *	@copyright Copyright 2011-2015 Howard Chu, Symas Corp. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted only as authorized by the OpenLDAP
