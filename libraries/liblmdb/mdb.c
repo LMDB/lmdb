@@ -1016,7 +1016,11 @@ struct MDB_txn {
  *	@ingroup internal
  *	@{
  */
-#define MDB_TXN_RDONLY		0x01		/**< read-only transaction */
+	/** #mdb_txn_begin() flags */
+#define MDB_TXN_BEGIN_FLAGS	MDB_RDONLY
+#define MDB_TXN_RDONLY		MDB_RDONLY	/**< read-only transaction */
+	/* internal txn flags */
+#define MDB_TXN_WRITEMAP	MDB_WRITEMAP	/**< copy of #MDB_env flag in writers */
 #define MDB_TXN_ERROR		0x02		/**< txn is unusable after an error */
 #define MDB_TXN_DIRTY		0x04		/**< must write, even if dirty list is empty */
 #define MDB_TXN_SPILLS		0x08		/**< txn or a parent has spilled pages */
@@ -1942,7 +1946,7 @@ mdb_page_dirty(MDB_txn *txn, MDB_page *mp)
 	MDB_ID2 mid;
 	int rc, (*insert)(MDB_ID2L, MDB_ID2 *);
 
-	if (txn->mt_env->me_flags & MDB_WRITEMAP) {
+	if (txn->mt_flags & MDB_TXN_WRITEMAP) {
 		insert = mdb_mid2l_append;
 	} else {
 		insert = mdb_mid2l_insert;
@@ -2662,18 +2666,20 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 	MDB_ntxn *ntxn;
 	int rc, size, tsize = sizeof(MDB_txn);
 
+	flags &= MDB_TXN_BEGIN_FLAGS;
+	flags |= env->me_flags & MDB_WRITEMAP;
+
 	if (env->me_flags & MDB_FATAL_ERROR) {
 		DPUTS("environment had fatal error, must shutdown!");
 		return MDB_PANIC;
 	}
-	if ((env->me_flags & MDB_RDONLY) && !(flags & MDB_RDONLY))
+	if (env->me_flags & MDB_RDONLY & ~flags) /* write txn in RDONLY env */
 		return EACCES;
 	if (parent) {
 		/* Nested transactions: Max 1 child, write txns only, no writemap */
+		flags |= parent->mt_flags;
 		if (parent->mt_child ||
-			(flags & MDB_RDONLY) ||
-			(parent->mt_flags & (MDB_TXN_RDONLY|MDB_TXN_ERROR)) ||
-			(env->me_flags & MDB_WRITEMAP))
+			(flags & (MDB_RDONLY|MDB_WRITEMAP|MDB_TXN_ERROR)))
 		{
 			return (parent->mt_flags & MDB_TXN_RDONLY) ? EINVAL : MDB_BAD_TXN;
 		}
@@ -2696,7 +2702,6 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 	}
 	txn->mt_dbs = (MDB_db *) ((char *)txn + tsize);
 	if (flags & MDB_RDONLY) {
-		txn->mt_flags |= MDB_TXN_RDONLY;
 		txn->mt_dbflags = (unsigned char *)(txn->mt_dbs + env->me_maxdbs);
 		txn->mt_dbiseqs = env->me_dbiseqs;
 	} else {
@@ -2709,6 +2714,7 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 			txn->mt_dbflags = (unsigned char *)(txn->mt_dbiseqs + env->me_maxdbs);
 		}
 	}
+	txn->mt_flags = flags;
 	txn->mt_env = env;
 
 ok:
@@ -2730,7 +2736,6 @@ ok:
 		parent->mt_child = txn;
 		txn->mt_parent = parent;
 		txn->mt_numdbs = parent->mt_numdbs;
-		txn->mt_flags = parent->mt_flags;
 		txn->mt_dbxs = parent->mt_dbxs;
 		memcpy(txn->mt_dbs, parent->mt_dbs, txn->mt_numdbs * sizeof(MDB_db));
 		/* Copy parent's mt_dbflags, but clear DB_NEW */
@@ -2758,9 +2763,10 @@ ok:
 		if (txn != env->me_txn0)
 			free(txn);
 	} else {
+		txn->mt_flags |= flags;	/* for txn==me_txn0, no effect otherwise */
 		*ret = txn;
 		DPRINTF(("begin txn %"Z"u%c %p on mdbenv %p, root page %"Z"u",
-			txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w',
+			txn->mt_txnid, (flags & MDB_RDONLY) ? 'r' : 'w',
 			(void *) txn, (void *) env, txn->mt_dbs[MAIN_DBI].md_root));
 	}
 
@@ -3606,6 +3612,7 @@ mdb_env_write_meta(MDB_txn *txn)
 {
 	MDB_env *env;
 	MDB_meta	meta, metab, *mp;
+	unsigned flags;
 	size_t mapsize;
 	off_t off;
 	int rc, len, toggle;
@@ -3622,19 +3629,20 @@ mdb_env_write_meta(MDB_txn *txn)
 		toggle, txn->mt_dbs[MAIN_DBI].md_root));
 
 	env = txn->mt_env;
+	flags = env->me_flags;
 	mp = env->me_metas[toggle];
 	mapsize = env->me_metas[toggle ^ 1]->mm_mapsize;
 	/* Persist any increases of mapsize config */
 	if (mapsize < env->me_mapsize)
 		mapsize = env->me_mapsize;
 
-	if (env->me_flags & MDB_WRITEMAP) {
+	if (flags & MDB_WRITEMAP) {
 		mp->mm_mapsize = mapsize;
 		mp->mm_dbs[0] = txn->mt_dbs[0];
 		mp->mm_dbs[1] = txn->mt_dbs[1];
 		mp->mm_last_pg = txn->mt_next_pgno - 1;
 		mp->mm_txnid = txn->mt_txnid;
-		if (!(env->me_flags & (MDB_NOMETASYNC|MDB_NOSYNC))) {
+		if (!(flags & (MDB_NOMETASYNC|MDB_NOSYNC))) {
 			unsigned meta_size = env->me_psize;
 			rc = (env->me_flags & MDB_MAPASYNC) ? MS_ASYNC : MS_SYNC;
 			ptr = env->me_map;
@@ -3670,8 +3678,7 @@ mdb_env_write_meta(MDB_txn *txn)
 	off += PAGEHDRSZ;
 
 	/* Write to the SYNC fd */
-	mfd = env->me_flags & (MDB_NOSYNC|MDB_NOMETASYNC) ?
-		env->me_fd : env->me_mfd;
+	mfd = (flags & (MDB_NOSYNC|MDB_NOMETASYNC)) ? env->me_fd : env->me_mfd;
 #ifdef _WIN32
 	{
 		memset(&ov, 0, sizeof(ov));
@@ -5081,7 +5088,7 @@ mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret, int *lvl)
 	MDB_page *p = NULL;
 	int level;
 
-	if (!((txn->mt_flags & MDB_TXN_RDONLY) | (env->me_flags & MDB_WRITEMAP))) {
+	if (! (txn->mt_flags & (MDB_TXN_RDONLY|MDB_TXN_WRITEMAP))) {
 		MDB_txn *tx2 = txn;
 		level = 1;
 		do {
