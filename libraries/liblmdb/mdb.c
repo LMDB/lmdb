@@ -2640,6 +2640,7 @@ mdb_txn_renew0(MDB_txn *txn)
 			meta = env->me_metas[txn->mt_txnid & 1];
 		}
 	} else {
+		/* Not yet touching txn == env->me_txn0, it may be active */
 		if (ti) {
 			if (LOCK_MUTEX(rc, env, MDB_MUTEX(env, w)))
 				return rc;
@@ -2722,7 +2723,7 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 {
 	MDB_txn *txn;
 	MDB_ntxn *ntxn;
-	int rc, size, tsize = sizeof(MDB_txn);
+	int rc, size, tsize;
 
 	flags &= MDB_TXN_BEGIN_FLAGS;
 	flags |= env->me_flags & MDB_WRITEMAP;
@@ -2733,6 +2734,8 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 	}
 	if (env->me_flags & MDB_RDONLY & ~flags) /* write txn in RDONLY env */
 		return EACCES;
+
+	size = tsize = sizeof(MDB_txn);
 	if (parent) {
 		/* Nested transactions: Max 1 child, write txns only, no writemap */
 		flags |= parent->mt_flags;
@@ -2741,16 +2744,15 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 		{
 			return (parent->mt_flags & MDB_TXN_RDONLY) ? EINVAL : MDB_BAD_TXN;
 		}
-		tsize = sizeof(MDB_ntxn);
-	}
-	size = tsize;
-	if (!(flags & MDB_RDONLY)) {
-		if (!parent) {
-			txn = env->me_txn0;	/* just reuse preallocated write txn */
-			goto ok;
-		}
-		/* child txns use own copy of cursors */
+		/* Child txns save MDB_pgstate and use own copy of cursors */
+		size = tsize = sizeof(MDB_ntxn);
 		size += env->me_maxdbs * sizeof(MDB_cursor *);
+	} else if (!(flags & MDB_RDONLY)) {
+		/* Reuse preallocated write txn. However, do not touch it until
+		 * mdb_txn_renew0() succeeds, since it currently may be active.
+		 */
+		txn = env->me_txn0;
+		goto renew;
 	}
 	size += env->me_maxdbs * (sizeof(MDB_db)+1);
 
@@ -2775,7 +2777,6 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 	txn->mt_flags = flags;
 	txn->mt_env = env;
 
-ok:
 	if (parent) {
 		unsigned int i;
 		txn->mt_u.dirty_list = malloc(sizeof(MDB_ID2)*MDB_IDL_UM_SIZE);
@@ -2815,6 +2816,7 @@ ok:
 		if (rc)
 			mdb_txn_reset0(txn, "beginchild-fail");
 	} else {
+renew:
 		rc = mdb_txn_renew0(txn);
 	}
 	if (rc) {
@@ -4732,15 +4734,13 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 			if (rc)
 				goto leave;
 		}
-		if (!((flags & MDB_RDONLY) ||
-			  (env->me_pbuf = calloc(1, env->me_psize))))
-			rc = ENOMEM;
 		if (!(flags & MDB_RDONLY)) {
 			MDB_txn *txn;
 			int tsize = sizeof(MDB_txn), size = tsize + env->me_maxdbs *
 				(sizeof(MDB_db)+sizeof(MDB_cursor *)+sizeof(unsigned int)+1);
-			txn = calloc(1, size);
-			if (txn) {
+			if ((env->me_pbuf = calloc(1, env->me_psize)) &&
+				(txn = calloc(1, size)))
+			{
 				txn->mt_dbs = (MDB_db *)((char *)txn + tsize);
 				txn->mt_cursors = (MDB_cursor **)(txn->mt_dbs + env->me_maxdbs);
 				txn->mt_dbiseqs = (unsigned int *)(txn->mt_cursors + env->me_maxdbs);
