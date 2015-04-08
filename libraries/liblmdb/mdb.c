@@ -2735,9 +2735,9 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 		return EACCES;
 	if (parent) {
 		/* Nested transactions: Max 1 child, write txns only, no writemap */
+		flags |= parent->mt_flags;
 		if (parent->mt_child ||
-			((flags | parent->mt_flags) &
-			 (MDB_RDONLY|MDB_WRITEMAP|MDB_TXN_ERROR)))
+			(flags & (MDB_RDONLY|MDB_WRITEMAP|MDB_TXN_ERROR)))
 		{
 			return (parent->mt_flags & MDB_TXN_RDONLY) ? EINVAL : MDB_BAD_TXN;
 		}
@@ -2794,7 +2794,6 @@ ok:
 		parent->mt_child = txn;
 		txn->mt_parent = parent;
 		txn->mt_numdbs = parent->mt_numdbs;
-		txn->mt_flags = parent->mt_flags;
 		txn->mt_dbxs = parent->mt_dbxs;
 		memcpy(txn->mt_dbs, parent->mt_dbs, txn->mt_numdbs * sizeof(MDB_db));
 		/* Copy parent's mt_dbflags, but clear DB_NEW */
@@ -2822,6 +2821,7 @@ ok:
 		if (txn != env->me_txn0)
 			free(txn);
 	} else {
+		txn->mt_flags |= flags;	/* for txn==me_txn0, no effect otherwise */
 		*ret = txn;
 		DPRINTF(("begin txn %"Z"u%c %p on mdbenv %p, root page %"Z"u",
 			txn->mt_txnid, (flags & MDB_RDONLY) ? 'r' : 'w',
