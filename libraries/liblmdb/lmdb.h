@@ -1043,14 +1043,16 @@ int  mdb_txn_renew(MDB_txn *txn);
 	 * The database handle may be discarded by calling #mdb_dbi_close().
 	 * The old database handle is returned if the database was already open.
 	 * The handle may only be closed once.
+	 *
 	 * The database handle will be private to the current transaction until
 	 * the transaction is successfully committed. If the transaction is
 	 * aborted the handle will be closed automatically.
-	 * After a successful commit the
-	 * handle will reside in the shared environment, and may be used
-	 * by other transactions. This function must not be called from
-	 * multiple concurrent transactions in the same process. A transaction
-	 * that uses this function must finish (either commit or abort) before
+	 * After a successful commit the handle will reside in the shared
+	 * environment, and may be used by other transactions.
+	 *
+	 * This function must not be called from multiple concurrent
+	 * transactions in the same process. A transaction that uses
+	 * this function must finish (either commit or abort) before
 	 * any other transaction in the process may use this function.
 	 *
 	 * To use named databases (with name != NULL), #mdb_env_set_maxdbs()
