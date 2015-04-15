@@ -4,6 +4,7 @@ LMDB 0.9.15 Release Engineering
 	Fix txn init (ITS#7961,#7987)
 	Fix MDB_PREV_DUP (ITS#7955,#7671)
 	Fix compact of empty env (ITS#7956)
+	Fix mdb_rebalance collapsing root (ITS#8062)
 	Fix mdb_load with large values (ITS#8066)
 	Added workaround for fdatasync bug in ext3fs
 	Build
