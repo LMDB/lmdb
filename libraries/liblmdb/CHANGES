@@ -7,6 +7,7 @@ LMDB 0.9.15 Release Engineering
 	Fix mdb_rebalance collapsing root (ITS#8062)
 	Fix mdb_load with large values (ITS#8066)
 	Fix to retry writes on EINTR (ITS#8106)
+	Fix mdb_cursor_del on empty DB (ITS#8109)
 	Added workaround for fdatasync bug in ext3fs
 	Build
 		Don't use -fPIC for static lib
