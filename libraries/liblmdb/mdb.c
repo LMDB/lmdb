@@ -7845,6 +7845,13 @@ mdb_cursor_del0(MDB_cursor *mc)
 		MDB_cursor *m2, *m3;
 		MDB_dbi dbi = mc->mc_dbi;
 
+		/* DB is totally empty now, just bail out.
+		 * Other cursors adjustments were already done
+		 * by mdb_rebalance and aren't needed here.
+		 */
+		if (!mc->mc_snum)
+			return rc;
+
 		mp = mc->mc_pg[mc->mc_top];
 		nkeys = NUMKEYS(mp);
 
