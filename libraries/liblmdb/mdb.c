@@ -7194,15 +7194,13 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
 				mx->mx_db.md_flags |= MDB_INTEGERKEY;
 		}
 	}
-#if UINT_MAX < SIZE_MAX
-	if (mc->mc_dbx->md_dcmp == mdb_cmp_int && mx->mx_db.md_pad == sizeof(size_t)) {
-		mc->mc_dbx->md_dcmp = mdb_cmp_clong;
-		mx->mx_dbx.md_cmp = mdb_cmp_clong;
-	}
-#endif
 	DPRINTF(("Sub-db -%u root page %"Z"u", mx->mx_cursor.mc_dbi,
 		mx->mx_db.md_root));
 	mx->mx_dbflag = DB_VALID|DB_DIRTY; /* DB_DIRTY guides mdb_cursor_touch */
+#if UINT_MAX < SIZE_MAX
+	if (mx->mx_dbx.md_cmp == mdb_cmp_int && mx->mx_db.md_pad == sizeof(size_t))
+		mx->mx_dbx.md_cmp = mdb_cmp_clong;
+#endif
 }
 
 /** Initialize a cursor for a given transaction and database. */
