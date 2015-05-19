@@ -296,12 +296,12 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
 #define MDB_REVERSEKEY	0x02
 	/** use sorted duplicates */
 #define MDB_DUPSORT		0x04
-	/** numeric keys in native byte order.
+	/** numeric keys in native byte order: either unsigned int or size_t.
 	 *  The keys must all be of the same size. */
 #define MDB_INTEGERKEY	0x08
 	/** with #MDB_DUPSORT, sorted dup items have fixed size */
 #define MDB_DUPFIXED	0x10
-	/** with #MDB_DUPSORT, dups are numeric in native byte order */
+	/** with #MDB_DUPSORT, dups are #MDB_INTEGERKEY-style integers */
 #define MDB_INTEGERDUP	0x20
 	/** with #MDB_DUPSORT, use reverse string dups */
 #define MDB_REVERSEDUP	0x40
@@ -1052,9 +1052,9 @@ int  mdb_txn_renew(MDB_txn *txn);
 	 *		keys may have multiple data items, stored in sorted order.) By default
 	 *		keys must be unique and may have only a single data item.
 	 *	<li>#MDB_INTEGERKEY
-	 *		Keys are binary integers in native byte order. Setting this option
-	 *		requires all keys to be the same size, typically sizeof(int)
-	 *		or sizeof(size_t).
+	 *		Keys are binary integers in native byte order, either unsigned int
+	 *		or size_t, and will be sorted as such.
+	 *		The keys must all be of the same size.
 	 *	<li>#MDB_DUPFIXED
 	 *		This flag may only be used in combination with #MDB_DUPSORT. This option
 	 *		tells the library that the data items for this database are all the same
@@ -1062,8 +1062,8 @@ int  mdb_txn_renew(MDB_txn *txn);
 	 *		all data items are the same size, the #MDB_GET_MULTIPLE and #MDB_NEXT_MULTIPLE
 	 *		cursor operations may be used to retrieve multiple items at once.
 	 *	<li>#MDB_INTEGERDUP
-	 *		This option specifies that duplicate data items are also integers, and
-	 *		should be sorted as such.
+	 *		This option specifies that duplicate data items are binary integers,
+	 *		similar to #MDB_INTEGERKEY keys.
 	 *	<li>#MDB_REVERSEDUP
 	 *		This option specifies that duplicate data items should be compared as
 	 *		strings in reverse order.
