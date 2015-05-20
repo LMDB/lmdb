@@ -54,12 +54,13 @@ int main(int argc,char * argv[])
    
 		key.mv_size = sizeof(int);
 		key.mv_data = sval;
-		data.mv_size = sizeof(sval);
-		data.mv_data = sval;
 
 		printf("Adding %d values\n", count);
 	    for (i=0;i<count;i++) {	
 			sprintf(sval, "%03x %d foo bar", values[i], values[i]);
+			/* Set <data> in each iteration, since MDB_NOOVERWRITE may modify it */
+			data.mv_size = sizeof(sval);
+			data.mv_data = sval;
 			if (RES(MDB_KEYEXIST, mdb_put(txn, dbi, &key, &data, MDB_NOOVERWRITE))) {
 				j++;
 				data.mv_size = sizeof(sval);
@@ -130,6 +131,7 @@ int main(int argc,char * argv[])
 				(int) key.mv_size,  (char *) key.mv_data,
 				(int) data.mv_size, (char *) data.mv_data);
 
+		mdb_cursor_close(cursor);
 		mdb_txn_abort(txn);
 
 		printf("Deleting with cursor\n");
