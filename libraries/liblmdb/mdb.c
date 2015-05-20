@@ -7190,7 +7190,7 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
 		mx->mx_cursor.mc_flags = C_SUB;
 	} else {
 		MDB_page *fp = NODEDATA(node);
-		mx->mx_db.md_pad = mc->mc_pg[mc->mc_top]->mp_pad;
+		mx->mx_db.md_pad = 0;
 		mx->mx_db.md_flags = 0;
 		mx->mx_db.md_depth = 1;
 		mx->mx_db.md_branch_pages = 0;
@@ -8130,6 +8130,7 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 	/* Create a right sibling. */
 	if ((rc = mdb_page_new(mc, mp->mp_flags, 1, &rp)))
 		return rc;
+	rp->mp_pad = mp->mp_pad;
 	DPRINTF(("new right sibling: page %"Z"u", rp->mp_pgno));
 
 	if (mc->mc_snum < 2) {
