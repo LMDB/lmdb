@@ -18,6 +18,7 @@ LMDB 0.9.15 Release Engineering
 		Misc. Android/Windows cleanup
 	Documentation
 		Fix MDB_APPEND doc
+		Fix MDB_MAXKEYSIZE doc (ITS#8156)
 		Clarify mdb_dbi_open doc
 
 LMDB 0.9.14 Release (2014/09/20)
