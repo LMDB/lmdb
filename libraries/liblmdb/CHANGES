@@ -25,6 +25,7 @@ LMDB 0.9.15 Release Engineering
 		Fix mdb_cursor_put,mdb_cursor_del EACCES description
 		Fix mdb_env_sync(MDB_RDONLY env) doc (ITS#8021)
 		Clarify MDB_WRITEMAP doc (ITS#8021)
+		Clarify mdb_env_open doc
 		Clarify mdb_dbi_open doc
 
 LMDB 0.9.14 Release (2014/09/20)
