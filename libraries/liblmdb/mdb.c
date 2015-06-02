@@ -4548,7 +4548,10 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		if (!env->me_wmutex) goto fail_errno;
 #elif defined(MDB_USE_SYSV_SEM)
 		unsigned short vals[2] = {1, 1};
-		semid = semget(IPC_PRIVATE, 2, mode);
+		key_t key = ftok(lpath, 'M');
+		if (key == -1)
+			goto fail_errno;
+		semid = semget(key, 2, (mode & 0777) | IPC_CREAT);
 		if (semid < 0)
 			goto fail_errno;
 		semu.array = vals;
