@@ -588,8 +588,8 @@ int  mdb_env_create(MDB_env **env);
 	 *		reserved in that case.
 	 *		This flag may be changed at any time using #mdb_env_set_flags().
 	 * </ul>
-	 * @param[in] mode The UNIX permissions to set on created files. This parameter
-	 * is ignored on Windows.
+	 * @param[in] mode The UNIX permissions to set on created files and semaphores.
+	 * This parameter is ignored on Windows.
 	 * @return A non-zero error value on failure and 0 on success. Some possible
 	 * errors are:
 	 * <ul>
