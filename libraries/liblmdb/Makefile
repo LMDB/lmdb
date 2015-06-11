@@ -19,6 +19,7 @@
 # read mdb.c before changing any of them.
 #
 CC	= gcc
+AR	= ar
 W	= -W -Wall -Wno-unused-parameter -Wbad-function-cast -Wuninitialized
 THREADS = -pthread
 OPT = -O2 -g
@@ -54,7 +55,7 @@ test:	all
 	./mtest && ./mdb_stat testdb
 
 liblmdb.a:	mdb.o midl.o
-	ar rs $@ mdb.o midl.o
+	$(AR) rs $@ mdb.o midl.o
 
 liblmdb.so:	mdb.lo midl.lo
 #	$(CC) $(LDFLAGS) -pthread -shared -Wl,-Bsymbolic -o $@ mdb.o midl.o $(SOLIBS)
