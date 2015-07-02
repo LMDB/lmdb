@@ -57,7 +57,8 @@
  *	  Otherwise just make all programs using the database close it;
  *	  the lockfile is always reset on first open of the environment.
  *
- *	- On BSD systems or others configured with MDB_USE_SYSV_SEM,
+ *	- On BSD systems or others configured with MDB_USE_SYSV_SEM or
+ *	  MDB_USE_POSIX_SEM,
  *	  startup can fail due to semaphores owned by another userid.
  *
  *	  Fix: Open and close the database as the user which owns the
