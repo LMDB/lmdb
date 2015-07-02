@@ -128,8 +128,15 @@ union semun {
 	unsigned short *array;
 };
 #endif /* _SEM_SEMUN_UNDEFINED */
+#else
+#define MDB_USE_POSIX_MUTEX	1
 #endif /* MDB_USE_SYSV_SEM */
 #endif /* !_WIN32 */
+
+#if defined(_WIN32) + defined(MDB_USE_SYSV_SEM) \
+	+ defined(MDB_USE_POSIX_MUTEX) != 1
+# error "Ambiguous shared-lock implementation"
+#endif
 
 #ifdef USE_VALGRIND
 #include <valgrind/memcheck.h>
@@ -208,10 +215,6 @@ union semun {
 #define MDB_DEVEL 0
 #endif
 
-#if defined(_WIN32) || defined(MDB_USE_SYSV_SEM) || defined(EOWNERDEAD)
-#define MDB_ROBUST_SUPPORTED	1
-#endif
-
 	/** Wrapper around __func__, which is a C99 feature */
 #if __STDC_VERSION__ >= 199901L
 # define mdb_func_	__func__
@@ -228,8 +231,12 @@ union semun {
 #define MDB_OWNERDEAD	((int) WAIT_ABANDONED)
 #elif defined MDB_USE_SYSV_SEM
 #define MDB_OWNERDEAD	(MDB_LAST_ERRCODE + 11)
-#else
-#define MDB_OWNERDEAD	EOWNERDEAD
+#elif defined(MDB_USE_POSIX_MUTEX) && defined(EOWNERDEAD)
+#define MDB_OWNERDEAD	EOWNERDEAD	/**< #LOCK_MUTEX0() result if dead owner */
+#endif
+
+#ifdef MDB_OWNERDEAD
+#define MDB_ROBUST_SUPPORTED	1
 #endif
 
 #ifdef _WIN32
@@ -314,7 +321,7 @@ mdb_sem_wait(mdb_mutex_t *sem)
 
 #define mdb_mutex_consistent(mutex)	0
 
-#else
+#else	/* MDB_USE_POSIX_MUTEX: */
 	/** Pointer/HANDLE type of shared mutex/semaphore.
 	 */
 typedef pthread_mutex_t mdb_mutex_t;
@@ -1290,7 +1297,7 @@ static int	mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata,
 static int  mdb_env_read_header(MDB_env *env, MDB_meta *meta);
 static int  mdb_env_pick_meta(const MDB_env *env);
 static int  mdb_env_write_meta(MDB_txn *txn);
-#if !(defined(_WIN32) || defined(MDB_USE_SYSV_SEM)) /* Drop unused excl arg */
+#ifdef MDB_USE_POSIX_MUTEX /* Drop unused excl arg */
 # define mdb_env_close0(env, excl) mdb_env_close1(env)
 #endif
 static void mdb_env_close0(MDB_env *env, int excl);
@@ -4303,8 +4310,8 @@ mdb_env_excl_lock(MDB_env *env, int *excl)
 	if (!rc) {
 		*excl = 1;
 	} else
-# ifdef MDB_USE_SYSV_SEM
-	if (*excl < 0) /* always true when !MDB_USE_SYSV_SEM */
+# ifndef MDB_USE_POSIX_MUTEX
+	if (*excl < 0) /* always true when MDB_USE_POSIX_MUTEX */
 # endif
 	{
 		lock_info.l_type = F_RDLCK;
@@ -4558,7 +4565,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		if (semctl(semid, 0, SETALL, semu) < 0)
 			goto fail_errno;
 		env->me_txns->mti_semid = semid;
-#else	/* MDB_USE_SYSV_SEM */
+#else	/* MDB_USE_POSIX_MUTEX: */
 		pthread_mutexattr_t mattr;
 
 		if ((rc = pthread_mutexattr_init(&mattr))
