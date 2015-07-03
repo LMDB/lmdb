@@ -121,7 +121,14 @@ extern int cacheflush(char *addr, int nbytes, int cache);
 #ifdef MDB_USE_POSIX_SEM
 # define MDB_USE_HASH		1
 #include <semaphore.h>
+#else
+#define MDB_USE_POSIX_MUTEX	1
 #endif
+#endif
+
+#if defined(_WIN32) + defined(MDB_USE_POSIX_SEM) \
+	+ defined(MDB_USE_POSIX_MUTEX) != 1
+# error "Ambiguous shared-lock implementation"
 #endif
 
 #ifdef USE_VALGRIND
@@ -278,7 +285,7 @@ mdb_sem_wait(sem_t *sem)
    return rc;
 }
 
-#else
+#else	/* MDB_USE_POSIX_MUTEX: */
 	/** Lock the reader mutex.
 	 */
 #define LOCK_MUTEX_R(env)	pthread_mutex_lock(&(env)->me_txns->mti_mutex)
@@ -1219,7 +1226,7 @@ static int	mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata,
 static int  mdb_env_read_header(MDB_env *env, MDB_meta *meta);
 static int  mdb_env_pick_meta(const MDB_env *env);
 static int  mdb_env_write_meta(MDB_txn *txn);
-#if !(defined(_WIN32) || defined(MDB_USE_POSIX_SEM)) /* Drop unused excl arg */
+#ifdef MDB_USE_POSIX_MUTEX /* Drop unused excl arg */
 # define mdb_env_close0(env, excl) mdb_env_close1(env)
 #endif
 static void mdb_env_close0(MDB_env *env, int excl);
@@ -4234,8 +4241,8 @@ mdb_env_excl_lock(MDB_env *env, int *excl)
 	if (!rc) {
 		*excl = 1;
 	} else
-# ifdef MDB_USE_POSIX_SEM
-	if (*excl < 0) /* always true when !MDB_USE_POSIX_SEM */
+# ifndef MDB_USE_POSIX_MUTEX
+	if (*excl < 0) /* always true when MDB_USE_POSIX_MUTEX */
 # endif
 	{
 		lock_info.l_type = F_RDLCK;
@@ -4507,7 +4514,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		env->me_wmutex = sem_open(env->me_txns->mti_wmname,
 			O_CREAT|O_EXCL, mode, 1);
 		if (env->me_wmutex == SEM_FAILED) goto fail_errno;
-#else	/* MDB_USE_POSIX_SEM */
+#else	/* MDB_USE_POSIX_MUTEX: */
 		pthread_mutexattr_t mattr;
 
 		if ((rc = pthread_mutexattr_init(&mattr))
