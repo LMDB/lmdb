@@ -49,9 +49,13 @@
  *	  stale locks can block further operation.
  *
  *	  Fix: Check for stale readers periodically, using the
- *	  #mdb_reader_check function or the \ref mdb_stat_1 "mdb_stat" tool. Or just
- *	  make all programs using the database close it; the lockfile
- *	  is always reset on first open of the environment.
+ *	  #mdb_reader_check function or the \ref mdb_stat_1 "mdb_stat" tool.
+ *	  Stale writers will be cleared automatically on some systems:
+ *	  - Windows - automatic
+ *	  - Linux, systems using POSIX mutexes with Robust option - automatic
+ *	  - not on BSD, systems using POSIX semaphores.
+ *	  Otherwise just make all programs using the database close it;
+ *	  the lockfile is always reset on first open of the environment.
  *
  *	- On BSD systems or others configured with MDB_USE_POSIX_SEM,
  *	  startup can fail due to semaphores owned by another userid.
@@ -105,6 +109,9 @@
  *	  The transaction becomes "long-lived" as above until a check
  *	  for stale readers is performed or the lockfile is reset,
  *	  since the process may not remove it from the lockfile.
+ *
+ *	  This does not apply to write transactions if the system clears
+ *	  stale writers, see above.
  *
  *	- If you do that anyway, do a periodic check for stale readers. Or
  *	  close the environment once in a while, so the lockfile can get reset.
@@ -391,7 +398,7 @@ typedef enum MDB_cursor_op {
 #define MDB_PAGE_NOTFOUND	(-30797)
 	/** Located page was wrong type */
 #define MDB_CORRUPTED	(-30796)
-	/** Update of meta page failed, probably I/O error */
+	/** Update of meta page failed or environment had fatal error */
 #define MDB_PANIC		(-30795)
 	/** Environment version mismatch */
 #define MDB_VERSION_MISMATCH	(-30794)
