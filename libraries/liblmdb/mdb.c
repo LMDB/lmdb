@@ -3960,6 +3960,7 @@ mdb_env_open2(MDB_env *env)
 	else
 		env->me_pidquery = PROCESS_QUERY_INFORMATION;
 #endif /* _WIN32 */
+
 #ifdef BROKEN_FDATASYNC
 	/* ext3/ext4 fdatasync is broken on some older Linux kernels.
 	 * https://lkml.org/lkml/2012/9/3/83
@@ -4815,7 +4816,6 @@ mdb_env_close0(MDB_env *env, int excl)
 
 	env->me_flags &= ~(MDB_ENV_ACTIVE|MDB_ENV_TXKEY);
 }
-
 
 void ESECT
 mdb_env_close(MDB_env *env)
