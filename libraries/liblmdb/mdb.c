@@ -9182,7 +9182,7 @@ mdb_env_get_flags(MDB_env *env, unsigned int *arg)
 	if (!env || !arg)
 		return EINVAL;
 
-	*arg = env->me_flags;
+	*arg = env->me_flags & (CHANGEABLE|CHANGELESS);
 	return MDB_SUCCESS;
 }
 
