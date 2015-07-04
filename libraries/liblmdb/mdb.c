@@ -1315,7 +1315,7 @@ static int mdb_sec_inited;
 #endif
 
 /** Return the library version info. */
-char *
+char * ESECT
 mdb_version(int *major, int *minor, int *patch)
 {
 	if (major) *major = MDB_VERSION_MAJOR;
@@ -1407,7 +1407,7 @@ mdb_strerror(int err)
 # define mdb_assert0(env, expr, expr_txt) ((expr) ? (void)0 : \
 		mdb_assert_fail(env, expr_txt, mdb_func_, __FILE__, __LINE__))
 
-static void
+static void ESECT
 mdb_assert_fail(MDB_env *env, const char *expr_txt,
 	const char *func, const char *file, int line)
 {
@@ -4350,7 +4350,7 @@ mdb_hash_val(MDB_val *val, mdb_hash_t hval)
  */
 static const char mdb_a85[]= "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~";
 
-static void
+static void ESECT
 mdb_pack85(unsigned long l, char *out)
 {
 	int i;
@@ -4361,7 +4361,7 @@ mdb_pack85(unsigned long l, char *out)
 	}
 }
 
-static void
+static void ESECT
 mdb_hash_enc(MDB_val *val, char *encbuf)
 {
 	mdb_hash_t h = mdb_hash_val(val, MDB_HASH_INIT);
@@ -9368,7 +9368,8 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 	return rc;
 }
 
-int mdb_stat(MDB_txn *txn, MDB_dbi dbi, MDB_stat *arg)
+int ESECT
+mdb_stat(MDB_txn *txn, MDB_dbi dbi, MDB_stat *arg)
 {
 	if (!arg || !TXN_DBI_EXIST(txn, dbi, DB_VALID))
 		return EINVAL;
@@ -9681,7 +9682,8 @@ mdb_reader_check(MDB_env *env, int *dead)
 }
 
 /** As #mdb_reader_check(). rlocked = <caller locked the reader mutex>. */
-static int mdb_reader_check0(MDB_env *env, int rlocked, int *dead)
+static int ESECT
+mdb_reader_check0(MDB_env *env, int rlocked, int *dead)
 {
 	mdb_mutexref_t rmutex = rlocked ? NULL : env->me_rmutex;
 	unsigned int i, j, rdrs;
@@ -9740,7 +9742,8 @@ static int mdb_reader_check0(MDB_env *env, int rlocked, int *dead)
  * @param[in] rc	LOCK_MUTEX0() error (nonzero)
  * @return 0 on success with the mutex locked, or an error code on failure.
  */
-static int mdb_mutex_failed(MDB_env *env, mdb_mutexref_t mutex, int rc)
+static int ESECT
+mdb_mutex_failed(MDB_env *env, mdb_mutexref_t mutex, int rc)
 {
 	int toggle, rlocked, rc2;
 
