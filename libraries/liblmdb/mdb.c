@@ -5191,15 +5191,12 @@ static void
 mdb_cursor_pop(MDB_cursor *mc)
 {
 	if (mc->mc_snum) {
-#if MDB_DEBUG
-		MDB_page	*top = mc->mc_pg[mc->mc_top];
-#endif
+		DPRINTF(("popping page %"Z"u off db %d cursor %p",
+			mc->mc_pg[mc->mc_top]->mp_pgno, DDBI(mc), (void *) mc));
+
 		mc->mc_snum--;
 		if (mc->mc_snum)
 			mc->mc_top--;
-
-		DPRINTF(("popped page %"Z"u off db %d cursor %p", top->mp_pgno,
-			DDBI(mc), (void *) mc));
 	}
 }
 
@@ -8581,7 +8578,7 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 	if (!key || !data || dbi == FREE_DBI || !TXN_DBI_EXIST(txn, dbi))
 		return EINVAL;
 
-	if ((flags & (MDB_NOOVERWRITE|MDB_NODUPDATA|MDB_RESERVE|MDB_APPEND|MDB_APPENDDUP)) != flags)
+	if (flags & ~(MDB_NOOVERWRITE|MDB_NODUPDATA|MDB_RESERVE|MDB_APPEND|MDB_APPENDDUP))
 		return EINVAL;
 
 	mdb_cursor_init(&mc, txn, dbi, &mx);
@@ -9151,7 +9148,7 @@ mdb_env_copy(MDB_env *env, const char *path)
 int ESECT
 mdb_env_set_flags(MDB_env *env, unsigned int flag, int onoff)
 {
-	if ((flag & CHANGEABLE) != flag)
+	if (flag & ~CHANGEABLE)
 		return EINVAL;
 	if (onoff)
 		env->me_flags |= flag;
@@ -9300,7 +9297,7 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 	unsigned int unused = 0, seq;
 	size_t len;
 
-	if ((flags & VALID_FLAGS) != flags)
+	if (flags & ~VALID_FLAGS)
 		return EINVAL;
 	if (txn->mt_flags & MDB_TXN_ERROR)
 		return MDB_BAD_TXN;
