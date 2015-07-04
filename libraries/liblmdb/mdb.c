@@ -9511,7 +9511,7 @@ int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY))
 		return EACCES;
 
-	if (dbi > MAIN_DBI && TXN_DBI_CHANGED(txn, dbi))
+	if (TXN_DBI_CHANGED(txn, dbi))
 		return MDB_BAD_DBI;
 
 	rc = mdb_cursor_open(txn, dbi, &mc);
