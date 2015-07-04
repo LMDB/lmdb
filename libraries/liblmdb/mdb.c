@@ -4769,6 +4769,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 		rc = ENOMEM;
 		goto leave;
 	}
+	env->me_dbxs[FREE_DBI].md_cmp = mdb_cmp_long; /* aligned MDB_INTEGERKEY */
 
 	/* For RDONLY, get lockfile after we know datafile exists */
 	if (!(flags & (MDB_RDONLY|MDB_NOLOCK))) {
@@ -9315,10 +9316,6 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 	int rc, dbflag, exact;
 	unsigned int unused = 0, seq;
 	size_t len;
-
-	if (txn->mt_dbxs[FREE_DBI].md_cmp == NULL) {
-		mdb_default_cmp(txn, FREE_DBI);
-	}
 
 	if ((flags & VALID_FLAGS) != flags)
 		return EINVAL;
