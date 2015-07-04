@@ -3349,12 +3349,11 @@ mdb_txn_commit(MDB_txn *txn)
 	unsigned int i;
 	MDB_env	*env;
 
-	if (txn == NULL || txn->mt_env == NULL)
+	if (txn == NULL)
 		return EINVAL;
 
 	if (txn->mt_child) {
 		rc = mdb_txn_commit(txn->mt_child);
-		txn->mt_child = NULL;
 		if (rc)
 			goto fail;
 	}
