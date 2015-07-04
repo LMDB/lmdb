@@ -9445,8 +9445,10 @@ mdb_drop0(MDB_cursor *mc, int subs)
 		MDB_cursor mx;
 		unsigned int i;
 
-		/* LEAF2 pages have no nodes, cannot have sub-DBs */
-		if (IS_LEAF2(mc->mc_pg[mc->mc_top]))
+		/* DUPSORT sub-DBs have no ovpages/DBs. Omit scanning leaves.
+		 * This also avoids any P_LEAF2 pages, which have no nodes.
+		 */
+		if (mc->mc_flags & C_SUB)
 			mdb_cursor_pop(mc);
 
 		mdb_cursor_copy(mc, &mx);
