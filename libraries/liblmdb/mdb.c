@@ -5924,8 +5924,10 @@ set2:
 
 	if (leaf == NULL) {
 		DPUTS("===> inexact leaf not found, goto sibling");
-		if ((rc = mdb_cursor_sibling(mc, 1)) != MDB_SUCCESS)
+		if ((rc = mdb_cursor_sibling(mc, 1)) != MDB_SUCCESS) {
+			mc->mc_flags |= C_EOF;
 			return rc;		/* no entries matched */
+		}
 		mp = mc->mc_pg[mc->mc_top];
 		mdb_cassert(mc, IS_LEAF(mp));
 		leaf = NODEPTR(mp, 0);
