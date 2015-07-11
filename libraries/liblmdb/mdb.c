@@ -7016,6 +7016,7 @@ mdb_node_add(MDB_cursor *mc, indx_t indx,
 	MDB_node	*node;
 	MDB_page	*mp = mc->mc_pg[mc->mc_top];
 	MDB_page	*ofp = NULL;		/* overflow page */
+	void		*ndata;
 	DKBUF;
 
 	mdb_cassert(mc, mp->mp_upper >= mp->mp_lower);
@@ -7046,7 +7047,7 @@ mdb_node_add(MDB_cursor *mc, indx_t indx,
 	if (key != NULL)
 		node_size += key->mv_size;
 	if (IS_LEAF(mp)) {
-		mdb_cassert(mc, data);
+		mdb_cassert(mc, key && data);
 		if (F_ISSET(flags, F_BIGDATA)) {
 			/* Data already on overflow page. */
 			node_size += sizeof(pgno_t);
@@ -7097,23 +7098,21 @@ update:
 		memcpy(NODEKEY(node), key->mv_data, key->mv_size);
 
 	if (IS_LEAF(mp)) {
-		mdb_cassert(mc, key);
+		ndata = NODEDATA(node);
 		if (ofp == NULL) {
 			if (F_ISSET(flags, F_BIGDATA))
-				memcpy(node->mn_data + key->mv_size, data->mv_data,
-				    sizeof(pgno_t));
+				memcpy(ndata, data->mv_data, sizeof(pgno_t));
 			else if (F_ISSET(flags, MDB_RESERVE))
-				data->mv_data = node->mn_data + key->mv_size;
+				data->mv_data = ndata;
 			else
-				memcpy(node->mn_data + key->mv_size, data->mv_data,
-				    data->mv_size);
+				memcpy(ndata, data->mv_data, data->mv_size);
 		} else {
-			memcpy(node->mn_data + key->mv_size, &ofp->mp_pgno,
-			    sizeof(pgno_t));
+			memcpy(ndata, &ofp->mp_pgno, sizeof(pgno_t));
+			ndata = METADATA(ofp);
 			if (F_ISSET(flags, MDB_RESERVE))
-				data->mv_data = METADATA(ofp);
+				data->mv_data = ndata;
 			else
-				memcpy(METADATA(ofp), data->mv_data, data->mv_size);
+				memcpy(ndata, data->mv_data, data->mv_size);
 		}
 	}
 
