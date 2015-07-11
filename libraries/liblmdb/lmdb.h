@@ -413,7 +413,14 @@ typedef enum MDB_cursor_op {
 #define MDB_PAGE_FULL	(-30786)
 	/** Database contents grew beyond environment mapsize */
 #define MDB_MAP_RESIZED	(-30785)
-	/** MDB_INCOMPATIBLE: Operation and DB incompatible, or DB flags changed */
+	/** Operation and DB incompatible, or DB type changed. This can mean:
+	 *	<ul>
+	 *	<li>The operation expects an #MDB_DUPSORT / #MDB_DUPFIXED database.
+	 *	<li>Opening a named DB when the unnamed DB has #MDB_DUPSORT / #MDB_INTEGERKEY.
+	 *	<li>Accessing a data record as a database, or vice versa.
+	 *	<li>The database was dropped and recreated with different flags.
+	 *	</ul>
+	 */
 #define MDB_INCOMPATIBLE	(-30784)
 	/** Invalid reuse of reader locktable slot */
 #define MDB_BAD_RSLOT		(-30783)
@@ -1034,8 +1041,9 @@ int  mdb_txn_renew(MDB_txn *txn);
 	 * any other transaction in the process may use this function.
 	 *
 	 * To use named databases (with name != NULL), #mdb_env_set_maxdbs()
-	 * must be called before opening the environment.  Database names
-	 * are kept as keys in the unnamed database.
+	 * must be called before opening the environment.  Database names are
+	 * keys in the unnamed database, and may be read but not written.
+	 *
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] name The name of the database to open. If only a single
 	 * 	database is needed in the environment, this value may be NULL.

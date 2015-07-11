@@ -3395,7 +3395,8 @@ mdb_txn_commit(MDB_txn *txn)
 					goto fail;
 				}
 				data.mv_data = &txn->mt_dbs[i];
-				rc = mdb_cursor_put(&mc, &txn->mt_dbxs[i].md_name, &data, 0);
+				rc = mdb_cursor_put(&mc, &txn->mt_dbxs[i].md_name, &data,
+					F_SUBDATA);
 				if (rc)
 					goto fail;
 			}
@@ -5214,6 +5215,8 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int flags)
 						&mc->mc_dbx->md_name, &exact);
 					if (!exact)
 						return MDB_NOTFOUND;
+					if ((leaf->mn_flags & (F_DUPDATA|F_SUBDATA)) != F_SUBDATA)
+						return MDB_INCOMPATIBLE; /* not a named DB */
 					rc = mdb_node_read(mc->mc_txn, leaf, &data);
 					if (rc)
 						return rc;
@@ -6406,6 +6409,9 @@ prep_subDB:
 			goto new_sub;
 		}
 current:
+		/* LMDB passes F_SUBDATA in 'flags' to write a DB record */
+		if ((leaf->mn_flags ^ flags) & F_SUBDATA)
+			return MDB_INCOMPATIBLE;
 		/* overflow page overwrites need special handling */
 		if (F_ISSET(leaf->mn_flags, F_BIGDATA)) {
 			MDB_page *omp;
@@ -6675,6 +6681,11 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 			if (rc)
 				goto fail;
 		}
+	}
+	/* LMDB passes F_SUBDATA in 'flags' to delete a DB record */
+	else if ((leaf->mn_flags ^ flags) & F_SUBDATA) {
+		rc = MDB_INCOMPATIBLE;
+		goto fail;
 	}
 
 	/* add overflow pages to free list */
@@ -9171,7 +9182,7 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 	if (rc == MDB_SUCCESS) {
 		/* make sure this is actually a DB */
 		MDB_node *node = NODEPTR(mc.mc_pg[mc.mc_top], mc.mc_ki[mc.mc_top]);
-		if (!(node->mn_flags & F_SUBDATA))
+		if ((node->mn_flags & (F_DUPDATA|F_SUBDATA)) != F_SUBDATA)
 			return MDB_INCOMPATIBLE;
 	} else if (rc == MDB_NOTFOUND && (flags & MDB_CREATE)) {
 		/* Create if requested */
@@ -9364,7 +9375,7 @@ int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)
 
 	/* Can't delete the main DB */
 	if (del && dbi > MAIN_DBI) {
-		rc = mdb_del0(txn, MAIN_DBI, &mc->mc_dbx->md_name, NULL, 0);
+		rc = mdb_del0(txn, MAIN_DBI, &mc->mc_dbx->md_name, NULL, F_SUBDATA);
 		if (!rc) {
 			txn->mt_dbflags[dbi] = DB_STALE;
 			mdb_dbi_close(txn->mt_env, dbi);
