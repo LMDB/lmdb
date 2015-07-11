@@ -1318,7 +1318,7 @@ static int	mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata,
 				pgno_t newpgno, unsigned int nflags);
 
 static int  mdb_env_read_header(MDB_env *env, MDB_meta *meta);
-static int  mdb_env_pick_meta(const MDB_env *env);
+static MDB_meta *mdb_env_pick_meta(const MDB_env *env);
 static int  mdb_env_write_meta(MDB_txn *txn);
 #ifdef MDB_USE_POSIX_MUTEX /* Drop unused excl arg */
 # define mdb_env_close0(env, excl) mdb_env_close1(env)
@@ -2622,7 +2622,7 @@ mdb_txn_renew0(MDB_txn *txn)
 
 	if ((flags &= MDB_TXN_RDONLY) != 0) {
 		if (!ti) {
-			meta = env->me_metas[ mdb_env_pick_meta(env) ];
+			meta = mdb_env_pick_meta(env);
 			txn->mt_txnid = meta->mm_txnid;
 			txn->mt_u.reader = NULL;
 		} else {
@@ -2691,7 +2691,7 @@ mdb_txn_renew0(MDB_txn *txn)
 			txn->mt_txnid = ti->mti_txnid;
 			meta = env->me_metas[txn->mt_txnid & 1];
 		} else {
-			meta = env->me_metas[ mdb_env_pick_meta(env) ];
+			meta = mdb_env_pick_meta(env);
 			txn->mt_txnid = meta->mm_txnid;
 		}
 		txn->mt_txnid++;
@@ -3831,12 +3831,13 @@ done:
 
 /** Check both meta pages to see which one is newer.
  * @param[in] env the environment handle
- * @return meta toggle (0 or 1).
+ * @return newest #MDB_meta.
  */
-static int
+static MDB_meta *
 mdb_env_pick_meta(const MDB_env *env)
 {
-	return (env->me_metas[0]->mm_txnid < env->me_metas[1]->mm_txnid);
+	MDB_meta *const *metas = env->me_metas;
+	return metas[ metas[0]->mm_txnid < metas[1]->mm_txnid ];
 }
 
 int ESECT
@@ -3963,7 +3964,7 @@ mdb_env_set_mapsize(MDB_env *env, size_t size)
 		void *old;
 		if (env->me_txn)
 			return EINVAL;
-		meta = env->me_metas[mdb_env_pick_meta(env)];
+		meta = mdb_env_pick_meta(env);
 		if (!size)
 			size = meta->mm_mapsize;
 		{
@@ -4170,12 +4171,12 @@ mdb_env_open2(MDB_env *env)
 
 #if MDB_DEBUG
 	{
-		int toggle = mdb_env_pick_meta(env);
-		MDB_db *db = &env->me_metas[toggle]->mm_dbs[MAIN_DBI];
+		MDB_meta *meta = mdb_env_pick_meta(env);
+		MDB_db *db = &meta->mm_dbs[MAIN_DBI];
 
 		DPRINTF(("opened database version %u, pagesize %u",
-			env->me_metas[0]->mm_version, env->me_psize));
-		DPRINTF(("using meta page %d",    toggle));
+			meta->mm_version, env->me_psize));
+		DPRINTF(("using meta page %d",    (int) (meta->mm_txnid & 1)));
 		DPRINTF(("depth: %u",             db->md_depth));
 		DPRINTF(("entries: %"Z"u",        db->md_entries));
 		DPRINTF(("branch pages: %"Z"u",   db->md_branch_pages));
@@ -4262,9 +4263,10 @@ PIMAGE_TLS_CALLBACK mdb_tls_cbp = mdb_tls_callback;
 static int ESECT
 mdb_env_share_locks(MDB_env *env, int *excl)
 {
-	int rc = 0, toggle = mdb_env_pick_meta(env);
+	int rc = 0;
+	MDB_meta *meta = mdb_env_pick_meta(env);
 
-	env->me_txns->mti_txnid = env->me_metas[toggle]->mm_txnid;
+	env->me_txns->mti_txnid = meta->mm_txnid;
 
 #ifdef _WIN32
 	{
@@ -9249,32 +9251,32 @@ mdb_stat0(MDB_env *env, MDB_db *db, MDB_stat *arg)
 int ESECT
 mdb_env_stat(MDB_env *env, MDB_stat *arg)
 {
-	int toggle;
+	MDB_meta *meta;
 
 	if (env == NULL || arg == NULL)
 		return EINVAL;
 
-	toggle = mdb_env_pick_meta(env);
+	meta = mdb_env_pick_meta(env);
 
-	return mdb_stat0(env, &env->me_metas[toggle]->mm_dbs[MAIN_DBI], arg);
+	return mdb_stat0(env, &meta->mm_dbs[MAIN_DBI], arg);
 }
 
 int ESECT
 mdb_env_info(MDB_env *env, MDB_envinfo *arg)
 {
-	int toggle;
+	MDB_meta *meta;
 
 	if (env == NULL || arg == NULL)
 		return EINVAL;
 
-	toggle = mdb_env_pick_meta(env);
-	arg->me_mapaddr = env->me_metas[toggle]->mm_address;
+	meta = mdb_env_pick_meta(env);
+	arg->me_mapaddr = meta->mm_address;
+	arg->me_last_pgno = meta->mm_last_pg;
+	arg->me_last_txnid = meta->mm_txnid;
+
 	arg->me_mapsize = env->me_mapsize;
 	arg->me_maxreaders = env->me_maxreaders;
 	arg->me_numreaders = env->me_txns ? env->me_txns->mti_numreaders : 0;
-
-	arg->me_last_pgno = env->me_metas[toggle]->mm_last_pg;
-	arg->me_last_txnid = env->me_metas[toggle]->mm_txnid;
 	return MDB_SUCCESS;
 }
 
@@ -9782,7 +9784,8 @@ mdb_reader_check0(MDB_env *env, int rlocked, int *dead)
 static int ESECT
 mdb_mutex_failed(MDB_env *env, mdb_mutexref_t mutex, int rc)
 {
-	int toggle, rlocked, rc2;
+	int rlocked, rc2;
+	MDB_meta *meta;
 
 	if (rc == MDB_OWNERDEAD) {
 		/* We own the mutex. Clean up after dead previous owner. */
@@ -9792,8 +9795,8 @@ mdb_mutex_failed(MDB_env *env, mdb_mutexref_t mutex, int rc)
 			/* Keep mti_txnid updated, otherwise next writer can
 			 * overwrite data which latest meta page refers to.
 			 */
-			toggle = mdb_env_pick_meta(env);
-			env->me_txns->mti_txnid = env->me_metas[toggle]->mm_txnid;
+			meta = mdb_env_pick_meta(env);
+			env->me_txns->mti_txnid = meta->mm_txnid;
 			/* env is hosed if the dead thread was ours */
 			if (env->me_txn) {
 				env->me_flags |= MDB_FATAL_ERROR;
