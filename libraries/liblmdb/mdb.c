@@ -2947,8 +2947,8 @@ mdb_txn_reset0(MDB_txn *txn, const char *act)
 		}
 
 		if (!txn->mt_parent) {
-			if (mdb_midl_shrink(&txn->mt_free_pgs))
-				env->me_free_pgs = txn->mt_free_pgs;
+			mdb_midl_shrink(&txn->mt_free_pgs);
+			env->me_free_pgs = txn->mt_free_pgs;
 			/* me_pgstate: */
 			env->me_pghead = NULL;
 			env->me_pglast = 0;
@@ -3533,8 +3533,8 @@ mdb_txn_commit(MDB_txn *txn)
 
 	mdb_midl_free(env->me_pghead);
 	env->me_pghead = NULL;
-	if (mdb_midl_shrink(&txn->mt_free_pgs))
-		env->me_free_pgs = txn->mt_free_pgs;
+	mdb_midl_shrink(&txn->mt_free_pgs);
+	env->me_free_pgs = txn->mt_free_pgs;
 
 #if (MDB_DEBUG) > 2
 	mdb_audit(txn);
