@@ -8564,6 +8564,9 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 	if (flags & ~(MDB_NOOVERWRITE|MDB_NODUPDATA|MDB_RESERVE|MDB_APPEND|MDB_APPENDDUP))
 		return EINVAL;
 
+	if (txn->mt_flags & (MDB_TXN_RDONLY|MDB_TXN_BLOCKED))
+		return (txn->mt_flags & MDB_TXN_RDONLY) ? EACCES : MDB_BAD_TXN;
+
 	mdb_cursor_init(&mc, txn, dbi, &mx);
 	return mdb_cursor_put(&mc, key, data, flags);
 }
