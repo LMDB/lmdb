@@ -1239,6 +1239,19 @@ static int  mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp);
 static int  mdb_page_new(MDB_cursor *mc, uint32_t flags, int num, MDB_page **mp);
 static int  mdb_page_touch(MDB_cursor *mc);
 
+#define MDB_END_NAMES {"committed", "empty-commit", "abort", "reset", \
+	"reset-tmp", "fail-begin", "fail-beginchild"}
+enum {
+	/* mdb_txn_end operation number, for logging */
+	MDB_END_COMMITTED, MDB_END_EMPTY_COMMIT, MDB_END_ABORT, MDB_END_RESET,
+	MDB_END_RESET_TMP, MDB_END_FAIL_BEGIN, MDB_END_FAIL_BEGINCHILD
+};
+#define MDB_END_OPMASK	0x0F	/**< mask for #mdb_txn_end() operation number */
+#define MDB_END_UPDATE	0x10	/**< update env state (DBIs) */
+#define MDB_END_FREE	0x20	/**< free txn unless it is #MDB_env.%me_txn0 */
+#define MDB_END_SLOT MDB_NOTLS	/**< release any reader slot if #MDB_NOTLS */
+static void mdb_txn_end(MDB_txn *txn, unsigned mode);
+
 static int  mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **mp, int *lvl);
 static int  mdb_page_search_root(MDB_cursor *mc,
 			    MDB_val *key, int modify);
@@ -2484,12 +2497,6 @@ mdb_cursors_close(MDB_txn *txn, unsigned merge)
 	}
 }
 
-#if !(MDB_DEBUG)
-#define mdb_txn_reset0(txn, act) mdb_txn_reset0(txn)
-#endif
-static void
-mdb_txn_reset0(MDB_txn *txn, const char *act);
-
 #if !(MDB_PIDLOCK)		/* Currently the same as defined(_WIN32) */
 enum Pidlock_op {
 	Pidset, Pidcheck
@@ -2669,11 +2676,7 @@ mdb_txn_renew0(MDB_txn *txn)
 	txn->mt_dbflags[FREE_DBI] = DB_VALID;
 
 	if (env->me_maxpg < txn->mt_next_pgno) {
-		mdb_txn_reset0(txn, "renew0-mapfail");
-		if (new_notls) {
-			txn->mt_u.reader->mr_pid = 0;
-			txn->mt_u.reader = NULL;
-		}
+		mdb_txn_end(txn, new_notls /*0 or MDB_END_SLOT*/ | MDB_END_FAIL_BEGIN);
 		return MDB_MAP_RESIZED;
 	}
 
@@ -2788,7 +2791,7 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 		if (!rc)
 			rc = mdb_cursor_shadow(parent, txn);
 		if (rc)
-			mdb_txn_reset0(txn, "beginchild-fail");
+			mdb_txn_end(txn, MDB_END_FAIL_BEGINCHILD);
 	} else { /* MDB_RDONLY */
 		txn->mt_dbiseqs = env->me_dbiseqs;
 renew:
@@ -2851,35 +2854,44 @@ mdb_dbis_update(MDB_txn *txn, int keep)
 		env->me_numdbs = n;
 }
 
-/** Common code for #mdb_txn_reset() and #mdb_txn_abort().
+/** End a transaction, except successful commit of a nested transaction.
  * May be called twice for readonly txns: First reset it, then abort.
- * @param[in] txn the transaction handle to reset
- * @param[in] act why the transaction is being reset
+ * @param[in] txn the transaction handle to end
+ * @param[in] mode why and how to end the transaction
  */
 static void
-mdb_txn_reset0(MDB_txn *txn, const char *act)
+mdb_txn_end(MDB_txn *txn, unsigned mode)
 {
 	MDB_env	*env = txn->mt_env;
+#if MDB_DEBUG
+	static const char *const names[] = MDB_END_NAMES;
+#endif
 
-	/* Close any DBI handles opened in this txn */
-	mdb_dbis_update(txn, 0);
+	/* Export or close DBI handles opened in this txn */
+	mdb_dbis_update(txn, mode & MDB_END_UPDATE);
 
 	DPRINTF(("%s txn %"Z"u%c %p on mdbenv %p, root page %"Z"u",
-		act, txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w',
+		names[mode & MDB_END_OPMASK],
+		txn->mt_txnid, (txn->mt_flags & MDB_TXN_RDONLY) ? 'r' : 'w',
 		(void *) txn, (void *)env, txn->mt_dbs[MAIN_DBI].md_root));
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
 		if (txn->mt_u.reader) {
 			txn->mt_u.reader->mr_txnid = (txnid_t)-1;
-			if (!(env->me_flags & MDB_NOTLS))
+			if (!(env->me_flags & MDB_NOTLS)) {
 				txn->mt_u.reader = NULL; /* txn does not own reader */
+			} else if (mode & MDB_END_SLOT) {
+				txn->mt_u.reader->mr_pid = 0;
+				txn->mt_u.reader = NULL;
+			} /* else txn owns the slot until it does MDB_END_SLOT */
 		}
 		txn->mt_numdbs = 0;		/* close nothing if called again */
 		txn->mt_dbxs = NULL;	/* mark txn as reset */
 	} else {
 		pgno_t *pghead = env->me_pghead;
 
-		mdb_cursors_close(txn, 0);
+		if (!(mode & MDB_END_UPDATE)) /* !(already closed cursors) */
+			mdb_cursors_close(txn, 0);
 		if (!(env->me_flags & MDB_WRITEMAP)) {
 			mdb_dlist_free(txn);
 		}
@@ -2892,6 +2904,8 @@ mdb_txn_reset0(MDB_txn *txn, const char *act)
 			env->me_pglast = 0;
 
 			env->me_txn = NULL;
+			mode = 0;	/* txn == env->me_txn0, do not free() it */
+
 			/* The writer mutex was locked in mdb_txn_begin. */
 			if (env->me_txns)
 				UNLOCK_MUTEX(env->me_wmutex);
@@ -2905,6 +2919,9 @@ mdb_txn_reset0(MDB_txn *txn, const char *act)
 
 		mdb_midl_free(pghead);
 	}
+
+	if (mode & MDB_END_FREE)
+		free(txn);
 }
 
 void
@@ -2917,7 +2934,7 @@ mdb_txn_reset(MDB_txn *txn)
 	if (!(txn->mt_flags & MDB_TXN_RDONLY))
 		return;
 
-	mdb_txn_reset0(txn, "reset");
+	mdb_txn_end(txn, MDB_END_RESET);
 }
 
 void
@@ -2929,13 +2946,7 @@ mdb_txn_abort(MDB_txn *txn)
 	if (txn->mt_child)
 		mdb_txn_abort(txn->mt_child);
 
-	mdb_txn_reset0(txn, "abort");
-	/* Free reader slot tied to this txn (if MDB_NOTLS && writable FS) */
-	if ((txn->mt_flags & MDB_TXN_RDONLY) && txn->mt_u.reader)
-		txn->mt_u.reader->mr_pid = 0;
-
-	if (txn != txn->mt_env->me_txn0)
-		free(txn);
+	mdb_txn_end(txn, MDB_END_ABORT|MDB_END_SLOT|MDB_END_FREE);
 }
 
 /** Save the freelist as of this transaction to the freeDB.
@@ -3286,11 +3297,14 @@ int
 mdb_txn_commit(MDB_txn *txn)
 {
 	int		rc;
-	unsigned int i;
+	unsigned int i, end_mode;
 	MDB_env	*env;
 
 	if (txn == NULL)
 		return EINVAL;
+
+	/* mdb_txn_end() mode for a commit which writes nothing */
+	end_mode = MDB_END_EMPTY_COMMIT|MDB_END_UPDATE|MDB_END_SLOT|MDB_END_FREE;
 
 	if (txn->mt_child) {
 		rc = mdb_txn_commit(txn->mt_child);
@@ -3301,10 +3315,7 @@ mdb_txn_commit(MDB_txn *txn)
 	env = txn->mt_env;
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_RDONLY)) {
-		mdb_dbis_update(txn, 1);
-		txn->mt_numdbs = 2; /* so txn_abort() doesn't close any new handles */
-		mdb_txn_abort(txn);
-		return MDB_SUCCESS;
+		goto done;
 	}
 
 	if (F_ISSET(txn->mt_flags, MDB_TXN_ERROR)) {
@@ -3472,7 +3483,6 @@ mdb_txn_commit(MDB_txn *txn)
 	mdb_midl_free(env->me_pghead);
 	env->me_pghead = NULL;
 	mdb_midl_shrink(&txn->mt_free_pgs);
-	env->me_free_pgs = txn->mt_free_pgs;
 
 #if (MDB_DEBUG) > 2
 	mdb_audit(txn);
@@ -3482,21 +3492,10 @@ mdb_txn_commit(MDB_txn *txn)
 		(rc = mdb_env_sync(env, 0)) ||
 		(rc = mdb_env_write_meta(txn)))
 		goto fail;
-
-	/* Free P_LOOSE pages left behind in dirty_list */
-	if (!(env->me_flags & MDB_WRITEMAP))
-		mdb_dlist_free(txn);
+	end_mode = MDB_END_COMMITTED|MDB_END_UPDATE;
 
 done:
-	env->me_pglast = 0;
-	env->me_txn = NULL;
-	mdb_dbis_update(txn, 1);
-
-	if (env->me_txns)
-		UNLOCK_MUTEX(env->me_wmutex);
-	if (txn != env->me_txn0)
-		free(txn);
-
+	mdb_txn_end(txn, end_mode);
 	return MDB_SUCCESS;
 
 fail:
@@ -8969,7 +8968,7 @@ mdb_env_copyfd0(MDB_env *env, HANDLE fd)
 
 	if (env->me_txns) {
 		/* We must start the actual read txn after blocking writers */
-		mdb_txn_reset0(txn, "reset-stage1");
+		mdb_txn_end(txn, MDB_END_RESET_TMP);
 
 		/* Temporarily block writers until we snapshot the meta pages */
 		wmutex = env->me_wmutex;
