@@ -98,9 +98,8 @@ void mdb_midl_free(MDB_IDL ids);
 	/** Shrink an IDL.
 	 * Return the IDL to the default size if it has grown larger.
 	 * @param[in,out] idp	Address of the IDL to shrink.
-	 * @return	0 on no change, non-zero if shrunk.
 	 */
-int mdb_midl_shrink(MDB_IDL *idp);
+void mdb_midl_shrink(MDB_IDL *idp);
 
 	/** Make room for num additional elements in an IDL.
 	 * @param[in,out] idp	Address of the IDL.
