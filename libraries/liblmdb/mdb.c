@@ -3785,7 +3785,6 @@ mdb_env_write_meta(MDB_txn *txn)
 
 	/* Write to the SYNC fd */
 	mfd = (flags & (MDB_NOSYNC|MDB_NOMETASYNC)) ? env->me_fd : env->me_mfd;
-retry_write:
 #ifdef _WIN32
 	{
 		memset(&ov, 0, sizeof(ov));
@@ -3794,6 +3793,7 @@ retry_write:
 			rc = -1;
 	}
 #else
+retry_write:
 	rc = pwrite(mfd, ptr, len, off);
 #endif
 	if (rc != len) {
