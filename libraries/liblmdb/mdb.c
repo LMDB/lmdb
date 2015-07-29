@@ -3798,7 +3798,7 @@ retry_write:
 #endif
 	if (rc != len) {
 		rc = rc < 0 ? ErrCode() : EIO;
-#ifndef _WIN323
+#ifndef _WIN32
 		if (rc == EINTR)
 			goto retry_write;
 #endif
