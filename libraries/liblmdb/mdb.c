@@ -3648,7 +3648,6 @@ mdb_env_write_meta(MDB_txn *txn)
 	/* Write to the SYNC fd */
 	mfd = env->me_flags & (MDB_NOSYNC|MDB_NOMETASYNC) ?
 		env->me_fd : env->me_mfd;
-retry_write:
 #ifdef _WIN32
 	{
 		memset(&ov, 0, sizeof(ov));
@@ -3657,12 +3656,15 @@ retry_write:
 			rc = -1;
 	}
 #else
+retry_write:
 	rc = pwrite(mfd, ptr, len, off);
 #endif
 	if (rc != len) {
 		rc = rc < 0 ? ErrCode() : EIO;
+#ifndef _WIN32
 		if (rc == EINTR)
 			goto retry_write;
+#endif
 		DPUTS("write failed, disk error?");
 		/* On a failure, the pagecache still contains the new data.
 		 * Write some old data back, to prevent it from being used.
