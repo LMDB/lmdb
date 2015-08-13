@@ -42,6 +42,10 @@
  *  as int64 which is wrong. MSVC doesn't define it at all, so just
  *  don't use it.
  */
+#ifdef _MSC_VER
+#include <BaseTsd.h>
+typedef SSIZE_T ssize_t;
+#endif
 #define MDB_PID_T	int
 #define MDB_THR_T	DWORD
 #include <sys/types.h>
@@ -96,7 +100,10 @@ extern int cacheflush(char *addr, int nbytes, int cache);
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+#if defined(_WIN32) && defined(__MINGW64_VERSION_MAJOR)
 #include <unistd.h>
+#endif
 
 #if defined(__sun) || defined(ANDROID)
 /* Most platforms have posix_memalign, older may only have memalign */
@@ -1449,7 +1456,7 @@ mdb_strerror(int err)
 		;
 	}
 	buf[0] = 0;
-	FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM |
+	FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM |
 		FORMAT_MESSAGE_IGNORE_INSERTS,
 		NULL, err, 0, ptr, sizeof(buf), (va_list *)pad);
 	return ptr;
@@ -4022,7 +4029,7 @@ mdb_fsize(HANDLE fd, size_t *size)
 	if (!GetFileSizeEx(fd, &fsize))
 		return ErrCode();
 
-	*size = fsize.QuadPart;
+	*size = (size_t)fsize.QuadPart;
 #else
 	struct stat st;
 
@@ -4466,7 +4473,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 	off_t size, rsize;
 
 #ifdef _WIN32
-	env->me_lfd = CreateFile(lpath, GENERIC_READ|GENERIC_WRITE,
+	env->me_lfd = CreateFileA(lpath, GENERIC_READ|GENERIC_WRITE,
 		FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_ALWAYS,
 		FILE_ATTRIBUTE_NORMAL, NULL);
 #else
@@ -4570,9 +4577,9 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		mdb_hash_enc(&val, encbuf);
 		sprintf(env->me_txns->mti_rmname, "Global\\MDBr%s", encbuf);
 		sprintf(env->me_txns->mti_wmname, "Global\\MDBw%s", encbuf);
-		env->me_rmutex = CreateMutex(&mdb_all_sa, FALSE, env->me_txns->mti_rmname);
+		env->me_rmutex = CreateMutexA(&mdb_all_sa, FALSE, env->me_txns->mti_rmname);
 		if (!env->me_rmutex) goto fail_errno;
-		env->me_wmutex = CreateMutex(&mdb_all_sa, FALSE, env->me_txns->mti_wmname);
+		env->me_wmutex = CreateMutexA(&mdb_all_sa, FALSE, env->me_txns->mti_wmname);
 		if (!env->me_wmutex) goto fail_errno;
 #elif defined(MDB_USE_POSIX_SEM)
 		struct stat stbuf;
@@ -4659,9 +4666,9 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 			goto fail;
 		}
 #ifdef _WIN32
-		env->me_rmutex = OpenMutex(SYNCHRONIZE, FALSE, env->me_txns->mti_rmname);
+		env->me_rmutex = OpenMutexA(SYNCHRONIZE, FALSE, env->me_txns->mti_rmname);
 		if (!env->me_rmutex) goto fail_errno;
-		env->me_wmutex = OpenMutex(SYNCHRONIZE, FALSE, env->me_txns->mti_wmname);
+		env->me_wmutex = OpenMutexA(SYNCHRONIZE, FALSE, env->me_txns->mti_wmname);
 		if (!env->me_wmutex) goto fail_errno;
 #elif defined(MDB_USE_POSIX_SEM)
 		env->me_rmutex = sem_open(env->me_txns->mti_rmname, 0);
@@ -4756,7 +4763,11 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 	if (rc)
 		goto leave;
 
+#ifdef WIN32
+	env->me_path = _strdup(path);
+#else
 	env->me_path = strdup(path);
+#endif
 	env->me_dbxs = calloc(env->me_maxdbs, sizeof(MDB_dbx));
 	env->me_dbflags = calloc(env->me_maxdbs, sizeof(uint16_t));
 	env->me_dbiseqs = calloc(env->me_maxdbs, sizeof(unsigned int));
@@ -4782,7 +4793,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 		len = OPEN_ALWAYS;
 	}
 	mode = FILE_ATTRIBUTE_NORMAL;
-	env->me_fd = CreateFile(dpath, oflags, FILE_SHARE_READ|FILE_SHARE_WRITE,
+	env->me_fd = CreateFileA(dpath, oflags, FILE_SHARE_READ|FILE_SHARE_WRITE,
 		NULL, len, mode, NULL);
 #else
 	if (F_ISSET(flags, MDB_RDONLY))
@@ -4812,7 +4823,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 			 */
 #ifdef _WIN32
 			len = OPEN_EXISTING;
-			env->me_mfd = CreateFile(dpath, oflags,
+			env->me_mfd = CreateFileA(dpath, oflags,
 				FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, len,
 				mode | FILE_FLAG_WRITE_THROUGH, NULL);
 #else
@@ -8907,7 +8918,7 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
 	my.mc_toggle = 0;
 	my.mc_env = env;
 	my.mc_fd = fd;
-	THREAD_CREATE(thr, mdb_env_copythr, &my);
+	THREAD_CREATE(thr, (LPTHREAD_START_ROUTINE)mdb_env_copythr, &my);
 
 	rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
 	if (rc)
@@ -9118,7 +9129,7 @@ mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
 	 * already in the OS cache.
 	 */
 #ifdef _WIN32
-	newfd = CreateFile(lpath, GENERIC_WRITE, 0, NULL, CREATE_NEW,
+	newfd = CreateFileA(lpath, GENERIC_WRITE, 0, NULL, CREATE_NEW,
 				FILE_FLAG_NO_BUFFERING|FILE_FLAG_WRITE_THROUGH, NULL);
 #else
 	newfd = open(lpath, O_WRONLY|O_CREAT|O_EXCL, 0666);
@@ -9386,7 +9397,11 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 	/* OK, got info, add to table */
 	if (rc == MDB_SUCCESS) {
 		unsigned int slot = unused ? unused : txn->mt_numdbs;
+#ifdef WIN32
+		txn->mt_dbxs[slot].md_name.mv_data = _strdup(name);
+#else
 		txn->mt_dbxs[slot].md_name.mv_data = strdup(name);
+#endif
 		txn->mt_dbxs[slot].md_name.mv_size = len;
 		txn->mt_dbxs[slot].md_rel = NULL;
 		txn->mt_dbflags[slot] = dbflag;
