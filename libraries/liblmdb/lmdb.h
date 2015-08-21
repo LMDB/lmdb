@@ -1465,7 +1465,7 @@ int  mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	 *		database. No key comparisons are performed. This option allows
 	 *		fast bulk loading when keys are already known to be in the
 	 *		correct order. Loading unsorted keys with this flag will cause
-	 *		data corruption.
+	 *		a #MDB_KEYEXIST error.
 	 *	<li>#MDB_APPENDDUP - as above, but for sorted dup data.
 	 *	<li>#MDB_MULTIPLE - store multiple contiguous data elements in a
 	 *		single request. This flag may only be specified if the database
