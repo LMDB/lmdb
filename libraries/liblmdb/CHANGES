@@ -1,5 +1,7 @@
 LMDB 0.9 Change Log
 
+LMDB 0.9.17 Release Engineering
+
 LMDB 0.9.16 Release (2015/08/14)
 	Fix cursor EOF bug (ITS#8190)
 	Fix handling of subDB records (ITS#8181)
