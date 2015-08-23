@@ -1300,6 +1300,8 @@ struct MDB_cursor {
 #define C_UNTRACK	0x40		/**< Un-track cursor when closing */
 #define C_WRITEMAP	MDB_TXN_WRITEMAP /**< Copy of txn flag */
 /** Read-only cursor into the txn's original snapshot in the map.
+ *	Set for read-only txns, and in #mdb_page_alloc() for #FREE_DBI when
+ *	#MDB_DEVEL & 2. Only implements code which is necessary for this.
  */
 #define C_ORIG_RDONLY	MDB_TXN_RDONLY
 /** @} */
@@ -2259,6 +2261,8 @@ mdb_page_dirty(MDB_txn *txn, MDB_page *mp)
  * Do not modify the freedB, just merge freeDB records into me_pghead[]
  * and move me_pglast to say which records were consumed.  Only this
  * function can create me_pghead and move me_pglast/mt_next_pgno.
+ * When #MDB_DEVEL & 2, it is not affected by #mdb_freelist_save(): it
+ * then uses the transaction's original snapshot of the freeDB.
  * @param[in] mc cursor A cursor handle identifying the transaction and
  *	database for which we are allocating.
  * @param[in] num the number of pages to allocate.
@@ -2334,6 +2338,14 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 			last = env->me_pglast;
 			oldest = env->me_pgoldest;
 			mdb_cursor_init(&m2, txn, FREE_DBI, NULL);
+#if (MDB_DEVEL) & 2	/* "& 2" so MDB_DEVEL=1 won't hide bugs breaking freeDB */
+			/* Use original snapshot. TODO: Should need less care in code
+			 * which modifies the database. Maybe we can delete some code?
+			 */
+			m2.mc_flags |= C_ORIG_RDONLY;
+			m2.mc_db = &env->me_metas[(txn->mt_txnid-1) & 1]->mm_dbs[FREE_DBI];
+			m2.mc_dbflag = (unsigned char *)""; /* probably unnecessary */
+#endif
 			if (last) {
 				op = MDB_SET_RANGE;
 				key.mv_data = &last; /* will look up last+1 */
@@ -3260,6 +3272,9 @@ mdb_txn_abort(MDB_txn *txn)
 
 /** Save the freelist as of this transaction to the freeDB.
  * This changes the freelist. Keep trying until it stabilizes.
+ *
+ * When (MDB_DEVEL) & 2, the changes do not affect #mdb_page_alloc(),
+ * it then uses the transaction's original snapshot of the freeDB.
  */
 static int
 mdb_freelist_save(MDB_txn *txn)
