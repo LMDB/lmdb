@@ -3553,6 +3553,9 @@ mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 	mdb_env_init_meta0(env, meta);
 
 	p = calloc(2, psize);
+	if (!p)
+		return ENOMEM;
+
 	p->mp_pgno = 0;
 	p->mp_flags = P_META;
 	*(MDB_meta *)METADATA(p) = *meta;
