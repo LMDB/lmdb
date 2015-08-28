@@ -287,6 +287,8 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
 #define MDB_NORDAHEAD	0x800000
 	/** don't initialize malloc'd memory before writing to datafile */
 #define MDB_NOMEMINIT	0x1000000
+	/** keep WAL files after checkpoint */
+#define MDB_KEEPXLOGS   0x2000000
 /** @} */
 
 /**	@defgroup	mdb_dbi_open	Database Flags
@@ -407,10 +409,14 @@ typedef enum MDB_cursor_op {
 	/** Invalid reuse of reader locktable slot */
 #define MDB_BAD_RSLOT		(-30783)
 	/** Transaction cannot recover - it must be aborted */
-#define MDB_BAD_TXN			(-30782)
+#define MDB_BAD_TXN		(-30782)
 	/** Too big key/data, key is empty, or wrong DUPFIXED size */
 #define MDB_BAD_VALSIZE		(-30781)
-#define MDB_LAST_ERRCODE	MDB_BAD_VALSIZE
+        /** Corrupted meta page during WAL recover */
+#define MDB_WAL_INVALID_META    (-30780)
+        /** WAL recover failure pages in transaction mismatch */
+#define MDB_WAL_WRONG_TXN_PAGES (-30779)
+#define MDB_LAST_ERRCODE MDB_WAL_WRONG_TXN_PAGES
 /** @} */
 
 /** @brief Statistics for a database in the environment */
@@ -1457,6 +1463,15 @@ int	mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx);
 	 * @return 0 on success, non-zero on failure.
 	 */
 int	mdb_reader_check(MDB_env *env, int *dead);
+
+        /** @brief set MDB_KEEPXLOGS flag on or off
+         * @param[in] env An environment handle returned by #mdb_env_create()
+         * @param[in] set_xlog_on zero (off) or non-zerro (on)
+         * @param[out] the current xlog number
+         * @return == 0 on success otherwise invalid  An environment handle
+         */
+int     mdb_env_set_xlog(MDB_env *env, int set_xlog_on, unsigned long *last_xlog_num);
+
 /**	@} */
 
 #ifdef __cplusplus
