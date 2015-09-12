@@ -1,6 +1,8 @@
 LMDB 0.9 Change Log
 
 LMDB 0.9.17 Release Engineering
+	Fix ITS#7377 catch calloc failure
+	Fix ITS#8237 regression from ITS#7589
 
 LMDB 0.9.16 Release (2015/08/14)
 	Fix cursor EOF bug (ITS#8190)
