@@ -7898,7 +7898,6 @@ mdb_rebalance(MDB_cursor *mc)
 		minkeys = 2;
 		thresh = FILL_THRESHOLD;
 	}
-	minkeys = 1 + (IS_BRANCH(mc->mc_pg[mc->mc_top]));
 	DPRINTF(("rebalancing %s page %"Z"u (has %u keys, %.1f%% full)",
 	    IS_LEAF(mc->mc_pg[mc->mc_top]) ? "leaf" : "branch",
 	    mdb_dbg_pgno(mc->mc_pg[mc->mc_top]), NUMKEYS(mc->mc_pg[mc->mc_top]),
@@ -8038,7 +8037,6 @@ mdb_rebalance(MDB_cursor *mc)
 	 * move one key from it. Otherwise we should try to merge them.
 	 * (A branch page must never have less than 2 keys.)
 	 */
-	minkeys = 1 + (IS_BRANCH(mn.mc_pg[mn.mc_top]));
 	if (PAGEFILL(mc->mc_txn->mt_env, mn.mc_pg[mn.mc_top]) >= thresh && NUMKEYS(mn.mc_pg[mn.mc_top]) > minkeys) {
 		rc = mdb_node_move(&mn, mc);
 		if (mc->mc_ki[ptop]) {
