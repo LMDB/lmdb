@@ -7690,10 +7690,10 @@ mdb_rebalance(MDB_cursor *mc)
 	indx_t oldki;
 
 	if (IS_BRANCH(mc->mc_pg[mc->mc_top])) {
-		minkeys = 1;
+		minkeys = 2;
 		thresh = 1;
 	} else {
-		minkeys = 2;
+		minkeys = 1;
 		thresh = FILL_THRESHOLD;
 	}
 	DPRINTF(("rebalancing %s page %"Z"u (has %u keys, %.1f%% full)",
