@@ -1429,7 +1429,7 @@ mdb_strerror(int err)
 /** assert(3) variant in cursor context */
 #define mdb_cassert(mc, expr)	mdb_assert0((mc)->mc_txn->mt_env, expr, #expr)
 /** assert(3) variant in transaction context */
-#define mdb_tassert(mc, expr)	mdb_assert0((txn)->mt_env, expr, #expr)
+#define mdb_tassert(txn, expr)	mdb_assert0((txn)->mt_env, expr, #expr)
 /** assert(3) variant in environment context */
 #define mdb_eassert(env, expr)	mdb_assert0(env, expr, #expr)
 
