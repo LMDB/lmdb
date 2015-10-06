@@ -7440,8 +7440,22 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 		/* Adjust other cursors pointing to mp */
 		MDB_cursor *m2, *m3;
 		MDB_dbi dbi = csrc->mc_dbi;
-		MDB_page *mp = csrc->mc_pg[csrc->mc_top];
+		MDB_page *mp;
 
+		mp = cdst->mc_pg[csrc->mc_top];
+		for (m2 = csrc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
+			if (csrc->mc_flags & C_SUB)
+				m3 = &m2->mc_xcursor->mx_cursor;
+			else
+				m3 = m2;
+			if (m3 == cdst) continue;
+			if (m3->mc_pg[csrc->mc_top] == mp && m3->mc_ki[csrc->mc_top] >=
+				cdst->mc_ki[csrc->mc_top]) {
+				m3->mc_ki[csrc->mc_top]++;
+			}
+		}
+
+		mp = csrc->mc_pg[csrc->mc_top];
 		for (m2 = csrc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
 			if (csrc->mc_flags & C_SUB)
 				m3 = &m2->mc_xcursor->mx_cursor;
@@ -7877,37 +7891,16 @@ mdb_cursor_del0(MDB_cursor *mc)
 	MDB_page *mp;
 	indx_t ki;
 	unsigned int nkeys;
+	MDB_cursor *m2, *m3;
+	MDB_dbi dbi = mc->mc_dbi;
 
 	ki = mc->mc_ki[mc->mc_top];
+	mp = mc->mc_pg[mc->mc_top];
 	mdb_node_del(mc, mc->mc_db->md_pad);
 	mc->mc_db->md_entries--;
-	rc = mdb_rebalance(mc);
-
-	if (rc == MDB_SUCCESS) {
-		MDB_cursor *m2, *m3;
-		MDB_dbi dbi = mc->mc_dbi;
-
-		/* DB is totally empty now, just bail out.
-		 * Other cursors adjustments were already done
-		 * by mdb_rebalance and aren't needed here.
-		 */
-		if (!mc->mc_snum)
-			return rc;
-
-		mp = mc->mc_pg[mc->mc_top];
-		nkeys = NUMKEYS(mp);
-
-		/* if mc points past last node in page, find next sibling */
-		if (mc->mc_ki[mc->mc_top] >= nkeys) {
-			rc = mdb_cursor_sibling(mc, 1);
-			if (rc == MDB_NOTFOUND) {
-				mc->mc_flags |= C_EOF;
-				rc = MDB_SUCCESS;
-			}
-		}
-
+	{
 		/* Adjust other cursors pointing to mp */
-		for (m2 = mc->mc_txn->mt_cursors[dbi]; !rc && m2; m2=m2->mc_next) {
+		for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
 			m3 = (mc->mc_flags & C_SUB) ? &m2->mc_xcursor->mx_cursor : m2;
 			if (! (m2->mc_flags & m3->mc_flags & C_INITIALIZED))
 				continue;
@@ -7921,6 +7914,31 @@ mdb_cursor_del0(MDB_cursor *mc)
 					else if (mc->mc_db->md_flags & MDB_DUPSORT)
 						m3->mc_xcursor->mx_cursor.mc_flags |= C_EOF;
 				}
+			}
+		}
+	}
+	rc = mdb_rebalance(mc);
+
+	if (rc == MDB_SUCCESS) {
+		/* DB is totally empty now, just bail out.
+		 * Other cursors adjustments were already done
+		 * by mdb_rebalance and aren't needed here.
+		 */
+		if (!mc->mc_snum)
+			return rc;
+
+		mp = mc->mc_pg[mc->mc_top];
+		nkeys = NUMKEYS(mp);
+
+		/* Adjust other cursors pointing to mp */
+		for (m2 = mc->mc_txn->mt_cursors[dbi]; !rc && m2; m2=m2->mc_next) {
+			m3 = (mc->mc_flags & C_SUB) ? &m2->mc_xcursor->mx_cursor : m2;
+			if (! (m2->mc_flags & m3->mc_flags & C_INITIALIZED))
+				continue;
+			if (m3->mc_snum < mc->mc_snum)
+				continue;
+			if (m3->mc_pg[mc->mc_top] == mp) {
+				/* if m3 points past last node in page, find next sibling */
 				if (m3->mc_ki[mc->mc_top] >= nkeys) {
 					rc = mdb_cursor_sibling(m3, 1);
 					if (rc == MDB_NOTFOUND) {
