@@ -1384,6 +1384,7 @@ static int	mdb_cursor_last(MDB_cursor *mc, MDB_val *key, MDB_val *data);
 static void	mdb_cursor_init(MDB_cursor *mc, MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx);
 static void	mdb_xcursor_init0(MDB_cursor *mc);
 static void	mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node);
+static void	mdb_xcursor_init2(MDB_cursor *mc, MDB_node *node);
 
 static int	mdb_drop0(MDB_cursor *mc, int subs);
 static void mdb_default_cmp(MDB_txn *txn, MDB_dbi dbi);
@@ -6765,22 +6766,22 @@ put_sub:
 				rc = mdb_cursor_put(&mc->mc_xcursor->mx_cursor, &dkey, &xdata, xflags);
 				if (rc)
 					goto bad_sub;
-				{
-					/* Adjust other cursors pointing to mp */
-					MDB_cursor *m2;
-					unsigned i = mc->mc_top;
-					MDB_page *mp = mc->mc_pg[i];
-
-					for (m2 = mc->mc_txn->mt_cursors[mc->mc_dbi]; m2; m2=m2->mc_next) {
-						if (m2 == mc || m2->mc_snum < mc->mc_snum) continue;
-						if (!(m2->mc_flags & C_INITIALIZED)) continue;
-						if (m2->mc_pg[i] == mp && m2->mc_ki[i] == mc->mc_ki[i]) {
-							mdb_xcursor_init1(m2, leaf);
-						}
-					}
-				}
 				/* we've done our job */
 				dkey.mv_size = 0;
+			}
+			{
+				/* Adjust other cursors pointing to mp */
+				MDB_cursor *m2;
+				unsigned i = mc->mc_top;
+				MDB_page *mp = mc->mc_pg[i];
+
+				for (m2 = mc->mc_txn->mt_cursors[mc->mc_dbi]; m2; m2=m2->mc_next) {
+					if (m2 == mc || m2->mc_snum < mc->mc_snum) continue;
+					if (!(m2->mc_flags & C_INITIALIZED)) continue;
+					if (m2->mc_pg[i] == mp && m2->mc_ki[i] == mc->mc_ki[i]) {
+						mdb_xcursor_init2(m2, leaf);
+					}
+				}
 			}
 			ecount = mc->mc_xcursor->mx_db.md_entries;
 			if (flags & MDB_APPENDDUP)
@@ -7323,6 +7324,54 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
 	if (mx->mx_dbx.md_cmp == mdb_cmp_int && mx->mx_db.md_pad == sizeof(size_t))
 		mx->mx_dbx.md_cmp = mdb_cmp_clong;
 #endif
+}
+
+
+/** Fixup a sorted-dups cursor due to underlying update.
+ *	Sets up some fields that depend on the data from the main cursor.
+ *	Almost the same as init1, but skips initialization steps if the
+ *	xcursor had already been used.
+ * @param[in] mc The main cursor whose sorted-dups cursor is to be fixed up.
+ * @param[in] node The data containing the #MDB_db record for the
+ * sorted-dup database.
+ */
+static void
+mdb_xcursor_init2(MDB_cursor *mc, MDB_node *node)
+{
+	MDB_xcursor *mx = mc->mc_xcursor;
+
+	if (node->mn_flags & F_SUBDATA) {
+		memcpy(&mx->mx_db, NODEDATA(node), sizeof(MDB_db));
+		mdb_page_get(mc->mc_txn,mx->mx_db.md_root,&mx->mx_cursor.mc_pg[0],NULL);
+	} else {
+		MDB_page *fp = NODEDATA(node);
+		mx->mx_db.md_entries = NUMKEYS(fp);
+		COPY_PGNO(mx->mx_db.md_root, fp->mp_pgno);
+		mx->mx_cursor.mc_pg[0] = fp;
+	}
+	if (!(mx->mx_cursor.mc_flags & C_INITIALIZED)) {
+		mx->mx_cursor.mc_snum = 1;
+		mx->mx_cursor.mc_top = 0;
+		mx->mx_cursor.mc_flags |= C_INITIALIZED;
+		mx->mx_cursor.mc_ki[0] = 0;
+		if (!(node->mn_flags & F_SUBDATA)) {
+			mx->mx_db.md_pad = 0;
+			mx->mx_db.md_flags = 0;
+			mx->mx_db.md_depth = 1;
+			mx->mx_db.md_branch_pages = 0;
+			mx->mx_db.md_leaf_pages = 1;
+			mx->mx_db.md_overflow_pages = 0;
+			if (mc->mc_db->md_flags & MDB_DUPFIXED) {
+				mx->mx_db.md_flags = MDB_DUPFIXED;
+				mx->mx_db.md_pad = mx->mx_cursor.mc_pg[0]->mp_pad;
+				if (mc->mc_db->md_flags & MDB_INTEGERDUP)
+					mx->mx_db.md_flags |= MDB_INTEGERKEY;
+			}
+		}
+	}
+	DPRINTF(("Sub-db -%u root page %"Z"u", mx->mx_cursor.mc_dbi,
+		mx->mx_db.md_root));
+	mx->mx_dbflag = DB_VALID|DB_USRVALID|DB_DIRTY; /* DB_DIRTY guides mdb_cursor_touch */
 }
 
 /** Initialize a cursor for a given transaction and database. */
