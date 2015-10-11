@@ -1384,7 +1384,7 @@ static int	mdb_cursor_last(MDB_cursor *mc, MDB_val *key, MDB_val *data);
 static void	mdb_cursor_init(MDB_cursor *mc, MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx);
 static void	mdb_xcursor_init0(MDB_cursor *mc);
 static void	mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node);
-static void	mdb_xcursor_init2(MDB_cursor *mc, MDB_node *node);
+static void	mdb_xcursor_init2(MDB_cursor *mc, MDB_xcursor *src_mx, int force);
 
 static int	mdb_drop0(MDB_cursor *mc, int subs);
 static void mdb_default_cmp(MDB_txn *txn, MDB_dbi dbi);
@@ -6322,7 +6322,7 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 {
 	MDB_env		*env;
 	MDB_node	*leaf = NULL;
-	MDB_page	*fp, *mp;
+	MDB_page	*fp, *mp, *sub_root = NULL;
 	uint16_t	fp_flags;
 	MDB_val		xdata, *rdata, dkey, olddata;
 	MDB_db dummy;
@@ -6602,6 +6602,7 @@ prep_subDB:
 					offset = env->me_psize - olddata.mv_size;
 					flags |= F_DUPDATA|F_SUBDATA;
 					dummy.md_root = mp->mp_pgno;
+					sub_root = mp;
 			}
 			if (mp != fp) {
 				mp->mp_flags = fp_flags | P_DIRTY;
@@ -6748,7 +6749,7 @@ new_sub:
 		 * DB are all zero size.
 		 */
 		if (do_sub) {
-			int xflags;
+			int xflags, new_dupdata;
 			size_t ecount;
 put_sub:
 			xdata.mv_size = 0;
@@ -6761,6 +6762,9 @@ put_sub:
 				xflags = (flags & MDB_NODUPDATA) ?
 					MDB_NOOVERWRITE|MDB_NOSPILL : MDB_NOSPILL;
 			}
+			if (sub_root)
+				mc->mc_xcursor->mx_cursor.mc_pg[0] = sub_root;
+			new_dupdata = (int)dkey.mv_size;
 			/* converted, write the original data first */
 			if (dkey.mv_size) {
 				rc = mdb_cursor_put(&mc->mc_xcursor->mx_cursor, &dkey, &xdata, xflags);
@@ -6769,9 +6773,10 @@ put_sub:
 				/* we've done our job */
 				dkey.mv_size = 0;
 			}
-			{
+			if (!(leaf->mn_flags & F_SUBDATA) || sub_root) {
 				/* Adjust other cursors pointing to mp */
 				MDB_cursor *m2;
+				MDB_xcursor *mx = mc->mc_xcursor;
 				unsigned i = mc->mc_top;
 				MDB_page *mp = mc->mc_pg[i];
 
@@ -6779,7 +6784,7 @@ put_sub:
 					if (m2 == mc || m2->mc_snum < mc->mc_snum) continue;
 					if (!(m2->mc_flags & C_INITIALIZED)) continue;
 					if (m2->mc_pg[i] == mp && m2->mc_ki[i] == mc->mc_ki[i]) {
-						mdb_xcursor_init2(m2, leaf);
+						mdb_xcursor_init2(m2, mx, new_dupdata);
 					}
 				}
 			}
@@ -7332,46 +7337,30 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
  *	Almost the same as init1, but skips initialization steps if the
  *	xcursor had already been used.
  * @param[in] mc The main cursor whose sorted-dups cursor is to be fixed up.
- * @param[in] node The data containing the #MDB_db record for the
- * sorted-dup database.
+ * @param[in] src_mx The xcursor of an up-to-date cursor.
+ * @param[in] new_dupdata True if converting from a non-#F_DUPDATA item.
  */
 static void
-mdb_xcursor_init2(MDB_cursor *mc, MDB_node *node)
+mdb_xcursor_init2(MDB_cursor *mc, MDB_xcursor *src_mx, int new_dupdata)
 {
 	MDB_xcursor *mx = mc->mc_xcursor;
 
-	if (node->mn_flags & F_SUBDATA) {
-		memcpy(&mx->mx_db, NODEDATA(node), sizeof(MDB_db));
-		mdb_page_get(mc->mc_txn,mx->mx_db.md_root,&mx->mx_cursor.mc_pg[0],NULL);
-	} else {
-		MDB_page *fp = NODEDATA(node);
-		mx->mx_db.md_entries = NUMKEYS(fp);
-		COPY_PGNO(mx->mx_db.md_root, fp->mp_pgno);
-		mx->mx_cursor.mc_pg[0] = fp;
-	}
-	if (!(mx->mx_cursor.mc_flags & C_INITIALIZED)) {
+	if (new_dupdata) {
 		mx->mx_cursor.mc_snum = 1;
 		mx->mx_cursor.mc_top = 0;
 		mx->mx_cursor.mc_flags |= C_INITIALIZED;
 		mx->mx_cursor.mc_ki[0] = 0;
-		if (!(node->mn_flags & F_SUBDATA)) {
-			mx->mx_db.md_pad = 0;
-			mx->mx_db.md_flags = 0;
-			mx->mx_db.md_depth = 1;
-			mx->mx_db.md_branch_pages = 0;
-			mx->mx_db.md_leaf_pages = 1;
-			mx->mx_db.md_overflow_pages = 0;
-			if (mc->mc_db->md_flags & MDB_DUPFIXED) {
-				mx->mx_db.md_flags = MDB_DUPFIXED;
-				mx->mx_db.md_pad = mx->mx_cursor.mc_pg[0]->mp_pad;
-				if (mc->mc_db->md_flags & MDB_INTEGERDUP)
-					mx->mx_db.md_flags |= MDB_INTEGERKEY;
-			}
-		}
+		mx->mx_dbflag = DB_VALID|DB_USRVALID|DB_DIRTY; /* DB_DIRTY guides mdb_cursor_touch */
+#if UINT_MAX < SIZE_MAX
+		mx->mx_dbx.md_cmp = src_mx->mx_dbx.md_cmp;
+#endif
+	} else if (!(mx->mx_cursor.mc_flags & C_INITIALIZED)) {
+		return;
 	}
+	mx->mx_db = src_mx->mx_db;
+	mx->mx_cursor.mc_pg[0] = src_mx->mx_cursor.mc_pg[0];
 	DPRINTF(("Sub-db -%u root page %"Z"u", mx->mx_cursor.mc_dbi,
 		mx->mx_db.md_root));
-	mx->mx_dbflag = DB_VALID|DB_USRVALID|DB_DIRTY; /* DB_DIRTY guides mdb_cursor_touch */
 }
 
 /** Initialize a cursor for a given transaction and database. */
