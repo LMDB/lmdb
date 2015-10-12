@@ -6891,6 +6891,7 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 					/* fix other sub-DB cursors pointed at fake pages on this page */
 					for (m2 = mc->mc_txn->mt_cursors[mc->mc_dbi]; m2; m2=m2->mc_next) {
 						if (m2 == mc || m2->mc_snum < mc->mc_snum) continue;
+						if (!(m2->mc_flags & C_INITIALIZED)) continue;
 						if (m2->mc_pg[mc->mc_top] == mp) {
 							if (m2->mc_ki[mc->mc_top] == mc->mc_ki[mc->mc_top]) {
 								m2->mc_xcursor->mx_cursor.mc_pg[0] = NODEDATA(leaf);
