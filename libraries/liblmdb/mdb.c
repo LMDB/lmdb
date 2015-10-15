@@ -185,6 +185,12 @@ extern int cacheflush(char *addr, int nbytes, int cache);
 #define ESECT
 #endif
 
+#ifdef _MSC_VER
+#define CALL_CONV WINAPI
+#else
+#define CALL_CONV
+#endif
+
 /** @defgroup internal	LMDB Internals
  *	@{
  */
@@ -8509,7 +8515,7 @@ typedef struct mdb_copy {
 } mdb_copy;
 
 	/** Dedicated writer thread for compacting copy. */
-static THREAD_RET ESECT
+static THREAD_RET ESECT CALL_CONV
 mdb_env_copythr(void *arg)
 {
 	mdb_copy *my = arg;
