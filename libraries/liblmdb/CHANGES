@@ -8,9 +8,17 @@ LMDB 0.9.17 Release Engineering
 	Fix ITS#8264 cursor_del cursor tracking
 	Fix ITS#8263 cursor_put cursor tracking
 	Fix ITS#7771 fakepage cursor tracking
+	Fix ITS#7789 ensure mapsize >= pages in use
+	Fix ITS#7971 mdb_txn_renew0() new reader slots
+	Fix ITS#7969 use __sync_synchronize on non-x86
+	Added mdb_txn_id() (ITS#7994)
+	Added robust mutex support
+	Miscellaneous cleanup/simplification
 	Build
 		Create install dirs if needed (ITS#8256)
 		Fix ThreadProc decl on Win32/MSVC (ITS#8270)
+		Added ssize_t typedef for MSVC (ITS#8067)
+		Use ANSI apis on Windows (ITS#8069)
 
 LMDB 0.9.16 Release (2015/08/14)
 	Fix cursor EOF bug (ITS#8190)
