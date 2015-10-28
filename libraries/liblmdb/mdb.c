@@ -3750,7 +3750,7 @@ mdb_env_write_meta(MDB_txn *txn)
 		toggle, txn->mt_dbs[MAIN_DBI].md_root));
 
 	env = txn->mt_env;
-	flags = txn->mt_flags & env->me_flags;
+	flags = txn->mt_flags | env->me_flags;
 	mp = env->me_metas[toggle];
 	mapsize = env->me_metas[toggle ^ 1]->mm_mapsize;
 	/* Persist any increases of mapsize config */
