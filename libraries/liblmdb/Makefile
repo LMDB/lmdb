@@ -13,7 +13,7 @@
 # - MDB_FDATASYNC
 # - MDB_FDATASYNC_WORKS
 # - MDB_USE_PWRITEV
-# - MDB_NO_ROBUST
+# - MDB_USE_ROBUST
 #
 # There may be other macros in mdb.c of interest. You should
 # read mdb.c before changing any of them.
