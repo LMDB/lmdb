@@ -238,7 +238,25 @@ typedef SSIZE_T	ssize_t;
 #define MDB_OWNERDEAD	EOWNERDEAD	/**< #LOCK_MUTEX0() result if dead owner */
 #endif
 
-#ifdef MDB_OWNERDEAD
+/* Android currently lacks Robust Mutex support */
+#if defined(ANDROID) && defined(MDB_USE_POSIX_MUTEX)
+#define MDB_NO_ROBUST	1
+#endif
+
+/** Some platforms define the EOWNERDEAD error code
+ * even though they don't support Robust Mutexes.
+ * Compile with -DMDB_NO_ROBUST, or use some other
+ * mechanism like -DMDB_USE_SYSV_SEM instead of
+ * -DMDB_USE_POSIX_MUTEX. (SysV semaphores are
+ * also Robust, but some systems don't support them
+ * either.)
+ */
+
+#ifndef MDB_NO_ROBUST
+#define MDB_NO_ROBUST	0
+#endif
+
+#if defined(MDB_OWNERDEAD) && !(MDB_NO_ROBUST)
 #define MDB_ROBUST_SUPPORTED	1
 #endif
 
