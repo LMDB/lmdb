@@ -8130,7 +8130,8 @@ mdb_rebalance(MDB_cursor *mc)
 	 */
 	if (PAGEFILL(mc->mc_txn->mt_env, mn.mc_pg[mn.mc_top]) >= thresh && NUMKEYS(mn.mc_pg[mn.mc_top]) > minkeys) {
 		rc = mdb_node_move(&mn, mc);
-		if (mc->mc_ki[mc->mc_top-1]) {
+		if (!mc->mc_ki[mc->mc_top]) {
+			/* if we inserted on left, bump position up */
 			oldki++;
 		}
 	} else {
