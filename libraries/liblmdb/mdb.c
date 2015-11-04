@@ -7794,6 +7794,7 @@ mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst)
 		/* Adjust other cursors pointing to mp */
 		MDB_cursor *m2, *m3;
 		MDB_dbi dbi = csrc->mc_dbi;
+		unsigned int top = csrc->mc_top;
 
 		for (m2 = csrc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
 			if (csrc->mc_flags & C_SUB)
@@ -7802,9 +7803,10 @@ mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst)
 				m3 = m2;
 			if (m3 == csrc) continue;
 			if (m3->mc_snum < csrc->mc_snum) continue;
-			if (m3->mc_pg[csrc->mc_top] == psrc) {
-				m3->mc_pg[csrc->mc_top] = pdst;
-				m3->mc_ki[csrc->mc_top] += nkeys;
+			if (m3->mc_pg[top] == psrc) {
+				m3->mc_pg[top] = pdst;
+				m3->mc_ki[top] += nkeys;
+				m3->mc_ki[top-1] = cdst->mc_ki[top-1];
 			}
 		}
 	}
