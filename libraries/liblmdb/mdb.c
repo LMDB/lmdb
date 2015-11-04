@@ -7596,32 +7596,25 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 		/* Adjust other cursors pointing to mp */
 		MDB_cursor *m2, *m3;
 		MDB_dbi dbi = csrc->mc_dbi;
-		MDB_page *mp;
+		MDB_page *mpd, *mps;
 
+		mps = csrc->mc_pg[csrc->mc_top];
 		/* If we're adding on the left, bump others up */
 		if (!cdst->mc_ki[csrc->mc_top]) {
-			mp = cdst->mc_pg[csrc->mc_top];
+			mpd = cdst->mc_pg[csrc->mc_top];
 			for (m2 = csrc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
 				if (csrc->mc_flags & C_SUB)
 					m3 = &m2->mc_xcursor->mx_cursor;
 				else
 					m3 = m2;
-				if (m3 == cdst) continue;
-				if (m3->mc_pg[csrc->mc_top] == mp && m3->mc_ki[csrc->mc_top] >=
-					cdst->mc_ki[csrc->mc_top]) {
+				if (m3 != cdst &&
+					m3->mc_pg[csrc->mc_top] == mpd &&
+					m3->mc_ki[csrc->mc_top] >= cdst->mc_ki[csrc->mc_top]) {
 					m3->mc_ki[csrc->mc_top]++;
 				}
-			}
-
-			mp = csrc->mc_pg[csrc->mc_top];
-			for (m2 = csrc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
-				if (csrc->mc_flags & C_SUB)
-					m3 = &m2->mc_xcursor->mx_cursor;
-				else
-					m3 = m2;
-				if (m3 == csrc) continue;
-				if (m3->mc_pg[csrc->mc_top] == mp && m3->mc_ki[csrc->mc_top] ==
-					csrc->mc_ki[csrc->mc_top]) {
+				if (m3 !=csrc &&
+					m3->mc_pg[csrc->mc_top] == mps &&
+					m3->mc_ki[csrc->mc_top] == csrc->mc_ki[csrc->mc_top]) {
 					m3->mc_pg[csrc->mc_top] = cdst->mc_pg[cdst->mc_top];
 					m3->mc_ki[csrc->mc_top] = cdst->mc_ki[cdst->mc_top];
 				}
@@ -7629,14 +7622,13 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 		} else
 		/* Adding on the right, bump others down */
 		{
-			mp = csrc->mc_pg[csrc->mc_top];
 			for (m2 = csrc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
 				if (csrc->mc_flags & C_SUB)
 					m3 = &m2->mc_xcursor->mx_cursor;
 				else
 					m3 = m2;
 				if (m3 == csrc) continue;
-				if (m3->mc_pg[csrc->mc_top] == mp) {
+				if (m3->mc_pg[csrc->mc_top] == mps) {
 					if (!m3->mc_ki[csrc->mc_top]) {
 						m3->mc_pg[csrc->mc_top] = cdst->mc_pg[cdst->mc_top];
 						m3->mc_ki[csrc->mc_top] = cdst->mc_ki[cdst->mc_top];
