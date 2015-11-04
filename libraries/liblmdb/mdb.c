@@ -7598,16 +7598,19 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 		MDB_dbi dbi = csrc->mc_dbi;
 		MDB_page *mp;
 
-		mp = cdst->mc_pg[csrc->mc_top];
-		for (m2 = csrc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
-			if (csrc->mc_flags & C_SUB)
-				m3 = &m2->mc_xcursor->mx_cursor;
-			else
-				m3 = m2;
-			if (m3 == cdst) continue;
-			if (m3->mc_pg[csrc->mc_top] == mp && m3->mc_ki[csrc->mc_top] >=
-				cdst->mc_ki[csrc->mc_top]) {
-				m3->mc_ki[csrc->mc_top]++;
+		/* If we're adding on the left, bump others up */
+		if (!cdst->mc_ki[csrc->mc_top]) {
+			mp = cdst->mc_pg[csrc->mc_top];
+			for (m2 = csrc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
+				if (csrc->mc_flags & C_SUB)
+					m3 = &m2->mc_xcursor->mx_cursor;
+				else
+					m3 = m2;
+				if (m3 == cdst) continue;
+				if (m3->mc_pg[csrc->mc_top] == mp && m3->mc_ki[csrc->mc_top] >=
+					cdst->mc_ki[csrc->mc_top]) {
+					m3->mc_ki[csrc->mc_top]++;
+				}
 			}
 		}
 
