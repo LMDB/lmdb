@@ -3,10 +3,12 @@ LMDB 0.9 Change Log
 LMDB 0.9.17 Release Engineering
 	Fix ITS#7377 catch calloc failure
 	Fix ITS#8237 regression from ITS#7589
+	Fix ITS#8238 page_split for DUPFIXED pages
 	Fix ITS#8221 MDB_PAGE_FULL on delete/rebalance
 	Fix ITS#8258 rebalance/split assert
-	Fix ITS#8264 cursor_del cursor tracking
 	Fix ITS#8263 cursor_put cursor tracking
+	Fix ITS#8264 cursor_del cursor tracking
+	Fix ITS#8299 mdb_del cursor tracking
 	Fix ITS#7771 fakepage cursor tracking
 	Fix ITS#7789 ensure mapsize >= pages in use
 	Fix ITS#7971 mdb_txn_renew0() new reader slots
