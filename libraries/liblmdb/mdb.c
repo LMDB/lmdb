@@ -7617,6 +7617,7 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 					m3->mc_ki[csrc->mc_top] == csrc->mc_ki[csrc->mc_top]) {
 					m3->mc_pg[csrc->mc_top] = cdst->mc_pg[cdst->mc_top];
 					m3->mc_ki[csrc->mc_top] = cdst->mc_ki[cdst->mc_top];
+					m3->mc_ki[csrc->mc_top-1]++;
 				}
 			}
 		} else
@@ -7632,6 +7633,7 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 					if (!m3->mc_ki[csrc->mc_top]) {
 						m3->mc_pg[csrc->mc_top] = cdst->mc_pg[cdst->mc_top];
 						m3->mc_ki[csrc->mc_top] = cdst->mc_ki[cdst->mc_top];
+						m3->mc_ki[csrc->mc_top-1]--;
 					} else {
 						m3->mc_ki[csrc->mc_top]--;
 					}
