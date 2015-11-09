@@ -7733,6 +7733,9 @@ mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst)
 	if ((rc = mdb_page_touch(cdst)))
 		return rc;
 
+	/* get dst page again now that we've touched it. */
+	pdst = cdst->mc_pg[cdst->mc_top];
+
 	/* Move all nodes from src to dst.
 	 */
 	j = nkeys = NUMKEYS(pdst);
