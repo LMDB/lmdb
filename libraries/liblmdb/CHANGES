@@ -10,6 +10,7 @@ LMDB 0.9.17 Release Engineering
 	Fix ITS#8264 cursor_del cursor tracking
 	Fix ITS#8299 mdb_del cursor tracking
 	Fix ITS#8300 mdb_del cursor tracking
+	Fix ITS#8304 mdb_del cursor tracking
 	Fix ITS#7771 fakepage cursor tracking
 	Fix ITS#7789 ensure mapsize >= pages in use
 	Fix ITS#7971 mdb_txn_renew0() new reader slots
