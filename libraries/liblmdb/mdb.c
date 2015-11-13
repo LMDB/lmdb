@@ -7970,9 +7970,9 @@ mdb_rebalance(MDB_cursor *mc)
 						m3 = &m2->mc_xcursor->mx_cursor;
 					else
 						m3 = m2;
-					if (m3 == mc || m3->mc_snum < mc->mc_snum) continue;
+					if (m3 == mc) continue;
 					if (m3->mc_pg[0] == mp) {
-						for (i=0; i<m3->mc_snum; i++) {
+						for (i=0; i<mc->mc_db->md_depth; i++) {
 							m3->mc_pg[i] = m3->mc_pg[i+1];
 							m3->mc_ki[i] = m3->mc_ki[i+1];
 						}
