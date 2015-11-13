@@ -8,6 +8,7 @@ LMDB 0.9.17 Release Engineering
 	Fix ITS#8258 rebalance/split assert
 	Fix ITS#8263 cursor_put cursor tracking
 	Fix ITS#8264 cursor_del cursor tracking
+	Fix ITS#8310 cursor_del cursor tracking
 	Fix ITS#8299 mdb_del cursor tracking
 	Fix ITS#8300 mdb_del cursor tracking
 	Fix ITS#8304 mdb_del cursor tracking
