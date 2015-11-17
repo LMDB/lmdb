@@ -459,10 +459,13 @@ static int mdb_mutex_failed(MDB_env *env, mdb_mutexref_t mutex, int rc);
  *
  *	@note If O_DSYNC is undefined but exists in /usr/include,
  * preferably set some compiler flag to get the definition.
- * Otherwise compile with the less efficient -DMDB_DSYNC=O_SYNC.
  */
 #ifndef MDB_DSYNC
+# ifdef O_DSYNC
 # define MDB_DSYNC	O_DSYNC
+# else
+# define MDB_DSYNC	O_SYNC
+# endif
 #endif
 #endif
 
