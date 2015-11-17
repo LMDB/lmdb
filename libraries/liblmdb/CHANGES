@@ -24,6 +24,7 @@ LMDB 0.9.17 Release Engineering
 		Fix ThreadProc decl on Win32/MSVC (ITS#8270)
 		Added ssize_t typedef for MSVC (ITS#8067)
 		Use ANSI apis on Windows (ITS#8069)
+		Use O_SYNC if O_DSYNC,MDB_DSYNC are not defined (ITS#7209)
 
 LMDB 0.9.16 Release (2015/08/14)
 	Fix cursor EOF bug (ITS#8190)
