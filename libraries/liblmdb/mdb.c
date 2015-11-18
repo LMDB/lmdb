@@ -3543,7 +3543,7 @@ mdb_txn_commit(MDB_txn *txn)
 		}
 
 		/* Append our loose page list to parent's */
-		for (lp = &parent->mt_loose_pgs; *lp; lp = &NEXT_LOOSE_PAGE(lp))
+		for (lp = &parent->mt_loose_pgs; *lp; lp = &NEXT_LOOSE_PAGE(*lp))
 			;
 		*lp = txn->mt_loose_pgs;
 		parent->mt_loose_count += txn->mt_loose_count;
