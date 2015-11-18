@@ -8055,6 +8055,7 @@ mdb_rebalance(MDB_cursor *mc)
 			mn.mc_ki[mn.mc_top] += mc->mc_ki[mn.mc_top] + 1;
 			/* We want mdb_rebalance to find mn when doing fixups */
 			if (mc->mc_flags & C_SUB) {
+				dummy.mc_flags = C_INITIALIZED;
 				dummy.mc_next = mc->mc_txn->mt_cursors[mc->mc_dbi];
 				mc->mc_txn->mt_cursors[mc->mc_dbi] = &dummy;
 				dummy.mc_xcursor = (MDB_xcursor *)&mn;
