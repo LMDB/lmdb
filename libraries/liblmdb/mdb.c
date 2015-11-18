@@ -5449,6 +5449,7 @@ mdb_ovpage_free(MDB_cursor *mc, MDB_page *mp)
 				return MDB_CORRUPTED;
 			}
 		}
+		txn->mt_dirty_room++;
 		if (!(env->me_flags & MDB_WRITEMAP))
 			mdb_dpage_free(env, mp);
 release:
@@ -6583,6 +6584,7 @@ current:
 						return ENOMEM;
 					id2.mid = pg;
 					id2.mptr = np;
+					/* Note - this page is already counted in parent's dirty_room */
 					rc2 = mdb_mid2l_insert(mc->mc_txn->mt_u.dirty_list, &id2);
 					mdb_cassert(mc, rc2 == 0);
 					if (!(flags & MDB_RESERVE)) {
