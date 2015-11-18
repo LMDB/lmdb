@@ -8372,6 +8372,11 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 	rp->mp_pad = mp->mp_pad;
 	DPRINTF(("new right sibling: page %"Z"u", rp->mp_pgno));
 
+	/* Usually when splitting the root page, the cursor
+	 * height is 1. But when called from mdb_update_key,
+	 * the cursor height may be greater because it walks
+	 * up the stack while finding the branch slot to update.
+	 */
 	if (mc->mc_top < 1) {
 		if ((rc = mdb_page_new(mc, P_BRANCH, 1, &pp)))
 			goto done;
