@@ -7963,6 +7963,8 @@ mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst)
 				m3->mc_pg[top] = pdst;
 				m3->mc_ki[top] += nkeys;
 				m3->mc_ki[top-1] = cdst->mc_ki[top-1];
+			} else if (m3->mc_ki[top-1] > csrc->mc_ki[top-1]) {
+				m3->mc_ki[top-1]--;
 			}
 		}
 	}
