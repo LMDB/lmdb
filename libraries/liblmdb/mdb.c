@@ -8450,6 +8450,7 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 	/* Copy separator key to the parent.
 	 */
 	if (SIZELEFT(mn.mc_pg[ptop]) < mdb_branch_size(env, &sepkey)) {
+		int snum = mc->mc_snum;
 		mn.mc_snum--;
 		mn.mc_top--;
 		did_split = 1;
@@ -8458,13 +8459,7 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 			goto done;
 
 		/* root split? */
-		if (mn.mc_snum == mc->mc_snum) {
-			mc->mc_pg[mc->mc_snum] = mc->mc_pg[mc->mc_top];
-			mc->mc_ki[mc->mc_snum] = mc->mc_ki[mc->mc_top];
-			mc->mc_pg[mc->mc_top] = mc->mc_pg[ptop];
-			mc->mc_ki[mc->mc_top] = mc->mc_ki[ptop];
-			mc->mc_snum++;
-			mc->mc_top++;
+		if (mc->mc_snum > snum) {
 			ptop++;
 		}
 		/* Right page might now have changed parent.
@@ -8595,8 +8590,6 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 				continue;
 			if (!(m2->mc_flags & m3->mc_flags & C_INITIALIZED))
 				continue;
-			if (m3->mc_flags & C_SPLITTING)
-				continue;
 			if (new_root) {
 				int k;
 				/* root split */
@@ -8613,6 +8606,8 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 				m3->mc_snum++;
 				m3->mc_top++;
 			}
+			if (m3->mc_flags & C_SPLITTING)
+				continue;
 			if (m3->mc_top >= mc->mc_top && m3->mc_pg[mc->mc_top] == mp) {
 				if (m3->mc_ki[mc->mc_top] >= newindx && !(nflags & MDB_SPLIT_REPLACE))
 					m3->mc_ki[mc->mc_top]++;
