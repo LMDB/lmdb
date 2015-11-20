@@ -7635,6 +7635,8 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 					m3 = &m2->mc_xcursor->mx_cursor;
 				else
 					m3 = m2;
+				if (!(m3->mc_flags & C_INITIALIZED) || m3->mc_top < csrc->mc_top)
+					continue;
 				if (m3 != cdst &&
 					m3->mc_pg[csrc->mc_top] == mpd &&
 					m3->mc_ki[csrc->mc_top] >= cdst->mc_ki[csrc->mc_top]) {
@@ -7657,6 +7659,8 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst)
 				else
 					m3 = m2;
 				if (m3 == csrc) continue;
+				if (!(m3->mc_flags & C_INITIALIZED) || m3->mc_top < csrc->mc_top)
+					continue;
 				if (m3->mc_pg[csrc->mc_top] == mps) {
 					if (!m3->mc_ki[csrc->mc_top]) {
 						m3->mc_pg[csrc->mc_top] = cdst->mc_pg[cdst->mc_top];
@@ -7957,7 +7961,8 @@ mdb_rebalance(MDB_cursor *mc)
 						m3 = &m2->mc_xcursor->mx_cursor;
 					else
 						m3 = m2;
-					if (m3->mc_snum < mc->mc_snum) continue;
+					if (!(m3->mc_flags & C_INITIALIZED) || (m3->mc_snum < mc->mc_snum))
+						continue;
 					if (m3->mc_pg[0] == mp) {
 						m3->mc_snum = 0;
 						m3->mc_top = 0;
@@ -7993,6 +7998,8 @@ mdb_rebalance(MDB_cursor *mc)
 					else
 						m3 = m2;
 					if (m3 == mc) continue;
+					if (!(m3->mc_flags & C_INITIALIZED))
+						continue;
 					if (m3->mc_pg[0] == mp) {
 						for (i=0; i<mc->mc_db->md_depth; i++) {
 							m3->mc_pg[i] = m3->mc_pg[i+1];
