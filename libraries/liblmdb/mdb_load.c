@@ -400,20 +400,22 @@ int main(int argc, char *argv[])
 
 		while(1) {
 			rc = readline(&key, &kbuf);
-			if (rc == EOF)
+			if (rc)  /* rc == EOF */
 				break;
-			if (rc)
-				goto txn_abort;
 
 			rc = readline(&data, &dbuf);
-			if (rc)
+			if (rc) {
+				fprintf(stderr, "%s: line %" Z "d: failed to read key value\n", prog, lineno);
 				goto txn_abort;
-			
+			}
+
 			rc = mdb_cursor_put(mc, &key, &data, putflags);
 			if (rc == MDB_KEYEXIST && putflags)
 				continue;
-			if (rc)
+			if (rc) {
+				fprintf(stderr, "mdb_cursor_put failed, error %d %s\n", rc, mdb_strerror(rc));
 				goto txn_abort;
+			}
 			batch++;
 			if (batch == 100) {
 				rc = mdb_txn_commit(txn);
