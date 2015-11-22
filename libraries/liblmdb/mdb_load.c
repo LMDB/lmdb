@@ -327,7 +327,7 @@ int main(int argc, char *argv[])
 			putflags = MDB_NOOVERWRITE|MDB_NODUPDATA;
 			break;
 		case 'T':
-			mode |= NOHDR;
+			mode |= NOHDR | PRINT;
 			break;
 		default:
 			usage();
