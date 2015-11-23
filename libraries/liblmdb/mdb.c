@@ -2558,14 +2558,15 @@ mdb_cursor_shadow(MDB_txn *src, MDB_txn *dst)
 				*bk = *mc;
 				mc->mc_backup = bk;
 				mc->mc_db = &dst->mt_dbs[i];
-				/* Kill pointers into src - and dst to reduce abuse: The
-				 * user may not use mc until dst ends. Otherwise we'd...
+				/* Kill pointers into src to reduce abuse: The
+				 * user may not use mc until dst ends. But we need a valid
+				 * txn pointer here for cursor fixups to keep working.
 				 */
-				mc->mc_txn    = NULL;	/* ...set this to dst */
-				mc->mc_dbflag = NULL;	/* ...and &dst->mt_dbflags[i] */
+				mc->mc_txn    = dst;
+				mc->mc_dbflag = &dst->mt_dbflags[i];
 				if ((mx = mc->mc_xcursor) != NULL) {
 					*(MDB_xcursor *)(bk+1) = *mx;
-					mx->mx_cursor.mc_txn = NULL; /* ...and dst. */
+					mx->mx_cursor.mc_txn = dst;
 				}
 				mc->mc_next = dst->mt_cursors[i];
 				dst->mt_cursors[i] = mc;
