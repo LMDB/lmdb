@@ -8606,7 +8606,7 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 		/* Adjust other cursors pointing to mp */
 		MDB_cursor *m2, *m3;
 		MDB_dbi dbi = mc->mc_dbi;
-		int fixup = NUMKEYS(mp);
+		nkeys = NUMKEYS(mp);
 
 		for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
 			if (mc->mc_flags & C_SUB)
@@ -8619,12 +8619,15 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 				continue;
 			if (new_root) {
 				int k;
+				/* sub cursors may be on different DB */
+				if (m3->mc_pg[0] != mp)
+					continue;
 				/* root split */
 				for (k=new_root; k>=0; k--) {
 					m3->mc_ki[k+1] = m3->mc_ki[k];
 					m3->mc_pg[k+1] = m3->mc_pg[k];
 				}
-				if (m3->mc_ki[0] >= split_indx) {
+				if (m3->mc_ki[0] > nkeys) {
 					m3->mc_ki[0] = 1;
 				} else {
 					m3->mc_ki[0] = 0;
@@ -8636,10 +8639,13 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 			if (m3->mc_top >= mc->mc_top && m3->mc_pg[mc->mc_top] == mp) {
 				if (m3->mc_ki[mc->mc_top] >= newindx && !(nflags & MDB_SPLIT_REPLACE))
 					m3->mc_ki[mc->mc_top]++;
-				if (m3->mc_ki[mc->mc_top] >= fixup) {
+				if (m3->mc_ki[mc->mc_top] >= nkeys) {
 					m3->mc_pg[mc->mc_top] = rp;
-					m3->mc_ki[mc->mc_top] -= fixup;
-					m3->mc_ki[ptop] = mn.mc_ki[ptop];
+					m3->mc_ki[mc->mc_top] -= nkeys;
+					for (i=0; i<mc->mc_top; i++) {
+						m3->mc_ki[i] = mn.mc_ki[i];
+						m3->mc_pg[i] = mn.mc_pg[i];
+					}
 				}
 			} else if (!did_split && m3->mc_top >= ptop && m3->mc_pg[ptop] == mc->mc_pg[ptop] &&
 				m3->mc_ki[ptop] >= mc->mc_ki[ptop]) {
