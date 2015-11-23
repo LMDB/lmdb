@@ -3500,6 +3500,25 @@ mdb_txn_commit(MDB_txn *txn)
 			pspill[0] = y;
 		}
 
+		/* Remove anything in our spill list from parent's dirty list */
+		if (txn->mt_spill_pgs && txn->mt_spill_pgs[0]) {
+			for (i=1; i<=txn->mt_spill_pgs[0]; i++) {
+				MDB_ID pn = txn->mt_spill_pgs[i];
+				if (pn & 1)
+					continue;	/* deleted spillpg */
+				pn >>= 1;
+				y = mdb_mid2l_search(dst, pn);
+				if (y <= dst[0].mid && dst[y].mid == pn) {
+					free(dst[y].mptr);
+					while (y < dst[0].mid) {
+						dst[y] = dst[y+1];
+						y++;
+					}
+					dst[0].mid--;
+				}
+			}
+		}
+
 		/* Find len = length of merging our dirty list with parent's */
 		x = dst[0].mid;
 		dst[0].mid = 0;		/* simplify loops */
