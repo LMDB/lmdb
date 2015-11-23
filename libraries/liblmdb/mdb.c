@@ -6710,6 +6710,7 @@ put_sub:
 				MDB_xcursor *mx = mc->mc_xcursor;
 				unsigned i = mc->mc_top;
 				MDB_page *mp = mc->mc_pg[i];
+				int nkeys = NUMKEYS(mp);
 
 				for (m2 = mc->mc_txn->mt_cursors[mc->mc_dbi]; m2; m2=m2->mc_next) {
 					if (m2 == mc || m2->mc_snum < mc->mc_snum) continue;
@@ -6717,9 +6718,9 @@ put_sub:
 					if (m2->mc_pg[i] == mp) {
 						if (m2->mc_ki[i] == mc->mc_ki[i]) {
 							mdb_xcursor_init2(m2, mx, new_dupdata);
-						} else if (!insert_key) {
+						} else if (!insert_key && m2->mc_ki[i] < nkeys) {
 							MDB_node *n2 = NODEPTR(mp, m2->mc_ki[i]);
-							if (!(n2->mn_flags & F_SUBDATA))
+							if ((n2->mn_flags & (F_SUBDATA|F_DUPDATA)) == F_DUPDATA)
 								m2->mc_xcursor->mx_cursor.mc_pg[0] = NODEDATA(n2);
 						}
 					}
