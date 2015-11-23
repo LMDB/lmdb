@@ -8380,8 +8380,6 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 				rp->mp_lower += sizeof(indx_t);
 				rp->mp_upper -= ksize - sizeof(indx_t);
 				mc->mc_ki[mc->mc_top] = x;
-				mc->mc_pg[mc->mc_top] = rp;
-				mc->mc_ki[ptop]++;
 			}
 		} else {
 			int psize, nsize, k;
@@ -8582,12 +8580,26 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 		/* reset back to original page */
 		if (newindx < split_indx) {
 			mc->mc_pg[mc->mc_top] = mp;
-			if (nflags & MDB_RESERVE) {
-				node = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
-				if (!(node->mn_flags & F_BIGDATA))
-					newdata->mv_data = NODEDATA(node);
-			}
 		} else {
+			mc->mc_pg[mc->mc_top] = rp;
+			mc->mc_ki[ptop]++;
+			/* Make sure mc_ki is still valid.
+			 */
+			if (mn.mc_pg[ptop] != mc->mc_pg[ptop] &&
+				mc->mc_ki[ptop] >= NUMKEYS(mc->mc_pg[ptop])) {
+				for (i=0; i<=ptop; i++) {
+					mc->mc_pg[i] = mn.mc_pg[i];
+					mc->mc_ki[i] = mn.mc_ki[i];
+				}
+			}
+		}
+		if (nflags & MDB_RESERVE) {
+			node = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
+			if (!(node->mn_flags & F_BIGDATA))
+				newdata->mv_data = NODEDATA(node);
+		}
+	} else {
+		if (newindx >= split_indx) {
 			mc->mc_pg[mc->mc_top] = rp;
 			mc->mc_ki[ptop]++;
 			/* Make sure mc_ki is still valid.
