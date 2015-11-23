@@ -1613,6 +1613,13 @@ mdb_cursor_chk(MDB_cursor *mc)
 	}
 	if (mc->mc_ki[i] >= NUMKEYS(mc->mc_pg[i]))
 		printf("ack!\n");
+	if (mc->mc_xcursor && (mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED)) {
+		node = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
+		if (((node->mn_flags & (F_DUPDATA|F_SUBDATA)) == F_DUPDATA) &&
+			mc->mc_xcursor->mx_cursor.mc_pg[0] != NODEDATA(node)) {
+			printf("blah!\n");
+		}
+	}
 }
 #endif
 
@@ -2423,10 +2430,10 @@ done:
 				m2->mc_pg[mc->mc_top] = np;
 				if ((mc->mc_db->md_flags & MDB_DUPSORT) &&
 					IS_LEAF(np) &&
-					m2->mc_ki[mc->mc_top] == mc->mc_ki[mc->mc_top])
+					(m2->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED))
 				{
-					MDB_node *leaf = NODEPTR(np, mc->mc_ki[mc->mc_top]);
-					if (!(leaf->mn_flags & F_SUBDATA))
+					MDB_node *leaf = NODEPTR(np, m2->mc_ki[mc->mc_top]);
+					if ((leaf->mn_flags & (F_DUPDATA|F_SUBDATA)) == F_DUPDATA)
 						m2->mc_xcursor->mx_cursor.mc_pg[0] = NODEDATA(leaf);
 				}
 			}
@@ -7623,6 +7630,7 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst, int fromleft)
 		data.mv_size = NODEDSZ(srcnode);
 		data.mv_data = NODEDATA(srcnode);
 	}
+	mn.mc_xcursor = NULL;
 	if (IS_BRANCH(cdst->mc_pg[cdst->mc_top]) && cdst->mc_ki[cdst->mc_top] == 0) {
 		unsigned int snum = cdst->mc_snum;
 		MDB_node *s2;
@@ -7694,6 +7702,12 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst, int fromleft)
 					m3->mc_ki[csrc->mc_top] = cdst->mc_ki[cdst->mc_top];
 					m3->mc_ki[csrc->mc_top-1]++;
 				}
+				if (m3->mc_xcursor && (m3->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED) &&
+					IS_LEAF(mps)) {
+					MDB_node *node = NODEPTR(m3->mc_pg[csrc->mc_top], m3->mc_ki[csrc->mc_top]);
+					if ((node->mn_flags & (F_DUPDATA|F_SUBDATA)) == F_DUPDATA)
+						m3->mc_xcursor->mx_cursor.mc_pg[0] = NODEDATA(node);
+				}
 			}
 		} else
 		/* Adding on the right, bump others down */
@@ -7713,6 +7727,12 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst, int fromleft)
 						m3->mc_ki[csrc->mc_top-1]--;
 					} else {
 						m3->mc_ki[csrc->mc_top]--;
+					}
+					if (m3->mc_xcursor && (m3->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED) &&
+						IS_LEAF(mps)) {
+						MDB_node *node = NODEPTR(m3->mc_pg[csrc->mc_top], m3->mc_ki[csrc->mc_top]);
+						if ((node->mn_flags & (F_DUPDATA|F_SUBDATA)) == F_DUPDATA)
+							m3->mc_xcursor->mx_cursor.mc_pg[0] = NODEDATA(node);
 					}
 				}
 			}
@@ -7838,6 +7858,7 @@ mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst)
 				MDB_cursor mn;
 				MDB_node *s2;
 				mdb_cursor_copy(csrc, &mn);
+				mn.mc_xcursor = NULL;
 				/* must find the lowest key below src */
 				rc = mdb_page_search_lowest(&mn);
 				if (rc)
@@ -7912,6 +7933,12 @@ mdb_page_merge(MDB_cursor *csrc, MDB_cursor *cdst)
 			} else if (m3->mc_pg[top-1] == csrc->mc_pg[top-1] &&
 				m3->mc_ki[top-1] > csrc->mc_ki[top-1]) {
 				m3->mc_ki[top-1]--;
+			}
+			if (m3->mc_xcursor && (m3->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED) &&
+				IS_LEAF(psrc)) {
+				MDB_node *node = NODEPTR(m3->mc_pg[top], m3->mc_ki[top]);
+				if ((node->mn_flags & (F_DUPDATA|F_SUBDATA)) == F_DUPDATA)
+					m3->mc_xcursor->mx_cursor.mc_pg[0] = NODEDATA(node);
 			}
 		}
 	}
@@ -8171,6 +8198,11 @@ mdb_cursor_del0(MDB_cursor *mc)
 					else if (mc->mc_db->md_flags & MDB_DUPSORT)
 						m3->mc_xcursor->mx_cursor.mc_flags &= ~C_INITIALIZED;
 				}
+				if (m3->mc_xcursor && (m3->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED)) {
+					MDB_node *node = NODEPTR(m3->mc_pg[mc->mc_top], m3->mc_ki[mc->mc_top]);
+					if ((node->mn_flags & (F_DUPDATA|F_SUBDATA)) == F_DUPDATA)
+						m3->mc_xcursor->mx_cursor.mc_pg[0] = NODEDATA(node);
+				}
 			}
 		}
 	}
@@ -8353,6 +8385,7 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 	}
 
 	mdb_cursor_copy(mc, &mn);
+	mn.mc_xcursor = NULL;
 	mn.mc_pg[mn.mc_top] = rp;
 	mn.mc_ki[ptop] = mc->mc_ki[ptop]+1;
 
@@ -8682,6 +8715,12 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 			} else if (!did_split && m3->mc_top >= ptop && m3->mc_pg[ptop] == mc->mc_pg[ptop] &&
 				m3->mc_ki[ptop] >= mc->mc_ki[ptop]) {
 				m3->mc_ki[ptop]++;
+			}
+			if (m3->mc_xcursor && (m3->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED) &&
+				IS_LEAF(mp)) {
+				MDB_node *node = NODEPTR(m3->mc_pg[mc->mc_top], m3->mc_ki[mc->mc_top]);
+				if ((node->mn_flags & (F_DUPDATA|F_SUBDATA)) == F_DUPDATA)
+					m3->mc_xcursor->mx_cursor.mc_pg[0] = NODEDATA(node);
 			}
 		}
 	}
