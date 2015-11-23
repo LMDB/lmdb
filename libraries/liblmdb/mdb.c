@@ -7645,21 +7645,21 @@ mdb_update_key(MDB_cursor *mc, MDB_val *key)
 static void
 mdb_cursor_copy(const MDB_cursor *csrc, MDB_cursor *cdst);
 
-/** Track a temporary cursor */
-#define CURSOR_TMP_TRACK(mc, mn, dummy, tracked) \
-	if (mc->mc_flags & C_SUB) { \
+/** Perform \b act while tracking temporary cursor \b mn */
+#define WITH_CURSOR_TRACKING(mn, act) do { \
+	MDB_cursor dummy, *tracked, **tp = &(mn).mc_txn->mt_cursors[mn.mc_dbi]; \
+	if ((mn).mc_flags & C_SUB) { \
 		dummy.mc_flags =  C_INITIALIZED; \
-		dummy.mc_xcursor = (MDB_xcursor *)&mn; \
+		dummy.mc_xcursor = (MDB_xcursor *)&(mn);	\
 		tracked = &dummy; \
 	} else { \
-		tracked = &mn; \
+		tracked = &(mn); \
 	} \
-	tracked->mc_next = mc->mc_txn->mt_cursors[mc->mc_dbi]; \
-	mc->mc_txn->mt_cursors[mc->mc_dbi] = tracked
-
-/** Stop tracking a temporary cursor */
-#define CURSOR_TMP_UNTRACK(mc, tracked) \
-	mc->mc_txn->mt_cursors[mc->mc_dbi] = tracked->mc_next
+	tracked->mc_next = *tp; \
+	*tp = tracked; \
+	{ act; } \
+	*tp = tracked->mc_next; \
+} while (0)
 
 /** Move a node from csrc to cdst.
  */
@@ -7816,7 +7816,6 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst, int fromleft)
 	 */
 	if (csrc->mc_ki[csrc->mc_top] == 0) {
 		if (csrc->mc_ki[csrc->mc_top-1] != 0) {
-			MDB_cursor dummy, *tracked;
 			if (IS_LEAF2(csrc->mc_pg[csrc->mc_top])) {
 				key.mv_data = LEAF2KEY(csrc->mc_pg[csrc->mc_top], 0, key.mv_size);
 			} else {
@@ -7830,9 +7829,8 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst, int fromleft)
 			mn.mc_snum--;
 			mn.mc_top--;
 			/* We want mdb_rebalance to find mn when doing fixups */
-			CURSOR_TMP_TRACK(csrc, mn, dummy, tracked);
-			rc = mdb_update_key(&mn, &key);
-			CURSOR_TMP_UNTRACK(csrc, tracked);
+			WITH_CURSOR_TRACKING(mn,
+				rc = mdb_update_key(&mn, &key));
 			if (rc)
 				return rc;
 		}
@@ -7849,7 +7847,6 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst, int fromleft)
 
 	if (cdst->mc_ki[cdst->mc_top] == 0) {
 		if (cdst->mc_ki[cdst->mc_top-1] != 0) {
-			MDB_cursor dummy, *tracked;
 			if (IS_LEAF2(csrc->mc_pg[csrc->mc_top])) {
 				key.mv_data = LEAF2KEY(cdst->mc_pg[cdst->mc_top], 0, key.mv_size);
 			} else {
@@ -7863,9 +7860,8 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst, int fromleft)
 			mn.mc_snum--;
 			mn.mc_top--;
 			/* We want mdb_rebalance to find mn when doing fixups */
-			CURSOR_TMP_TRACK(cdst, mn, dummy, tracked);
-			rc = mdb_update_key(&mn, &key);
-			CURSOR_TMP_UNTRACK(cdst, tracked);
+			WITH_CURSOR_TRACKING(mn,
+				rc = mdb_update_key(&mn, &key));
 			if (rc)
 				return rc;
 		}
@@ -8224,13 +8220,11 @@ mdb_rebalance(MDB_cursor *mc)
 		if (!fromleft) {
 			rc = mdb_page_merge(&mn, mc);
 		} else {
-			MDB_cursor dummy, *tracked;
 			oldki += NUMKEYS(mn.mc_pg[mn.mc_top]);
 			mn.mc_ki[mn.mc_top] += mc->mc_ki[mn.mc_top] + 1;
 			/* We want mdb_rebalance to find mn when doing fixups */
-			CURSOR_TMP_TRACK(mc, mn, dummy, tracked);
-			rc = mdb_page_merge(mc, &mn);
-			CURSOR_TMP_UNTRACK(mc, tracked);
+			WITH_CURSOR_TRACKING(mn,
+				rc = mdb_page_merge(mc, &mn));
 			mdb_cursor_copy(&mn, mc);
 		}
 		mc->mc_flags &= ~C_EOF;
@@ -8594,14 +8588,12 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 	 */
 	if (SIZELEFT(mn.mc_pg[ptop]) < mdb_branch_size(env, &sepkey)) {
 		int snum = mc->mc_snum;
-		MDB_cursor dummy, *tracked;
 		mn.mc_snum--;
 		mn.mc_top--;
 		did_split = 1;
 		/* We want other splits to find mn when doing fixups */
-		CURSOR_TMP_TRACK(mc, mn, dummy, tracked);
-		rc = mdb_page_split(&mn, &sepkey, NULL, rp->mp_pgno, 0);
-		CURSOR_TMP_UNTRACK(mc, tracked);
+		WITH_CURSOR_TRACKING(mn,
+			rc = mdb_page_split(&mn, &sepkey, NULL, rp->mp_pgno, 0));
 		if (rc)
 			goto done;
 
