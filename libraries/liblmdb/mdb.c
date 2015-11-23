@@ -2418,6 +2418,7 @@ done:
 	} else {
 		for (; m2; m2=m2->mc_next) {
 			if (m2->mc_snum < mc->mc_snum) continue;
+			if (m2 == mc) continue;
 			if (m2->mc_pg[mc->mc_top] == mp) {
 				m2->mc_pg[mc->mc_top] = np;
 				if ((mc->mc_db->md_flags & MDB_DUPSORT) &&
