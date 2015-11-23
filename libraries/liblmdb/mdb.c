@@ -5878,6 +5878,8 @@ mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 			} else
 				return MDB_NOTFOUND;
 		}
+	} else {
+		mc->mc_pg[0] = 0;
 	}
 
 	rc = mdb_page_search(mc, key, 0);
