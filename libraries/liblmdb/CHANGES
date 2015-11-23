@@ -22,6 +22,8 @@ LMDB 0.9.17 Release Engineering
 	Fix ITS#8315 dirty_room in nested txn
 	Fix ITS#8316 page_merge cursor tracking
 	Fix ITS#8321 cursor tracking
+	Fix ITS#8319 mdb_load error messages
+	Fix ITS#8320 mdb_load plaintext input
 	Added mdb_txn_id() (ITS#7994)
 	Added robust mutex support
 	Miscellaneous cleanup/simplification
