@@ -20,6 +20,7 @@ LMDB 0.9.17 Release Engineering
 	Fix ITS#8312 loose pages in nested txn
 	Fix ITS#8313 mdb_rebalance dummy cursor
 	Fix ITS#8315 dirty_room in nested txn
+	Fix ITS#8323 dirty_list in nested txn
 	Fix ITS#8316 page_merge cursor tracking
 	Fix ITS#8321 cursor tracking
 	Fix ITS#8319 mdb_load error messages
