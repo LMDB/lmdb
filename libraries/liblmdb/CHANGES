@@ -34,6 +34,8 @@ LMDB 0.9.17 Release Engineering
 		Added ssize_t typedef for MSVC (ITS#8067)
 		Use ANSI apis on Windows (ITS#8069)
 		Use O_SYNC if O_DSYNC,MDB_DSYNC are not defined (ITS#7209)
+		Allow passing AR to make (ITS#8168)
+		Allow passing mandir to make install (ITS#8169)
 
 LMDB 0.9.16 Release (2015/08/14)
 	Fix cursor EOF bug (ITS#8190)
