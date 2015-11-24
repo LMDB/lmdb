@@ -6105,8 +6105,6 @@ mdb_cursor_get(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 				MDB_GET_KEY(leaf, key);
 				if (data) {
 					if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
-						if (mc->mc_flags & C_DEL)
-							mdb_xcursor_init1(mc, leaf);
 						rc = mdb_cursor_get(&mc->mc_xcursor->mx_cursor, data, NULL, MDB_GET_CURRENT);
 					} else {
 						rc = mdb_node_read(mc->mc_txn, leaf, data);
@@ -6869,7 +6867,6 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 					}
 				}
 				mc->mc_db->md_entries--;
-				mc->mc_flags |= C_DEL;
 				return rc;
 			} else {
 				mc->mc_xcursor->mx_cursor.mc_flags &= ~C_INITIALIZED;
@@ -8191,12 +8188,12 @@ mdb_cursor_del0(MDB_cursor *mc)
 			if (m3 == mc || m3->mc_snum < mc->mc_snum)
 				continue;
 			if (m3->mc_pg[mc->mc_top] == mp) {
-				if (m3->mc_ki[mc->mc_top] >= ki) {
+				if (m3->mc_ki[mc->mc_top] == ki) {
 					m3->mc_flags |= C_DEL;
-					if (m3->mc_ki[mc->mc_top] > ki)
-						m3->mc_ki[mc->mc_top]--;
-					else if (mc->mc_db->md_flags & MDB_DUPSORT)
+					if (mc->mc_db->md_flags & MDB_DUPSORT)
 						m3->mc_xcursor->mx_cursor.mc_flags &= ~C_INITIALIZED;
+				} else if (m3->mc_ki[mc->mc_top] > ki) {
+					m3->mc_ki[mc->mc_top]--;
 				}
 				if (m3->mc_xcursor && (m3->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED)) {
 					MDB_node *node = NODEPTR(m3->mc_pg[mc->mc_top], m3->mc_ki[mc->mc_top]);
