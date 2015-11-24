@@ -6689,7 +6689,6 @@ new_sub:
 			MDB_dbi dbi = mc->mc_dbi;
 			unsigned i = mc->mc_top;
 			MDB_page *mp = mc->mc_pg[i];
-			int nkeys = NUMKEYS(mp);
 
 			for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2=m2->mc_next) {
 				if (mc->mc_flags & C_SUB)
