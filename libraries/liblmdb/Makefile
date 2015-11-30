@@ -24,8 +24,8 @@ W	= -W -Wall -Wno-unused-parameter -Wbad-function-cast -Wuninitialized
 THREADS = -pthread
 OPT = -O2 -g
 CFLAGS	= $(THREADS) $(OPT) $(W) $(XCFLAGS)
-LDLIBS	=
-SOLIBS	=
+LDLIBS	= # -lntdll # Windows needs ntdll
+SOLIBS	= # -lntdll
 prefix	= /usr/local
 mandir = $(prefix)/man
 

@@ -38,6 +38,36 @@
 #ifdef _WIN32
 #include <malloc.h>
 #include <windows.h>
+
+/* We use native NT APIs to setup the memory map, so that we can
+ * let the DB file grow incrementally instead of always preallocating
+ * the full size. These APIs are defined in <wdm.h> and <ntifs.h>
+ * but those headers are meant for driver-level development and
+ * conflict with the regular user-level headers, so we explicitly
+ * declare them here. Using these APIs also means we must link to
+ * ntdll.dll, which is not linked by default in user code.
+ */
+NTSTATUS WINAPI
+NtCreateSection(OUT PHANDLE sh, IN ACCESS_MASK acc,
+  IN void * oa OPTIONAL,
+  IN PLARGE_INTEGER ms OPTIONAL,
+  IN ULONG pp, IN ULONG aa, IN HANDLE fh OPTIONAL);
+
+typedef enum _SECTION_INHERIT {
+	ViewShare = 1,
+	ViewUnmap = 2
+} SECTION_INHERIT;
+
+NTSTATUS WINAPI
+NtMapViewOfSection(IN PHANDLE sh, IN HANDLE ph,
+  IN OUT PVOID *addr, IN ULONG_PTR zbits,
+  IN SIZE_T cs, IN OUT PLARGE_INTEGER off OPTIONAL,
+  IN OUT PSIZE_T vs, IN SECTION_INHERIT ih,
+  IN ULONG at, IN ULONG pp);
+
+NTSTATUS WINAPI
+NtClose(HANDLE h);
+
 /** getpid() returns int; MinGW defines pid_t but MinGW64 typedefs it
  *  as int64 which is wrong. MSVC doesn't define it at all, so just
  *  don't use it.
@@ -2293,6 +2323,20 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 			rc = MDB_MAP_FULL;
 			goto fail;
 	}
+#ifdef _WIN32
+	{
+		void *p;
+		p = (MDB_page *)(env->me_map + env->me_psize * pgno);
+		p = VirtualAlloc(p, env->me_psize * num, MEM_COMMIT,
+			(env->me_flags & MDB_WRITEMAP) ? PAGE_READWRITE:
+			PAGE_READONLY);
+		if (!p) {
+			DPUTS("VirtualAlloc failed");
+			rc = ErrCode();
+			goto fail;
+		}
+	}
+#endif
 
 search_done:
 	if (env->me_flags & MDB_WRITEMAP) {
@@ -3956,42 +4000,26 @@ mdb_env_map(MDB_env *env, void *addr)
 	unsigned int flags = env->me_flags;
 #ifdef _WIN32
 	int rc;
+	int access = SECTION_MAP_READ;
 	HANDLE mh;
-	LONG sizelo, sizehi;
-	size_t msize;
-
-	if (flags & MDB_RDONLY) {
-		/* Don't set explicit map size, use whatever exists */
-		msize = 0;
-		sizelo = 0;
-		sizehi = 0;
-	} else {
-		msize = env->me_mapsize;
-		sizelo = msize & 0xffffffff;
-		sizehi = msize >> 16 >> 16; /* only needed on Win64 */
-
-		/* Windows won't create mappings for zero length files.
-		 * and won't map more than the file size.
-		 * Just set the maxsize right now.
-		 */
-		if (SetFilePointer(env->me_fd, sizelo, &sizehi, 0) != (DWORD)sizelo
-			|| !SetEndOfFile(env->me_fd)
-			|| SetFilePointer(env->me_fd, 0, NULL, 0) != 0)
-			return ErrCode();
+	void *map;
+	size_t msize = 0;
+	ULONG pageprot = PAGE_READONLY;
+	if (flags & MDB_WRITEMAP) {
+		access |= SECTION_MAP_WRITE;
+		pageprot = PAGE_READWRITE;
 	}
 
-	mh = CreateFileMapping(env->me_fd, NULL, flags & MDB_WRITEMAP ?
-		PAGE_READWRITE : PAGE_READONLY,
-		sizehi, sizelo, NULL);
-	if (!mh)
-		return ErrCode();
-	env->me_map = MapViewOfFileEx(mh, flags & MDB_WRITEMAP ?
-		FILE_MAP_WRITE : FILE_MAP_READ,
-		0, 0, msize, addr);
-	rc = env->me_map ? 0 : ErrCode();
-	CloseHandle(mh);
+	rc = NtCreateSection(&mh, access, NULL, NULL, PAGE_READWRITE, SEC_RESERVE, env->me_fd);
 	if (rc)
 		return rc;
+	map = addr;
+	msize = env->me_mapsize;
+	rc = NtMapViewOfSection(mh, GetCurrentProcess(), &map, 0, 0, NULL, &msize, ViewUnmap, MEM_RESERVE, pageprot);
+	NtClose(mh);
+	if (rc)
+		return rc;
+	env->me_map = map;
 #else
 	int prot = PROT_READ;
 	if (flags & MDB_WRITEMAP) {
@@ -4228,6 +4256,17 @@ mdb_env_open2(MDB_env *env)
 			return rc;
 		newenv = 0;
 	}
+#ifdef _WIN32
+	/* For FIXEDMAP, make sure the file is non-empty before we attempt to map it */
+	if (newenv) {
+		char dummy = 0;
+		rc = WriteFile(env->me_fd, &dummy, 1, NULL, NULL);
+		if (!rc) {
+			rc = ErrCode();
+			return rc;
+		}
+	}
+#endif
 
 	rc = mdb_env_map(env, (flags & MDB_FIXEDMAP) ? meta.mm_address : NULL);
 	if (rc)
