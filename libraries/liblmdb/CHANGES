@@ -1,6 +1,6 @@
 LMDB 0.9 Change Log
 
-LMDB 0.9.17 Release Engineering
+LMDB 0.9.17 Release (2015/11/30)
 	Fix ITS#7377 catch calloc failure
 	Fix ITS#8237 regression from ITS#7589
 	Fix ITS#8238 page_split for DUPFIXED pages
