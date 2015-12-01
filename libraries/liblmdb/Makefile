@@ -42,7 +42,7 @@ install: $(ILIBS) $(IPROGS) $(IHDRS)
 	mkdir -p $(DESTDIR)$(prefix)/bin
 	mkdir -p $(DESTDIR)$(prefix)/lib
 	mkdir -p $(DESTDIR)$(prefix)/include
-	mkdir -p $(DESTDIR)$(prefix)/man/man1
+	mkdir -p $(DESTDIR)$(mandir)/man1
 	for f in $(IPROGS); do cp $$f $(DESTDIR)$(prefix)/bin; done
 	for f in $(ILIBS); do cp $$f $(DESTDIR)$(prefix)/lib; done
 	for f in $(IHDRS); do cp $$f $(DESTDIR)$(prefix)/include; done
