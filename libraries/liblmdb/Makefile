@@ -27,7 +27,12 @@ CFLAGS	= $(THREADS) $(OPT) $(W) $(XCFLAGS)
 LDLIBS	= # -lntdll # Windows needs ntdll
 SOLIBS	= # -lntdll
 prefix	= /usr/local
-mandir = $(prefix)/man
+exec_prefix = $(prefix)
+bindir = $(exec_prefix)/bin
+libdir = $(exec_prefix)/lib
+includedir = $(prefix)/include
+datarootdir = $(prefix)/share
+mandir = $(datarootdir)/man
 
 ########################################################################
 
@@ -39,13 +44,13 @@ PROGS	= $(IPROGS) mtest mtest2 mtest3 mtest4 mtest5
 all:	$(ILIBS) $(PROGS)
 
 install: $(ILIBS) $(IPROGS) $(IHDRS)
-	mkdir -p $(DESTDIR)$(prefix)/bin
-	mkdir -p $(DESTDIR)$(prefix)/lib
-	mkdir -p $(DESTDIR)$(prefix)/include
+	mkdir -p $(DESTDIR)$(bindir)
+	mkdir -p $(DESTDIR)$(libdir)
+	mkdir -p $(DESTDIR)$(includedir)
 	mkdir -p $(DESTDIR)$(mandir)/man1
-	for f in $(IPROGS); do cp $$f $(DESTDIR)$(prefix)/bin; done
-	for f in $(ILIBS); do cp $$f $(DESTDIR)$(prefix)/lib; done
-	for f in $(IHDRS); do cp $$f $(DESTDIR)$(prefix)/include; done
+	for f in $(IPROGS); do cp $$f $(DESTDIR)$(bindir); done
+	for f in $(ILIBS); do cp $$f $(DESTDIR)$(libdir); done
+	for f in $(IHDRS); do cp $$f $(DESTDIR)$(includedir); done
 	for f in $(IDOCS); do cp $$f $(DESTDIR)$(mandir)/man1; done
 
 clean:
