@@ -1,6 +1,10 @@
 LMDB 0.9 Change Log
 
 LMDB 0.9.18 Release Engineering
+	Fix robust mutex detection on glibc 2.10-11 (ITS#8330)
+	Build
+		Additional makefile var tweaks (ITS#8169)
+	
 
 LMDB 0.9.17 Release (2015/11/30)
 	Fix ITS#7377 catch calloc failure
