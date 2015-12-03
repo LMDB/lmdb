@@ -256,8 +256,8 @@ typedef SSIZE_T	ssize_t;
 #  define MDB_USE_ROBUST	0
 # else
 #  define MDB_USE_ROBUST	1
-/* glibc < 2.10 only provided _np API */
-#  if defined(__GLIBC__) && GLIBC_VER < 0x02000a
+/* glibc < 2.12 only provided _np API */
+#  if defined(__GLIBC__) && GLIBC_VER < 0x02000c
 #   define PTHREAD_MUTEX_ROBUST	PTHREAD_MUTEX_ROBUST_NP
 #   define pthread_mutexattr_setrobust(attr, flag)	pthread_mutexattr_setrobust_np(attr, flag)
 #   define pthread_mutex_consistent(mutex)	pthread_mutex_consistent_np(mutex)
