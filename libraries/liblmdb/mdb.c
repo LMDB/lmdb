@@ -2348,7 +2348,7 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 			goto fail;
 	}
 #ifdef _WIN32
-	{
+	if (env->me_flags & MDB_WRITEMAP) {
 		void *p;
 		p = (MDB_page *)(env->me_map + env->me_psize * pgno);
 		p = VirtualAlloc(p, env->me_psize * num, MEM_COMMIT,
@@ -4352,7 +4352,8 @@ mdb_env_open2(MDB_env *env)
 	/* For FIXEDMAP, make sure the file is non-empty before we attempt to map it */
 	if (newenv) {
 		char dummy = 0;
-		rc = WriteFile(env->me_fd, &dummy, 1, NULL, NULL);
+		DWORD len;
+		rc = WriteFile(env->me_fd, &dummy, 1, &len, NULL);
 		if (!rc) {
 			rc = ErrCode();
 			return rc;
