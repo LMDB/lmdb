@@ -42,7 +42,11 @@ extern "C" {
 	/** A generic unsigned ID number. These were entryIDs in back-bdb.
 	 *	Preferably it should have the same size as a pointer.
 	 */
+#ifdef MDB_VL32
+typedef u_int64_t MDB_ID;
+#else
 typedef size_t MDB_ID;
+#endif
 
 	/** An IDL is an ID List, a sorted array of IDs. The first
 	 * element of the array is a counter for how many actual
@@ -55,7 +59,11 @@ typedef MDB_ID *MDB_IDL;
 /* IDL sizes - likely should be even bigger
  *   limiting factors: sizeof(ID), thread stack size
  */
+#ifdef MDB_VL32
+#define	MDB_IDL_LOGN	10	/* DB_SIZE is 2^10, UM_SIZE is 2^11 */
+#else
 #define	MDB_IDL_LOGN	16	/* DB_SIZE is 2^16, UM_SIZE is 2^17 */
+#endif
 #define MDB_IDL_DB_SIZE		(1<<MDB_IDL_LOGN)
 #define MDB_IDL_UM_SIZE		(1<<(MDB_IDL_LOGN+1))
 

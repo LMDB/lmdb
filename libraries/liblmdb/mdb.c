@@ -35,6 +35,9 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1
 #endif
+#ifdef MDB_VL32
+#define _FILE_OFFSET_BITS	64
+#endif
 #ifdef _WIN32
 #include <malloc.h>
 #include <windows.h>
@@ -450,6 +453,12 @@ typedef pthread_mutex_t mdb_mutex_t[1], *mdb_mutexref_t;
 	 *	fundamental to the use of memory-mapped files.
 	 */
 #define	GET_PAGESIZE(x)	((x) = sysconf(_SC_PAGE_SIZE))
+#endif
+
+#ifdef MDB_VL32
+#define	Y	"ll"
+#else
+#define Y	Z
 #endif
 
 #if defined(_WIN32) || defined(MDB_USE_POSIX_SEM)
@@ -1062,7 +1071,7 @@ typedef struct MDB_db {
 	pgno_t		md_branch_pages;	/**< number of internal pages */
 	pgno_t		md_leaf_pages;		/**< number of leaf pages */
 	pgno_t		md_overflow_pages;	/**< number of overflow pages */
-	size_t		md_entries;		/**< number of data items */
+	pgno_t		md_entries;		/**< number of data items */
 	pgno_t		md_root;		/**< the root page of this tree */
 } MDB_db;
 
@@ -1092,8 +1101,16 @@ typedef struct MDB_meta {
 	uint32_t	mm_magic;
 		/** Version number of this file. Must be set to #MDB_DATA_VERSION. */
 	uint32_t	mm_version;
+#ifdef MDB_VL32
+	union {		/* always zero since we don't support fixed mapping in MDB_VL32 */
+		MDB_ID	mmun_ull;
+		void *mmun_address;
+	} mm_un;
+#define	mm_address mm_un.mmun_address
+#else
 	void		*mm_address;		/**< address for fixed mapping */
-	size_t		mm_mapsize;			/**< size of mmap region */
+#endif
+	pgno_t		mm_mapsize;			/**< size of mmap region */
 	MDB_db		mm_dbs[CORE_DBS];	/**< first is free space, 2nd is main db */
 	/** The size of pages used in this DB */
 #define	mm_psize	mm_dbs[FREE_DBI].md_pad
@@ -1182,6 +1199,10 @@ struct MDB_txn {
 	MDB_cursor	**mt_cursors;
 	/** Array of flags for each DB */
 	unsigned char	*mt_dbflags;
+#ifdef MDB_VL32
+	/** List of read-only pages */
+	MDB_ID2L	mt_rpages;
+#endif
 	/**	Number of DB records in use, or 0 when the txn is finished.
 	 *	This number only ever increments until the txn finishes; we
 	 *	don't decrement it when individual DB handles are closed.
@@ -1294,6 +1315,9 @@ struct MDB_env {
 	HANDLE		me_fd;		/**< The main data file */
 	HANDLE		me_lfd;		/**< The lock file */
 	HANDLE		me_mfd;			/**< just for writing the meta pages */
+#if defined(MDB_VL32) && defined(_WIN32)
+	HANDLE		me_fmh;		/**< File Mapping handle */
+#endif
 	/** Failed to update the meta page. Probably an I/O error. */
 #define	MDB_FATAL_ERROR	0x80000000U
 	/** Some fields are initialized. */
@@ -1318,7 +1342,7 @@ struct MDB_env {
 	void		*me_pbuf;		/**< scratch area for DUPSORT put() */
 	MDB_txn		*me_txn;		/**< current write transaction */
 	MDB_txn		*me_txn0;		/**< prealloc'd write transaction */
-	size_t		me_mapsize;		/**< size of the data memory map */
+	mdb_size_t	me_mapsize;		/**< size of the data memory map */
 	off_t		me_size;		/**< current file size */
 	pgno_t		me_maxpg;		/**< me_mapsize / me_psize */
 	MDB_dbx		*me_dbxs;		/**< array of static DB info */
@@ -2552,6 +2576,20 @@ done:
 			}
 		}
 	}
+#ifdef MDB_VL32
+	{
+		MDB_ID2L rl = mc->mc_txn->mt_rpages;
+		unsigned x = mdb_mid2l_search(rl, mp->mp_pgno);
+		if (x <= rl[0].mid && rl[x].mid == mp->mp_pgno) {
+			munmap(mp, mc->mc_txn->mt_env->me_psize);
+			while (x < rl[0].mid) {
+				rl[x] = rl[x+1];
+				x++;
+			}
+			rl[0].mid--;
+		}
+	}
+#endif
 	return 0;
 
 fail:
@@ -2666,6 +2704,22 @@ mdb_cursors_close(MDB_txn *txn, unsigned merge)
 		}
 		cursors[i] = NULL;
 	}
+#ifdef MDB_VL32
+	{
+		unsigned i, n = txn->mt_rpages[0].mid;
+		for (i = 1; i <= n; i++) {
+#ifdef _WIN32
+			UnmapViewOfFile(txn->mt_rpages[i].mptr);
+#else
+			MDB_page *mp = txn->mt_rpages[i].mptr;
+			int size = txn->mt_env->me_psize;
+			if (IS_OVERFLOW(mp)) size *= mp->mp_pages;
+			munmap(mp, size);
+#endif
+		}
+	}
+	txn->mt_rpages[0].mid = 0;
+#endif
 }
 
 #if !(MDB_PIDLOCK)		/* Currently the same as defined(_WIN32) */
@@ -2911,6 +2965,15 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 		DPRINTF(("calloc: %s", strerror(errno)));
 		return ENOMEM;
 	}
+#ifdef MDB_VL32
+	if (!parent) {
+		txn->mt_rpages = calloc(MDB_IDL_UM_SIZE, sizeof(MDB_ID2));
+		if (!txn->mt_rpages) {
+			free(txn);
+			return ENOMEM;
+		}
+	}
+#endif
 	txn->mt_dbxs = env->me_dbxs;	/* static */
 	txn->mt_dbs = (MDB_db *) ((char *)txn + tsize);
 	txn->mt_dbflags = (unsigned char *)txn + size - env->me_maxdbs;
@@ -2938,6 +3001,9 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 		parent->mt_child = txn;
 		txn->mt_parent = parent;
 		txn->mt_numdbs = parent->mt_numdbs;
+#ifdef MDB_VL32
+		txn->mt_rpages = parent->mt_rpages;
+#endif
 		memcpy(txn->mt_dbs, parent->mt_dbs, txn->mt_numdbs * sizeof(MDB_db));
 		/* Copy parent's mt_dbflags, but clear DB_NEW */
 		for (i=0; i<txn->mt_numdbs; i++)
@@ -2963,8 +3029,12 @@ renew:
 		rc = mdb_txn_renew0(txn);
 	}
 	if (rc) {
-		if (txn != env->me_txn0)
+		if (txn != env->me_txn0) {
+#ifdef MDB_VL32
+			free(txn->mt_rpages);
+#endif
 			free(txn);
+		}
 	} else {
 		txn->mt_flags |= flags;	/* could not change txn=me_txn0 earlier */
 		*ret = txn;
@@ -2983,7 +3053,7 @@ mdb_txn_env(MDB_txn *txn)
 	return txn->mt_env;
 }
 
-size_t
+mdb_size_t
 mdb_txn_id(MDB_txn *txn)
 {
     if(!txn) return 0;
@@ -3090,8 +3160,12 @@ mdb_txn_end(MDB_txn *txn, unsigned mode)
 		mdb_midl_free(pghead);
 	}
 
-	if (mode & MDB_END_FREE)
+	if (mode & MDB_END_FREE) {
+#ifdef MDB_VL32
+		free(txn->mt_rpages);
+#endif
 		free(txn);
+	}
 }
 
 void
@@ -3837,7 +3911,7 @@ mdb_env_write_meta(MDB_txn *txn)
 	MDB_env *env;
 	MDB_meta	meta, metab, *mp;
 	unsigned flags;
-	size_t mapsize;
+	mdb_size_t mapsize;
 	off_t off;
 	int rc, len, toggle;
 	char *ptr;
@@ -4014,12 +4088,29 @@ mdb_env_map(MDB_env *env, void *addr)
 	if (rc)
 		return rc;
 	map = addr;
+#ifdef MDB_VL32
+	msize = 2 * env->me_psize;
+#else
 	msize = env->me_mapsize;
+#endif
 	rc = NtMapViewOfSection(mh, GetCurrentProcess(), &map, 0, 0, NULL, &msize, ViewUnmap, MEM_RESERVE, pageprot);
+#ifdef MDB_VL32
+	env->me_fmh = mh;
+#else
 	NtClose(mh);
+#endif
 	if (rc)
 		return rc;
 	env->me_map = map;
+#else
+#ifdef MDB_VL32
+	(void) flags;
+	env->me_map = mmap(addr, 2 * env->me_psize, PROT_READ, MAP_SHARED,
+		env->me_fd, 0);
+	if (env->me_map == MAP_FAILED) {
+		env->me_map = NULL;
+		return ErrCode();
+	}
 #else
 	int prot = PROT_READ;
 	if (flags & MDB_WRITEMAP) {
@@ -4053,6 +4144,7 @@ mdb_env_map(MDB_env *env, void *addr)
 	 */
 	if (addr && env->me_map != addr)
 		return EBUSY;	/* TODO: Make a new MDB_* error code? */
+#endif
 
 	p = (MDB_page *)env->me_map;
 	env->me_metas[0] = METADATA(p);
@@ -4062,7 +4154,7 @@ mdb_env_map(MDB_env *env, void *addr)
 }
 
 int ESECT
-mdb_env_set_mapsize(MDB_env *env, size_t size)
+mdb_env_set_mapsize(MDB_env *env, mdb_size_t size)
 {
 	/* If env is already open, caller is responsible for making
 	 * sure there are no active txns.
@@ -4849,6 +4941,17 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 	if (env->me_fd!=INVALID_HANDLE_VALUE || (flags & ~(CHANGEABLE|CHANGELESS)))
 		return EINVAL;
 
+#ifdef MDB_VL32
+	if (flags & MDB_WRITEMAP) {
+		/* silently ignore WRITEMAP in 32 bit mode */
+		flags ^= MDB_WRITEMAP;
+	}
+	if (flags & MDB_FIXEDMAP) {
+		/* cannot support FIXEDMAP */
+		return EINVAL;
+	}
+#endif
+
 	len = strlen(path);
 	if (flags & MDB_NOSUBDIR) {
 		rc = len + sizeof(LOCKSUFF) + len + 1;
@@ -4972,6 +5075,13 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 				txn->mt_dbiseqs = (unsigned int *)(txn->mt_cursors + env->me_maxdbs);
 				txn->mt_dbflags = (unsigned char *)(txn->mt_dbiseqs + env->me_maxdbs);
 				txn->mt_env = env;
+#ifdef MDB_VL32
+				txn->mt_rpages = calloc(MDB_IDL_UM_SIZE, sizeof(MDB_ID2));
+				if (!txn->mt_rpages) {
+					free(txn);
+					rc = ENOMEM;
+				}
+#endif
 				txn->mt_dbxs = env->me_dbxs;
 				txn->mt_flags = MDB_TXN_FINISHED;
 				env->me_txn0 = txn;
@@ -5027,7 +5137,11 @@ mdb_env_close0(MDB_env *env, int excl)
 	}
 
 	if (env->me_map) {
+#ifdef MDB_VL32
+		munmap(env->me_map, 2*env->me_psize);
+#else
 		munmap(env->me_map, env->me_mapsize);
+#endif
 	}
 	if (env->me_mfd != env->me_fd && env->me_mfd != INVALID_HANDLE_VALUE)
 		(void) close(env->me_mfd);
@@ -5404,7 +5518,60 @@ mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret, int *lvl)
 
 	if (pgno < txn->mt_next_pgno) {
 		level = 0;
+#ifdef MDB_VL32
+		{
+			unsigned x = mdb_mid2l_search(txn->mt_rpages, pgno);
+			if (x <= txn->mt_rpages[0].mid && txn->mt_rpages[x].mid == pgno) {
+				p = txn->mt_rpages[x].mptr;
+				goto done;
+			}
+			if (txn->mt_rpages[0].mid >= MDB_IDL_UM_MAX) {
+				/* unmap some other page */
+				mdb_tassert(txn, 0);
+			}
+			if (txn->mt_rpages[0].mid < MDB_IDL_UM_SIZE) {
+				MDB_ID2 id2;
+				size_t len = env->me_psize;
+				int np;
+#ifdef _WIN32
+				off_t off = pgno * env->me_psize;
+				DWORD lo, hi;
+				lo = off & 0xffffffff;
+				hi = off >> 16 >> 16;
+				p = MapViewOfFile(env->me_fmh, FILE_MAP_READ, hi, lo, len);
+				if (p == NULL)
+					return ErrCode();
+				if (IS_OVERFLOW(p)) {
+					np = p->mp_pages;
+					UnmapViewOfFile(p);
+					len *= np;
+					p = MapViewOfFile(env->me_fmh, FILE_MAP_READ, hi, lo, len);
+					if (p == NULL)
+						return ErrCode();
+				}
+#else
+				off_t off = pgno * env->me_psize;
+				p = mmap(NULL, len, PROT_READ, MAP_SHARED, env->me_fd, off);
+				if (p == MAP_FAILED)
+					return errno;
+				if (IS_OVERFLOW(p)) {
+					np = p->mp_pages;
+					munmap(p, len);
+					len *= np;
+					p = mmap(NULL, len, PROT_READ, MAP_SHARED, env->me_fd, off);
+					if (p == MAP_FAILED)
+						return errno;
+				}
+#endif
+				id2.mid = pgno;
+				id2.mptr = p;
+				mdb_mid2l_insert(txn->mt_rpages, &id2);
+				goto done;
+			}
+		}
+#else
 		p = (MDB_page *)(env->me_map + env->me_psize * pgno);
+#endif
 	} else {
 		DPRINTF(("page %"Z"u not found", pgno));
 		txn->mt_flags |= MDB_TXN_ERROR;
@@ -5739,11 +5906,17 @@ mdb_cursor_sibling(MDB_cursor *mc, int move_right)
 	int		 rc;
 	MDB_node	*indx;
 	MDB_page	*mp;
+#ifdef MDB_VL32
+	MDB_page	*op;
+#endif
 
 	if (mc->mc_snum < 2) {
 		return MDB_NOTFOUND;		/* root has no siblings */
 	}
 
+#ifdef MDB_VL32
+	op = mc->mc_pg[mc->mc_top];
+#endif
 	mdb_cursor_pop(mc);
 	DPRINTF(("parent page is page %"Z"u, index %u",
 		mc->mc_pg[mc->mc_top]->mp_pgno, mc->mc_ki[mc->mc_top]));
@@ -5767,6 +5940,21 @@ mdb_cursor_sibling(MDB_cursor *mc, int move_right)
 		    move_right ? "right" : "left", mc->mc_ki[mc->mc_top]));
 	}
 	mdb_cassert(mc, IS_BRANCH(mc->mc_pg[mc->mc_top]));
+
+#ifdef MDB_VL32
+	{
+		MDB_ID2L rl = mc->mc_txn->mt_rpages;
+		unsigned x = mdb_mid2l_search(rl, op->mp_pgno);
+		if (x <= rl[0].mid && rl[x].mid == op->mp_pgno) {
+			munmap(op, mc->mc_txn->mt_env->me_psize);
+			while (x < rl[0].mid) {
+				rl[x] = rl[x+1];
+				x++;
+			}
+			rl[0].mid--;
+		}
+	}
+#endif
 
 	indx = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
 	if ((rc = mdb_page_get(mc->mc_txn, NODEPGNO(indx), &mp, NULL)) != 0) {
@@ -9977,7 +10165,7 @@ mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx)
 		if (mr[i].mr_pid) {
 			txnid_t	txnid = mr[i].mr_txnid;
 			sprintf(buf, txnid == (txnid_t)-1 ?
-				"%10d %"Z"x -\n" : "%10d %"Z"x %"Z"u\n",
+				"%10d %"Z"x -\n" : "%10d %"Z"x %"Y"u\n",
 				(int)mr[i].mr_pid, (size_t)mr[i].mr_tid, txnid);
 			if (first) {
 				first = 0;

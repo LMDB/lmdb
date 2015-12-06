@@ -18,11 +18,12 @@
 # There may be other macros in mdb.c of interest. You should
 # read mdb.c before changing any of them.
 #
-CC	= gcc
+CC	= gcc -m32
 AR	= ar
 W	= -W -Wall -Wno-unused-parameter -Wbad-function-cast -Wuninitialized
 THREADS = -pthread
 OPT = -O2 -g
+XCFLAGS = -DMDB_VL32
 CFLAGS	= $(THREADS) $(OPT) $(W) $(XCFLAGS)
 LDLIBS	= # -lntdll # Windows needs ntdll
 SOLIBS	= # -lntdll

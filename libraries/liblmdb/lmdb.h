@@ -170,6 +170,14 @@ typedef	int	mdb_mode_t;
 typedef	mode_t	mdb_mode_t;
 #endif
 
+#define MDB_VL32	1
+
+#ifdef MDB_VL32
+typedef u_int64_t	mdb_size_t;
+#else
+typedef size_t	mdb_size_t;
+#endif
+
 /** An abstraction for a file handle.
  *	On POSIX systems file handles are small integers. On Windows
  *	they're opaque pointers.
@@ -447,18 +455,18 @@ typedef struct MDB_stat {
 	unsigned int	ms_psize;			/**< Size of a database page.
 											This is currently the same for all databases. */
 	unsigned int	ms_depth;			/**< Depth (height) of the B-tree */
-	size_t		ms_branch_pages;	/**< Number of internal (non-leaf) pages */
-	size_t		ms_leaf_pages;		/**< Number of leaf pages */
-	size_t		ms_overflow_pages;	/**< Number of overflow pages */
-	size_t		ms_entries;			/**< Number of data items */
+	mdb_size_t		ms_branch_pages;	/**< Number of internal (non-leaf) pages */
+	mdb_size_t		ms_leaf_pages;		/**< Number of leaf pages */
+	mdb_size_t		ms_overflow_pages;	/**< Number of overflow pages */
+	mdb_size_t		ms_entries;			/**< Number of data items */
 } MDB_stat;
 
 /** @brief Information about the environment */
 typedef struct MDB_envinfo {
 	void	*me_mapaddr;			/**< Address of map, if fixed */
-	size_t	me_mapsize;				/**< Size of the data memory map */
-	size_t	me_last_pgno;			/**< ID of the last used page */
-	size_t	me_last_txnid;			/**< ID of the last committed transaction */
+	mdb_size_t	me_mapsize;				/**< Size of the data memory map */
+	mdb_size_t	me_last_pgno;			/**< ID of the last used page */
+	mdb_size_t	me_last_txnid;			/**< ID of the last committed transaction */
 	unsigned int me_maxreaders;		/**< max reader slots in the environment */
 	unsigned int me_numreaders;		/**< max reader slots used in the environment */
 } MDB_envinfo;
@@ -825,7 +833,7 @@ int  mdb_env_get_fd(MDB_env *env, mdb_filehandle_t *fd);
 	 *   	an active write transaction.
 	 * </ul>
 	 */
-int  mdb_env_set_mapsize(MDB_env *env, size_t size);
+int  mdb_env_set_mapsize(MDB_env *env, mdb_size_t size);
 
 	/** @brief Set the maximum number of threads/reader slots for the environment.
 	 *
@@ -974,7 +982,7 @@ MDB_env *mdb_txn_env(MDB_txn *txn);
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @return A transaction ID, valid if input is an active transaction.
 	 */
-size_t mdb_txn_id(MDB_txn *txn);
+mdb_size_t mdb_txn_id(MDB_txn *txn);
 
 	/** @brief Commit all the operations of a transaction into the database.
 	 *
