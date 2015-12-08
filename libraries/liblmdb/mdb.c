@@ -5279,7 +5279,11 @@ mdb_page_search_root(MDB_cursor *mc, MDB_val *key, int flags)
 		indx_t		i;
 
 		DPRINTF(("branch page %"Z"u has %u keys", mp->mp_pgno, NUMKEYS(mp)));
-		mdb_cassert(mc, NUMKEYS(mp) > 1);
+		/* Don't assert on branch pages in the FreeDB. We can get here
+		 * while in the process of rebalancing a FreeDB branch page; we must
+		 * let that proceed. ITS#8336
+		 */
+		mdb_cassert(mc, !mc->mc_dbi || NUMKEYS(mp) > 1);
 		DPRINTF(("found index 0 to page %"Z"u", NODEPGNO(NODEPTR(mp, 0))));
 
 		if (flags & (MDB_PS_FIRST|MDB_PS_LAST)) {
