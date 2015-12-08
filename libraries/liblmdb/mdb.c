@@ -6491,7 +6491,7 @@ more:
 #endif
 				/* does data match? */
 				if (!dcmp(data, &olddata)) {
-					if (flags & MDB_NODUPDATA)
+					if (flags & (MDB_NODUPDATA|MDB_APPENDDUP))
 						return MDB_KEYEXIST;
 					/* overwrite it */
 					goto current;
