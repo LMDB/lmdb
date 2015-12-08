@@ -43,7 +43,7 @@ extern "C" {
 	 *	Preferably it should have the same size as a pointer.
 	 */
 #ifdef MDB_VL32
-typedef u_int64_t MDB_ID;
+typedef uint64_t MDB_ID;
 #else
 typedef size_t MDB_ID;
 #endif

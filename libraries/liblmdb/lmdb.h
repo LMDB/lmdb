@@ -173,7 +173,7 @@ typedef	mode_t	mdb_mode_t;
 #define MDB_VL32	1
 
 #ifdef MDB_VL32
-typedef u_int64_t	mdb_size_t;
+typedef uint64_t	mdb_size_t;
 #else
 typedef size_t	mdb_size_t;
 #endif
