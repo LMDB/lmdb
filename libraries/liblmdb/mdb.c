@@ -4003,19 +4003,28 @@ mdb_env_map(MDB_env *env, void *addr)
 	int access = SECTION_MAP_READ;
 	HANDLE mh;
 	void *map;
-	size_t msize = 0;
-	ULONG pageprot = PAGE_READONLY;
+	size_t msize;
+	ULONG pageprot = PAGE_READONLY, secprot, alloctype;
+
 	if (flags & MDB_WRITEMAP) {
 		access |= SECTION_MAP_WRITE;
 		pageprot = PAGE_READWRITE;
 	}
+	if (flags & MDB_RDONLY) {
+		secprot = PAGE_READONLY;
+		msize = 0;
+		alloctype = 0;
+	} else {
+		secprot = PAGE_READWRITE;
+		msize = env->me_mapsize;
+		alloctype = MEM_RESERVE;
+	}
 
-	rc = NtCreateSection(&mh, access, NULL, NULL, PAGE_READWRITE, SEC_RESERVE, env->me_fd);
+	rc = NtCreateSection(&mh, access, NULL, NULL, secprot, SEC_RESERVE, env->me_fd);
 	if (rc)
 		return rc;
 	map = addr;
-	msize = env->me_mapsize;
-	rc = NtMapViewOfSection(mh, GetCurrentProcess(), &map, 0, 0, NULL, &msize, ViewUnmap, MEM_RESERVE, pageprot);
+	rc = NtMapViewOfSection(mh, GetCurrentProcess(), &map, 0, 0, NULL, &msize, ViewUnmap, alloctype, pageprot);
 	NtClose(mh);
 	if (rc)
 		return rc;
