@@ -1201,7 +1201,7 @@ struct MDB_txn {
 	unsigned char	*mt_dbflags;
 #ifdef MDB_VL32
 	/** List of read-only pages */
-	MDB_ID2L	mt_rpages;
+	MDB_ID3L	mt_rpages;
 #endif
 	/**	Number of DB records in use, or 0 when the txn is finished.
 	 *	This number only ever increments until the txn finishes; we
@@ -1897,6 +1897,33 @@ mdb_dlist_free(MDB_txn *txn)
 	dl[0].mid = 0;
 }
 
+#ifdef MDB_VL32
+static void
+mdb_page_unref(MDB_txn *txn, MDB_page *mp)
+{
+	MDB_ID3L rl = txn->mt_rpages;
+	unsigned x = mdb_mid3l_search(rl, mp->mp_pgno);
+	if (x <= rl[0].mid && rl[x].mid == mp->mp_pgno) {
+		rl[x].mref--;
+		if (rl[x].mref)
+			return;
+#ifdef _WIN32
+		UnmapViewOfFile(rl[x].mptr);
+#else
+		munmap(mp, txn->mt_env->me_psize * rl[x].mcnt);
+#endif
+		while (x < rl[0].mid) {
+			rl[x] = rl[x+1];
+			x++;
+		}
+		rl[0].mid--;
+	}
+}
+#define MDB_PAGE_UNREF(txn, mp)	mdb_page_unref(txn, mp)
+#else
+#define MDB_PAGE_UNREF(txn, mp)
+#endif /* MDB_VL32 */
+
 /** Loosen or free a single page.
  * Saves single pages to a list for future reuse
  * in this same txn. It has been pulled from the freeDB
@@ -2576,20 +2603,7 @@ done:
 			}
 		}
 	}
-#ifdef MDB_VL32
-	{
-		MDB_ID2L rl = mc->mc_txn->mt_rpages;
-		unsigned x = mdb_mid2l_search(rl, mp->mp_pgno);
-		if (x <= rl[0].mid && rl[x].mid == mp->mp_pgno) {
-			munmap(mp, mc->mc_txn->mt_env->me_psize);
-			while (x < rl[0].mid) {
-				rl[x] = rl[x+1];
-				x++;
-			}
-			rl[0].mid--;
-		}
-	}
-#endif
+	MDB_PAGE_UNREF(mc->mc_txn, mp);
 	return 0;
 
 fail:
@@ -2711,10 +2725,7 @@ mdb_cursors_close(MDB_txn *txn, unsigned merge)
 #ifdef _WIN32
 			UnmapViewOfFile(txn->mt_rpages[i].mptr);
 #else
-			MDB_page *mp = txn->mt_rpages[i].mptr;
-			int size = txn->mt_env->me_psize;
-			if (IS_OVERFLOW(mp)) size *= mp->mp_pages;
-			munmap(mp, size);
+			munmap(txn->mt_rpages[i].mptr, txn->mt_env->me_psize * txn->mt_rpages[i].mcnt);
 #endif
 		}
 	}
@@ -2967,7 +2978,7 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 	}
 #ifdef MDB_VL32
 	if (!parent) {
-		txn->mt_rpages = calloc(MDB_IDL_UM_SIZE, sizeof(MDB_ID2));
+		txn->mt_rpages = calloc(MDB_IDL_UM_SIZE, sizeof(MDB_ID3));
 		if (!txn->mt_rpages) {
 			free(txn);
 			return ENOMEM;
@@ -5079,7 +5090,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 				txn->mt_dbflags = (unsigned char *)(txn->mt_dbiseqs + env->me_maxdbs);
 				txn->mt_env = env;
 #ifdef MDB_VL32
-				txn->mt_rpages = calloc(MDB_IDL_UM_SIZE, sizeof(MDB_ID2));
+				txn->mt_rpages = calloc(MDB_IDL_UM_SIZE, sizeof(MDB_ID3));
 				if (!txn->mt_rpages) {
 					free(txn);
 					rc = ENOMEM;
@@ -5523,9 +5534,10 @@ mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret, int *lvl)
 		level = 0;
 #ifdef MDB_VL32
 		{
-			unsigned x = mdb_mid2l_search(txn->mt_rpages, pgno);
+			unsigned x = mdb_mid3l_search(txn->mt_rpages, pgno);
 			if (x <= txn->mt_rpages[0].mid && txn->mt_rpages[x].mid == pgno) {
 				p = txn->mt_rpages[x].mptr;
+				txn->mt_rpages[x].mref++;
 				goto done;
 			}
 			if (txn->mt_rpages[0].mid >= MDB_IDL_UM_MAX) {
@@ -5533,9 +5545,9 @@ mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret, int *lvl)
 				mdb_tassert(txn, 0);
 			}
 			if (txn->mt_rpages[0].mid < MDB_IDL_UM_SIZE) {
-				MDB_ID2 id2;
+				MDB_ID3 id3;
 				size_t len = env->me_psize;
-				int np;
+				int np = 1;
 #ifdef _WIN32
 				off_t off = pgno * env->me_psize;
 				DWORD lo, hi;
@@ -5566,9 +5578,11 @@ mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret, int *lvl)
 						return errno;
 				}
 #endif
-				id2.mid = pgno;
-				id2.mptr = p;
-				mdb_mid2l_insert(txn->mt_rpages, &id2);
+				id3.mid = pgno;
+				id3.mptr = p;
+				id3.mcnt = np;
+				id3.mref = 1;
+				mdb_mid3l_insert(txn->mt_rpages, &id3);
 				goto done;
 			}
 		}
@@ -5745,10 +5759,22 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int flags)
 	}
 
 	mdb_cassert(mc, root > 1);
-	if (!mc->mc_pg[0] || mc->mc_pg[0]->mp_pgno != root)
+	if (!mc->mc_pg[0] || mc->mc_pg[0]->mp_pgno != root) {
+#ifdef MDB_VL32
+		if (mc->mc_pg[0])
+			MDB_PAGE_UNREF(mc->mc_txn, mc->mc_pg[0]);
+#endif
 		if ((rc = mdb_page_get(mc->mc_txn, root, &mc->mc_pg[0], NULL)) != 0)
 			return rc;
+	}
 
+#ifdef MDB_VL32
+	{
+		int i;
+		for (i=1; i<mc->mc_snum; i++)
+			MDB_PAGE_UNREF(mc->mc_txn, mc->mc_pg[i]);
+	}
+#endif
 	mc->mc_snum = 1;
 	mc->mc_top = 0;
 
@@ -5880,7 +5906,7 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 {
 	MDB_cursor	mc;
 	MDB_xcursor	mx;
-	int exact = 0;
+	int exact = 0, rc;
 	DKBUF;
 
 	DPRINTF(("===> get db %u key [%s]", dbi, DKEY(key)));
@@ -5892,7 +5918,16 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 		return MDB_BAD_TXN;
 
 	mdb_cursor_init(&mc, txn, dbi, &mx);
-	return mdb_cursor_set(&mc, key, data, MDB_SET, &exact);
+	rc = mdb_cursor_set(&mc, key, data, MDB_SET, &exact);
+#ifdef MDB_VL32
+	{
+		int i;
+		/* leave the final page containing the data item, unref the rest */
+		for (i=0; i<mc.mc_top; i++)
+			MDB_PAGE_UNREF(txn, mc.mc_pg[i]);
+	}
+#endif
+	return rc;
 }
 
 /** Find a sibling for a page.
@@ -5944,20 +5979,7 @@ mdb_cursor_sibling(MDB_cursor *mc, int move_right)
 	}
 	mdb_cassert(mc, IS_BRANCH(mc->mc_pg[mc->mc_top]));
 
-#ifdef MDB_VL32
-	{
-		MDB_ID2L rl = mc->mc_txn->mt_rpages;
-		unsigned x = mdb_mid2l_search(rl, op->mp_pgno);
-		if (x <= rl[0].mid && rl[x].mid == op->mp_pgno) {
-			munmap(op, mc->mc_txn->mt_env->me_psize);
-			while (x < rl[0].mid) {
-				rl[x] = rl[x+1];
-				x++;
-			}
-			rl[0].mid--;
-		}
-	}
-#endif
+	MDB_PAGE_UNREF(mc->mc_txn, op);
 
 	indx = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
 	if ((rc = mdb_page_get(mc->mc_txn, NODEPGNO(indx), &mp, NULL)) != 0) {
@@ -9990,6 +10012,11 @@ mdb_drop0(MDB_cursor *mc, int subs)
 			mdb_cursor_pop(mc);
 
 		mdb_cursor_copy(mc, &mx);
+#ifdef MDB_VL32
+		/* bump refcount for mx's pages */
+		for (i=0; i<mc->mc_snum; i++)
+			mdb_page_get(txn, mc->mc_pg[i]->mp_pgno, &mx.mc_pg[i], NULL);
+#endif
 		while (mc->mc_snum > 0) {
 			MDB_page *mp = mc->mc_pg[mc->mc_top];
 			unsigned n = NUMKEYS(mp);
@@ -10049,6 +10076,11 @@ mdb_drop0(MDB_cursor *mc, int subs)
 done:
 		if (rc)
 			txn->mt_flags |= MDB_TXN_ERROR;
+#ifdef MDB_VL32
+		/* drop refcount for mx's pages */
+		for (i=0; i<mc->mc_snum; i++)
+			MDB_PAGE_UNREF(txn, mx.mc_pg[i]);
+#endif
 	} else if (rc == MDB_NOTFOUND) {
 		rc = MDB_SUCCESS;
 	}
