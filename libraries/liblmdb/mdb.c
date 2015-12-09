@@ -4156,6 +4156,7 @@ mdb_env_map(MDB_env *env, void *addr)
 int ESECT
 mdb_env_set_mapsize(MDB_env *env, mdb_size_t size)
 {
+#ifndef MDB_VL32
 	/* If env is already open, caller is responsible for making
 	 * sure there are no active txns.
 	 */
@@ -4181,6 +4182,7 @@ mdb_env_set_mapsize(MDB_env *env, mdb_size_t size)
 		if (rc)
 			return rc;
 	}
+#endif /* !MDB_VL32 */
 	env->me_mapsize = size;
 	if (env->me_psize)
 		env->me_maxpg = env->me_mapsize / env->me_psize;
