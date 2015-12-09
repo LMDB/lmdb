@@ -15,6 +15,7 @@
  * <http://www.OpenLDAP.org/license.html>.
  */
 
+#define MDB_VL32	1
 #include <limits.h>
 #include <string.h>
 #include <stdlib.h>
