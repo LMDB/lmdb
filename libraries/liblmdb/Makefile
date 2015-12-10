@@ -23,7 +23,7 @@ AR	= ar
 W	= -W -Wall -Wno-unused-parameter -Wbad-function-cast -Wuninitialized
 THREADS = -pthread
 OPT = -O2 -g
-XCFLAGS = -DMDB_VL32
+XCFLAGS = -DMDB_VL32 -D_FILE_OFFSET_BITS=64
 CFLAGS	= $(THREADS) $(OPT) $(W) $(XCFLAGS)
 LDLIBS	= # -lntdll # Windows needs ntdll
 SOLIBS	= # -lntdll
