@@ -2721,19 +2721,6 @@ mdb_cursors_close(MDB_txn *txn, unsigned merge)
 		}
 		cursors[i] = NULL;
 	}
-#ifdef MDB_VL32
-	{
-		unsigned i, n = txn->mt_rpages[0].mid;
-		for (i = 1; i <= n; i++) {
-#ifdef _WIN32
-			UnmapViewOfFile(txn->mt_rpages[i].mptr);
-#else
-			munmap(txn->mt_rpages[i].mptr, txn->mt_env->me_psize * txn->mt_rpages[i].mcnt);
-#endif
-		}
-	}
-	txn->mt_rpages[0].mid = 0;
-#endif
 }
 
 #if !(MDB_PIDLOCK)		/* Currently the same as defined(_WIN32) */
@@ -3173,11 +3160,23 @@ mdb_txn_end(MDB_txn *txn, unsigned mode)
 
 		mdb_midl_free(pghead);
 	}
+#ifdef MDB_VL32
+	if (!txn->mt_parent) {
+		unsigned i, n = txn->mt_rpages[0].mid;
+		for (i = 1; i <= n; i++) {
+#ifdef _WIN32
+			UnmapViewOfFile(txn->mt_rpages[i].mptr);
+#else
+			munmap(txn->mt_rpages[i].mptr, txn->mt_env->me_psize * txn->mt_rpages[i].mcnt);
+#endif
+		}
+		txn->mt_rpages[0].mid = 0;
+		if (mode & MDB_END_FREE)
+			free(txn->mt_rpages);
+	}
+#endif
 
 	if (mode & MDB_END_FREE) {
-#ifdef MDB_VL32
-		free(txn->mt_rpages);
-#endif
 		free(txn);
 	}
 }
@@ -5518,8 +5517,12 @@ mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret, int *lvl)
 				MDB_ID pn = pgno << 1;
 				x = mdb_midl_search(tx2->mt_spill_pgs, pn);
 				if (x <= tx2->mt_spill_pgs[0] && tx2->mt_spill_pgs[x] == pn) {
+#ifdef MDB_VL32
+					goto mapvl32;
+#else
 					p = (MDB_page *)(env->me_map + env->me_psize * pgno);
 					goto done;
+#endif
 				}
 			}
 			if (dl[0].mid) {
@@ -5536,6 +5539,7 @@ mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret, int *lvl)
 	if (pgno < txn->mt_next_pgno) {
 		level = 0;
 #ifdef MDB_VL32
+mapvl32:
 		{
 			unsigned x = mdb_mid3l_search(txn->mt_rpages, pgno);
 			if (x <= txn->mt_rpages[0].mid && txn->mt_rpages[x].mid == pgno) {
