@@ -1817,8 +1817,8 @@ int
 mdb_dcmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b)
 {
 	MDB_cmp_func *dcmp = txn->mt_dbxs[dbi].md_dcmp;
-#if UINT_MAX < SIZE_MAX
-	if (dcmp == mdb_cmp_int && a->mv_size == sizeof(size_t))
+#if UINT_MAX < SIZE_MAX || defined(MDB_VL32)
+	if (dcmp == mdb_cmp_int && a->mv_size == sizeof(mdb_size_t))
 		dcmp = mdb_cmp_clong;
 #endif
 	return dcmp(a, b);
@@ -4231,7 +4231,7 @@ mdb_env_get_maxreaders(MDB_env *env, unsigned int *readers)
 }
 
 static int ESECT
-mdb_fsize(HANDLE fd, size_t *size)
+mdb_fsize(HANDLE fd, mdb_size_t *size)
 {
 #ifdef _WIN32
 	LARGE_INTEGER fsize;
@@ -4345,7 +4345,7 @@ mdb_env_open2(MDB_env *env)
 		/* Make sure mapsize >= committed data size.  Even when using
 		 * mm_mapsize, which could be broken in old files (ITS#7789).
 		 */
-		size_t minsize = (meta.mm_last_pg + 1) * meta.mm_psize;
+		mdb_size_t minsize = (meta.mm_last_pg + 1) * meta.mm_psize;
 		if (env->me_mapsize < minsize)
 			env->me_mapsize = minsize;
 	}
@@ -5246,18 +5246,18 @@ mdb_env_close(MDB_env *env)
 	free(env);
 }
 
-/** Compare two items pointing at aligned size_t's */
+/** Compare two items pointing at aligned mdb_size_t's */
 static int
 mdb_cmp_long(const MDB_val *a, const MDB_val *b)
 {
-	return (*(size_t *)a->mv_data < *(size_t *)b->mv_data) ? -1 :
-		*(size_t *)a->mv_data > *(size_t *)b->mv_data;
+	return (*(mdb_size_t *)a->mv_data < *(mdb_size_t *)b->mv_data) ? -1 :
+		*(mdb_size_t *)a->mv_data > *(mdb_size_t *)b->mv_data;
 }
 
 /** Compare two items pointing at aligned unsigned int's.
  *
  *	This is also set as #MDB_INTEGERDUP|#MDB_DUPFIXED's #MDB_dbx.%md_dcmp,
- *	but #mdb_cmp_clong() is called instead if the data type is size_t.
+ *	but #mdb_cmp_clong() is called instead if the data type is mdb_size_t.
  */
 static int
 mdb_cmp_int(const MDB_val *a, const MDB_val *b)
@@ -5374,7 +5374,7 @@ mdb_node_search(MDB_cursor *mc, MDB_val *key, int *exactp)
 	 * alignment is guaranteed. Use faster mdb_cmp_int.
 	 */
 	if (cmp == mdb_cmp_cint && IS_BRANCH(mp)) {
-		if (NODEPTR(mp, 1)->mn_ksize == sizeof(size_t))
+		if (NODEPTR(mp, 1)->mn_ksize == sizeof(mdb_size_t))
 			cmp = mdb_cmp_long;
 		else
 			cmp = mdb_cmp_int;
@@ -6333,8 +6333,8 @@ set1:
 			if ((rc = mdb_node_read(mc->mc_txn, leaf, &olddata)) != MDB_SUCCESS)
 				return rc;
 			dcmp = mc->mc_dbx->md_dcmp;
-#if UINT_MAX < SIZE_MAX
-			if (dcmp == mdb_cmp_int && olddata.mv_size == sizeof(size_t))
+#if UINT_MAX < SIZE_MAX || defined(MDB_VL32)
+			if (dcmp == mdb_cmp_int && olddata.mv_size == sizeof(mdb_size_t))
 				dcmp = mdb_cmp_clong;
 #endif
 			rc = dcmp(data, &olddata);
@@ -6856,8 +6856,8 @@ more:
 				if (flags == MDB_CURRENT)
 					goto current;
 				dcmp = mc->mc_dbx->md_dcmp;
-#if UINT_MAX < SIZE_MAX
-				if (dcmp == mdb_cmp_int && olddata.mv_size == sizeof(size_t))
+#if UINT_MAX < SIZE_MAX || defined(MDB_VL32)
+				if (dcmp == mdb_cmp_int && olddata.mv_size == sizeof(mdb_size_t))
 					dcmp = mdb_cmp_clong;
 #endif
 				/* does data match? */
@@ -7688,8 +7688,8 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
 	DPRINTF(("Sub-db -%u root page %"Y"u", mx->mx_cursor.mc_dbi,
 		mx->mx_db.md_root));
 	mx->mx_dbflag = DB_VALID|DB_USRVALID|DB_DIRTY; /* DB_DIRTY guides mdb_cursor_touch */
-#if UINT_MAX < SIZE_MAX
-	if (mx->mx_dbx.md_cmp == mdb_cmp_int && mx->mx_db.md_pad == sizeof(size_t))
+#if UINT_MAX < SIZE_MAX || defined(MDB_VL32)
+	if (mx->mx_dbx.md_cmp == mdb_cmp_int && mx->mx_db.md_pad == sizeof(mdb_size_t))
 		mx->mx_dbx.md_cmp = mdb_cmp_clong;
 #endif
 }
@@ -9589,7 +9589,7 @@ mdb_env_copyfd0(MDB_env *env, HANDLE fd)
 
 	w2 = txn->mt_next_pgno * env->me_psize;
 	{
-		size_t fsize = 0;
+		mdb_size_t fsize = 0;
 		if ((rc = mdb_fsize(env->me_fd, &fsize)))
 			goto leave;
 		if (w2 > fsize)
