@@ -9476,6 +9476,7 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 	MDB_db dummy;
 	int rc, dbflag, exact;
 	unsigned int unused = 0, seq;
+	char *namedup;
 	size_t len;
 
 	if (flags & ~VALID_FLAGS)
@@ -9537,8 +9538,16 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 		MDB_node *node = NODEPTR(mc.mc_pg[mc.mc_top], mc.mc_ki[mc.mc_top]);
 		if ((node->mn_flags & (F_DUPDATA|F_SUBDATA)) != F_SUBDATA)
 			return MDB_INCOMPATIBLE;
-	} else if (rc == MDB_NOTFOUND && (flags & MDB_CREATE)) {
-		/* Create if requested */
+	} else if (! (rc == MDB_NOTFOUND && (flags & MDB_CREATE))) {
+		return rc;
+	}
+
+	/* Done here so we cannot fail after creating a new DB */
+	if ((namedup = strdup(name)) == NULL)
+		return ENOMEM;
+
+	if (rc) {
+		/* MDB_NOTFOUND and MDB_CREATE: Create new DB */
 		data.mv_size = sizeof(MDB_db);
 		data.mv_data = &dummy;
 		memset(&dummy, 0, sizeof(dummy));
@@ -9548,10 +9557,12 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 		dbflag |= DB_DIRTY;
 	}
 
-	/* OK, got info, add to table */
-	if (rc == MDB_SUCCESS) {
+	if (rc) {
+		free(namedup);
+	} else {
+		/* Got info, register DBI in this txn */
 		unsigned int slot = unused ? unused : txn->mt_numdbs;
-		txn->mt_dbxs[slot].md_name.mv_data = strdup(name);
+		txn->mt_dbxs[slot].md_name.mv_data = namedup;
 		txn->mt_dbxs[slot].md_name.mv_size = len;
 		txn->mt_dbxs[slot].md_rel = NULL;
 		txn->mt_dbflags[slot] = dbflag;
