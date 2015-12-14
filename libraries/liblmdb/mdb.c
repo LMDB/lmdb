@@ -1922,6 +1922,20 @@ mdb_page_unref(MDB_txn *txn, MDB_page *mp)
 	}
 }
 #define MDB_PAGE_UNREF(txn, mp)	mdb_page_unref(txn, mp)
+
+static void
+mdb_xcursor_unref(MDB_cursor *mc)
+{
+	MDB_cursor *m2 = &mc->mc_xcursor->mx_cursor;
+	int i;
+	if (IS_SUBP(m2->mc_pg[0]))
+		return;
+	for (i=0; i<m2->mc_snum; i++)
+		mdb_page_unref(mc->mc_txn, m2->mc_pg[i]);
+	m2->mc_snum = m2->mc_top = 0;
+	m2->mc_pg[0] = NULL;
+	m2->mc_flags &= ~C_INITIALIZED;
+}
 #else
 #define MDB_PAGE_UNREF(txn, mp)
 #endif /* MDB_VL32 */
@@ -6029,6 +6043,13 @@ mdb_cursor_next(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 					return rc;
 				}
 			}
+#ifdef MDB_VL32
+			else {
+				if (mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED) {
+					mdb_xcursor_unref(mc);
+				}
+			}
+#endif
 		} else {
 			mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
 			if (op == MDB_NEXT_DUP)
@@ -6108,6 +6129,13 @@ mdb_cursor_prev(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 					return rc;
 				}
 			}
+#ifdef MDB_VL32
+			else {
+				if (mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED) {
+					mdb_xcursor_unref(mc);
+				}
+			}
+#endif
 		} else {
 			mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
 			if (op == MDB_PREV_DUP)
@@ -6307,6 +6335,11 @@ set1:
 		return MDB_SUCCESS;
 	}
 
+#ifdef MDB_VL32
+	if (mc->mc_xcursor && mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED) {
+		mdb_xcursor_unref(mc);
+	}
+#endif
 	if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
 		mdb_xcursor_init1(mc, leaf);
 	}
@@ -6367,8 +6400,14 @@ mdb_cursor_first(MDB_cursor *mc, MDB_val *key, MDB_val *data)
 	int		 rc;
 	MDB_node	*leaf;
 
-	if (mc->mc_xcursor)
+	if (mc->mc_xcursor) {
+#ifdef MDB_VL32
+		if (mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED) {
+			mdb_xcursor_unref(mc);
+		}
+#endif
 		mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
+	}
 
 	if (!(mc->mc_flags & C_INITIALIZED) || mc->mc_top) {
 		rc = mdb_page_search(mc, NULL, MDB_PS_FIRST);
@@ -6411,8 +6450,14 @@ mdb_cursor_last(MDB_cursor *mc, MDB_val *key, MDB_val *data)
 	int		 rc;
 	MDB_node	*leaf;
 
-	if (mc->mc_xcursor)
+	if (mc->mc_xcursor) {
+#ifdef MDB_VL32
+		if (mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED) {
+			mdb_xcursor_unref(mc);
+		}
+#endif
 		mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
+	}
 
 	if (!(mc->mc_flags & C_EOF)) {
 
