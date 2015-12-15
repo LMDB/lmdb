@@ -407,17 +407,11 @@ int mdb_mid3l_insert( MDB_ID3L ids, MDB_ID3 *id )
 		return -1;
 	}
 
-	if ( ids[0].mid >= MDB_IDL_UM_MAX ) {
-		/* too big */
-		return -2;
-
-	} else {
-		/* insert id */
-		ids[0].mid++;
-		for (i=(unsigned)ids[0].mid; i>x; i--)
-			ids[i] = ids[i-1];
-		ids[x] = *id;
-	}
+	/* insert id */
+	ids[0].mid++;
+	for (i=(unsigned)ids[0].mid; i>x; i--)
+		ids[i] = ids[i-1];
+	ids[x] = *id;
 
 	return 0;
 }

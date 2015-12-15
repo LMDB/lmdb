@@ -1378,6 +1378,12 @@ struct MDB_env {
 	mdb_mutex_t	me_rmutex;
 	mdb_mutex_t	me_wmutex;
 #endif
+#ifdef MDB_VL32
+	MDB_ID3L	me_rpages;
+	mdb_mutex_t	me_rpmutex;
+#define MDB_RPAGE_SIZE	(MDB_IDL_UM_SIZE*4)
+#define MDB_RPAGE_MAX	(MDB_RPAGE_SIZE-1)
+#endif
 	void		*me_userctx;	 /**< User-settable context */
 	MDB_assert_func *me_assert_func; /**< Callback for assertion failures */
 };
@@ -1903,23 +1909,11 @@ mdb_dlist_free(MDB_txn *txn)
 static void
 mdb_page_unref(MDB_txn *txn, MDB_page *mp)
 {
-	MDB_ID3L rl = txn->mt_rpages;
-	unsigned x = mdb_mid3l_search(rl, mp->mp_pgno);
-	if (x <= rl[0].mid && rl[x].mid == mp->mp_pgno) {
-		rl[x].mref--;
-		if (rl[x].mref)
-			return;
-#ifdef _WIN32
-		UnmapViewOfFile(rl[x].mptr);
-#else
-		munmap(mp, txn->mt_env->me_psize * rl[x].mcnt);
-#endif
-		while (x < rl[0].mid) {
-			rl[x] = rl[x+1];
-			x++;
-		}
-		rl[0].mid--;
-	}
+	unsigned x;
+	if (mp->mp_flags & (P_SUBP|P_DIRTY))
+		return;
+	x = mdb_mid3l_search(txn->mt_rpages, mp->mp_pgno);
+	txn->mt_rpages[x].mref--;
 }
 #define MDB_PAGE_UNREF(txn, mp)	mdb_page_unref(txn, mp)
 
@@ -3175,20 +3169,18 @@ mdb_txn_end(MDB_txn *txn, unsigned mode)
 	}
 #ifdef MDB_VL32
 	if (!txn->mt_parent) {
-		unsigned i, n = txn->mt_rpages[0].mid;
+		unsigned i, x, n = txn->mt_rpages[0].mid;
+		LOCK_MUTEX0(env->me_rpmutex);
 		for (i = 1; i <= n; i++) {
-#ifdef _WIN32
-			UnmapViewOfFile(txn->mt_rpages[i].mptr);
-#else
-			munmap(txn->mt_rpages[i].mptr, txn->mt_env->me_psize * txn->mt_rpages[i].mcnt);
-#endif
+			x = mdb_mid3l_search(env->me_rpages, txn->mt_rpages[i].mid);
+			env->me_rpages[x].mref--;
 		}
+		UNLOCK_MUTEX(env->me_rpmutex);
 		txn->mt_rpages[0].mid = 0;
 		if (mode & MDB_END_FREE)
 			free(txn->mt_rpages);
 	}
 #endif
-
 	if (mode & MDB_END_FREE) {
 		free(txn);
 	}
@@ -4932,6 +4924,13 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 	env->me_rmutex->locked = &env->me_txns->mti_rlocked;
 	env->me_wmutex->locked = &env->me_txns->mti_wlocked;
 #endif
+#ifdef MDB_VL32
+#ifdef _WIN32
+	env->me_rpmutex = CreateMutex(NULL, FALSE, NULL);
+#else
+	pthread_mutex_init(env->me_rpmutex, NULL);
+#endif
+#endif
 
 	return MDB_SUCCESS;
 
@@ -5011,6 +5010,13 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 			  (env->me_dirty_list = calloc(MDB_IDL_UM_SIZE, sizeof(MDB_ID2)))))
 			rc = ENOMEM;
 	}
+#ifdef MDB_VL32
+	if (!rc) {
+		env->me_rpages = calloc(MDB_RPAGE_SIZE, sizeof(MDB_ID3));
+		if (!env->me_rpages)
+			rc = ENOMEM;
+	}
+#endif
 	env->me_flags = flags |= MDB_ENV_ACTIVE;
 	if (rc)
 		goto leave;
@@ -5151,6 +5157,9 @@ mdb_env_close0(MDB_env *env, int excl)
 	free(env->me_path);
 	free(env->me_dirty_list);
 	free(env->me_txn0);
+#ifdef MDB_VL32
+	free(env->me_rpages);
+#endif
 	mdb_midl_free(env->me_free_pgs);
 
 	if (env->me_flags & MDB_ENV_TXKEY) {
@@ -5236,6 +5245,13 @@ mdb_env_close0(MDB_env *env, int excl)
 #endif
 		(void) close(env->me_lfd);
 	}
+#ifdef MDB_VL32
+#ifdef _WIN32
+	if (env->me_rpmutex) CloseHandle(env->me_rpmutex);
+#else
+	pthread_mutex_destroy(env->me_rpmutex);
+#endif
+#endif
 
 	env->me_flags &= ~(MDB_ENV_ACTIVE|MDB_ENV_TXKEY);
 }
@@ -5502,6 +5518,158 @@ mdb_cursor_push(MDB_cursor *mc, MDB_page *mp)
 	return MDB_SUCCESS;
 }
 
+#ifdef MDB_VL32
+/** Map a read-only page.
+ * There are two levels of tracking in use, a per-txn list and a per-env list.
+ * ref'ing and unref'ing the per-txn list is faster since it requires no
+ * locking. Pages are cached in the per-env list for global reuse, and a lock
+ * is required. Pages are not immediately unmapped when their refcnt goes to
+ * zero; they hang around in case they will be reused again soon.
+ *
+ * When the per-txn list gets full, all pages with refcnt=0 are purged from the
+ * list and their refcnts in the per-env list are decremented.
+ *
+ * When the per-env list gets full, all pages with refcnt=0 are purged from the
+ * list and their pages are unmapped.
+ *
+ * If purging doesn't free any slots, filling the per-txn list will return
+ * MDB_TXN_FULL, and filling the per-env list returns MDB_MAP_FULL.
+ *
+ * Reference tracking in a txn is imperfect, pages can linger with non-zero
+ * refcnt even without active references. It was deemed to be too invasive
+ * to add unrefs in every required location. However, all pages are unref'd
+ * at the end of the transaction. This guarantees that no stale references
+ * linger in the per-env list.
+ *
+ * @param[in] txn the transaction for this access.
+ * @param[in] pgno the page number for the page to retrieve.
+ * @param[out] ret address of a pointer where the page's address will be stored.
+ * @return 0 on success, non-zero on failure.
+ */
+static int
+mdb_rpage_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret)
+{
+	MDB_env *env = txn->mt_env;
+	MDB_page *p;
+	MDB_ID3L rl = txn->mt_rpages;
+	MDB_ID3L el = env->me_rpages;
+	unsigned x = mdb_mid3l_search(rl, pgno);
+	if (x <= rl[0].mid && rl[x].mid == pgno) {
+		rl[x].mref++;
+		*ret = rl[x].mptr;
+		return MDB_SUCCESS;
+	}
+
+	if (rl[0].mid >= MDB_IDL_UM_MAX) {
+		unsigned i, y = 0;
+		/* purge unref'd pages from our list and unref in env */
+		LOCK_MUTEX0(env->me_rpmutex);
+		for (i=1; i<rl[0].mid; i++) {
+			if (!rl[i].mref) {
+				x = mdb_mid3l_search(el, rl[i].mid);
+				el[x].mref--;
+				if (!y) y = i;
+			}
+		}
+		UNLOCK_MUTEX(env->me_rpmutex);
+		if (!y)
+			return MDB_TXN_FULL;
+		for (i=y+1; i<= rl[0].mid; i++)
+			if (rl[i].mref)
+				rl[y++] = rl[i];
+		rl[0].mid = y-1;
+	}
+	if (rl[0].mid < MDB_IDL_UM_SIZE) {
+		MDB_ID3 id3;
+		size_t len = env->me_psize;
+		int np = 1;
+		/* search for page in env */
+		LOCK_MUTEX0(env->me_rpmutex);
+		x = mdb_mid3l_search(el, pgno);
+		if (x <= el[0].mid && el[x].mid == pgno) {
+			p = el[x].mptr;
+			el[x].mref++;
+			UNLOCK_MUTEX(env->me_rpmutex);
+			goto found;
+		}
+		if (el[0].mid >= MDB_RPAGE_MAX) {
+			/* purge unref'd pages */
+			unsigned i, y = 0;
+			for (i=1; i<el[0].mid; i++) {
+				if (!el[i].mref) {
+					if (!y) y = i;
+#ifdef _WIN32
+					UnmapViewOfFile(el[i].mptr);
+#else
+					munmap(el[i].mptr, env->me_psize * el[i].mcnt);
+#endif
+				}
+			}
+			if (!y) {
+				UNLOCK_MUTEX(env->me_rpmutex);
+				return MDB_MAP_FULL;
+			}
+			for (i=y+1; i<= el[0].mid; i++)
+				if (el[i].mref)
+					el[y++] = el[i];
+			el[0].mid = y-1;
+		}
+#ifdef _WIN32
+		off_t off = pgno * env->me_psize;
+		DWORD lo, hi;
+		lo = off & 0xffffffff;
+		hi = off >> 16 >> 16;
+		p = MapViewOfFile(env->me_fmh, FILE_MAP_READ, hi, lo, len);
+		if (p == NULL) {
+fail:
+			UNLOCK_MUTEX(env->me_rpmutex);
+			return ErrCode();
+		}
+		if (IS_OVERFLOW(p)) {
+			np = p->mp_pages;
+			UnmapViewOfFile(p);
+			len *= np;
+			p = MapViewOfFile(env->me_fmh, FILE_MAP_READ, hi, lo, len);
+			if (p == NULL)
+				goto fail;
+		}
+#else
+		off_t off = pgno * env->me_psize;
+		p = mmap(NULL, len, PROT_READ, MAP_SHARED, env->me_fd, off);
+		if (p == MAP_FAILED) {
+fail:
+			UNLOCK_MUTEX(env->me_rpmutex);
+			return errno;
+		}
+		if (IS_OVERFLOW(p)) {
+			np = p->mp_pages;
+			munmap(p, len);
+			len *= np;
+			p = mmap(NULL, len, PROT_READ, MAP_SHARED, env->me_fd, off);
+			if (p == MAP_FAILED)
+				goto fail;
+		}
+#endif
+		id3.mid = pgno;
+		id3.mptr = p;
+		id3.mcnt = np;
+		id3.mref = 1;
+		mdb_mid3l_insert(el, &id3);
+		UNLOCK_MUTEX(env->me_rpmutex);
+found:
+		id3.mid = pgno;
+		id3.mptr = p;
+		id3.mcnt = np;
+		id3.mref = 1;
+		mdb_mid3l_insert(rl, &id3);
+	} else {
+		return MDB_TXN_FULL;
+	}
+	*ret = p;
+	return MDB_SUCCESS;
+}
+#endif
+
 /** Find the address of the page corresponding to a given page number.
  * @param[in] txn the transaction for this access.
  * @param[in] pgno the page number for the page to retrieve.
@@ -5532,11 +5700,13 @@ mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret, int *lvl)
 				x = mdb_midl_search(tx2->mt_spill_pgs, pn);
 				if (x <= tx2->mt_spill_pgs[0] && tx2->mt_spill_pgs[x] == pn) {
 #ifdef MDB_VL32
-					goto mapvl32;
+					int rc = mdb_rpage_get(txn, pgno, &p);
+					if (rc)
+						return rc;
 #else
 					p = (MDB_page *)(env->me_map + env->me_psize * pgno);
-					goto done;
 #endif
+					goto done;
 				}
 			}
 			if (dl[0].mid) {
@@ -5553,59 +5723,10 @@ mdb_page_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret, int *lvl)
 	if (pgno < txn->mt_next_pgno) {
 		level = 0;
 #ifdef MDB_VL32
-mapvl32:
 		{
-			unsigned x = mdb_mid3l_search(txn->mt_rpages, pgno);
-			if (x <= txn->mt_rpages[0].mid && txn->mt_rpages[x].mid == pgno) {
-				p = txn->mt_rpages[x].mptr;
-				txn->mt_rpages[x].mref++;
-				goto done;
-			}
-			if (txn->mt_rpages[0].mid >= MDB_IDL_UM_MAX) {
-				/* unmap some other page */
-				mdb_tassert(txn, 0);
-			}
-			if (txn->mt_rpages[0].mid < MDB_IDL_UM_SIZE) {
-				MDB_ID3 id3;
-				size_t len = env->me_psize;
-				int np = 1;
-#ifdef _WIN32
-				off_t off = pgno * env->me_psize;
-				DWORD lo, hi;
-				lo = off & 0xffffffff;
-				hi = off >> 16 >> 16;
-				p = MapViewOfFile(env->me_fmh, FILE_MAP_READ, hi, lo, len);
-				if (p == NULL)
-					return ErrCode();
-				if (IS_OVERFLOW(p)) {
-					np = p->mp_pages;
-					UnmapViewOfFile(p);
-					len *= np;
-					p = MapViewOfFile(env->me_fmh, FILE_MAP_READ, hi, lo, len);
-					if (p == NULL)
-						return ErrCode();
-				}
-#else
-				off_t off = pgno * env->me_psize;
-				p = mmap(NULL, len, PROT_READ, MAP_SHARED, env->me_fd, off);
-				if (p == MAP_FAILED)
-					return errno;
-				if (IS_OVERFLOW(p)) {
-					np = p->mp_pages;
-					munmap(p, len);
-					len *= np;
-					p = mmap(NULL, len, PROT_READ, MAP_SHARED, env->me_fd, off);
-					if (p == MAP_FAILED)
-						return errno;
-				}
-#endif
-				id3.mid = pgno;
-				id3.mptr = p;
-				id3.mcnt = np;
-				id3.mref = 1;
-				mdb_mid3l_insert(txn->mt_rpages, &id3);
-				goto done;
-			}
+			int rc = mdb_rpage_get(txn, pgno, &p);
+			if (rc)
+				return rc;
 		}
 #else
 		p = (MDB_page *)(env->me_map + env->me_psize * pgno);
