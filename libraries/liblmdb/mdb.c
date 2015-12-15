@@ -4597,7 +4597,9 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 
 #ifdef _WIN32
 	wchar_t *wlpath;
-	utf8_to_utf16(lpath, -1, &wlpath, NULL);
+	rc = utf8_to_utf16(lpath, -1, &wlpath, NULL);
+	if (rc)
+		return rc;
 	env->me_lfd = CreateFileW(wlpath, GENERIC_READ|GENERIC_WRITE,
 		FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_ALWAYS,
 		FILE_ATTRIBUTE_NORMAL, NULL);
@@ -4918,7 +4920,9 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 		len = OPEN_ALWAYS;
 	}
 	mode = FILE_ATTRIBUTE_NORMAL;
-	utf8_to_utf16(dpath, -1, &wpath, NULL);
+	rc = utf8_to_utf16(dpath, -1, &wpath, NULL);
+	if (rc)
+		goto leave;
 	env->me_fd = CreateFileW(wpath, oflags, FILE_SHARE_READ|FILE_SHARE_WRITE,
 		NULL, len, mode, NULL);
 	free(wpath);
@@ -4950,7 +4954,9 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 			 */
 #ifdef _WIN32
 			len = OPEN_EXISTING;
-			utf8_to_utf16(dpath, -1, &wpath, NULL);
+			rc = utf8_to_utf16(dpath, -1, &wpath, NULL);
+			if (rc)
+				goto leave;
 			env->me_mfd = CreateFileW(wpath, oflags,
 				FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, len,
 				mode | FILE_FLAG_WRITE_THROUGH, NULL);
@@ -9455,7 +9461,9 @@ mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
 	 * already in the OS cache.
 	 */
 #ifdef _WIN32
-	utf8_to_utf16(lpath, -1, &wpath, NULL);
+	rc = utf8_to_utf16(lpath, -1, &wpath, NULL);
+	if (rc)
+		return rc;
 	newfd = CreateFileW(wpath, GENERIC_WRITE, 0, NULL, CREATE_NEW,
 				FILE_FLAG_NO_BUFFERING|FILE_FLAG_WRITE_THROUGH, NULL);
 	free(wpath);
@@ -10187,6 +10195,8 @@ static int utf8_to_utf16(const char *src, int srcsize, wchar_t **dst, int *dstsi
 	if (need == 0)
 		return EINVAL;
 	result = malloc(sizeof(wchar_t) * need);
+	if (!result)
+		return ENOMEM;
 	MultiByteToWideChar(CP_UTF8, 0, src, srcsize, result, need);
 	if (dstsize)
 		*dstsize = need;
