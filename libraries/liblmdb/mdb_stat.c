@@ -23,7 +23,11 @@
 #define	Z	"z"
 #endif
 #ifdef MDB_VL32
+#ifdef _WIN32
+#define	Y	"I64"
+#else
 #define	Y	"ll"
+#endif
 #else
 #define Y	Z
 #endif

@@ -245,7 +245,7 @@ union semun {
 #define ESECT
 #endif
 
-#ifdef _MSC_VER
+#ifdef _WIN32
 #define CALL_CONV WINAPI
 #else
 #define CALL_CONV
@@ -458,7 +458,11 @@ typedef pthread_mutex_t mdb_mutex_t[1], *mdb_mutexref_t;
 #endif
 
 #ifdef MDB_VL32
+#ifdef _WIN32
+#define	Y	"I64"
+#else
 #define	Y	"ll"
+#endif
 #else
 #define Y	Z
 #endif
@@ -4096,7 +4100,7 @@ mdb_env_map(MDB_env *env, void *addr)
 	int access = SECTION_MAP_READ;
 	HANDLE mh;
 	void *map;
-	size_t msize = 0;
+	SIZE_T msize = 0;
 	ULONG pageprot = PAGE_READONLY;
 	if (flags & MDB_WRITEMAP) {
 		access |= SECTION_MAP_WRITE;
@@ -5547,17 +5551,32 @@ mdb_cursor_push(MDB_cursor *mc, MDB_page *mp)
  * @return 0 on success, non-zero on failure.
  */
 static int
-mdb_rpage_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret)
+mdb_rpage_get(MDB_txn *txn, pgno_t pg0, MDB_page **ret)
 {
 	MDB_env *env = txn->mt_env;
 	MDB_page *p;
 	MDB_ID3L rl = txn->mt_rpages;
 	MDB_ID3L el = env->me_rpages;
-	unsigned x = mdb_mid3l_search(rl, pgno);
+	unsigned x;
+	pgno_t pgno;
+#ifdef _WIN32
+	/* Even though Windows uses 4KB pages, all mappings must begin
+	 * on 64KB boundaries. So we round off all pgnos to the
+	 * appropriate boundary and then offset the pointer just
+	 * before returning.
+	 *
+	 * FIXME: we need to do special handling for overflow pages.
+	 * Most likely by keeping a separate list for them.
+	 */
+	pgno = pg0 / 16;
+#else
+	pgno = pg0;
+#endif
+	x = mdb_mid3l_search(rl, pgno);
 	if (x <= rl[0].mid && rl[x].mid == pgno) {
+		p = rl[x].mptr;
 		rl[x].mref++;
-		*ret = rl[x].mptr;
-		return MDB_SUCCESS;
+		goto ok;
 	}
 
 	if (rl[0].mid >= MDB_IDL_UM_MAX) {
@@ -5615,16 +5634,22 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pgno, MDB_page **ret)
 			el[0].mid = y-1;
 		}
 #ifdef _WIN32
-		off_t off = pgno * env->me_psize;
-		DWORD lo, hi;
-		lo = off & 0xffffffff;
-		hi = off >> 16 >> 16;
-		p = MapViewOfFile(env->me_fmh, FILE_MAP_READ, hi, lo, len);
-		if (p == NULL) {
+		LARGE_INTEGER off;
+		SIZE_T mlen;
+		int rc;
+		off.QuadPart = pgno * env->me_psize * 16;
+		p = NULL;
+		np = 16;
+		len *= 16;
+		mlen = len;
+		rc = NtMapViewOfSection(env->me_fmh, GetCurrentProcess(), (void **)&p, 0,
+			mlen, &off, &mlen, ViewUnmap, MEM_RESERVE, PAGE_READONLY);
+		if (rc) {
 fail:
 			UNLOCK_MUTEX(env->me_rpmutex);
-			return ErrCode();
+			return rc;
 		}
+#if 0
 		if (IS_OVERFLOW(p)) {
 			np = p->mp_pages;
 			UnmapViewOfFile(p);
@@ -5633,6 +5658,7 @@ fail:
 			if (p == NULL)
 				goto fail;
 		}
+#endif
 #else
 		off_t off = pgno * env->me_psize;
 		p = mmap(NULL, len, PROT_READ, MAP_SHARED, env->me_fd, off);
@@ -5665,7 +5691,16 @@ found:
 	} else {
 		return MDB_TXN_FULL;
 	}
+ok:
+#ifdef _WIN32
+	{
+		char *v = (char *)p;
+		v += (pg0 & 0x0f) * env->me_psize;
+		*ret = (MDB_page *)v;
+	}
+#else
 	*ret = p;
+#endif
 	return MDB_SUCCESS;
 }
 #endif
