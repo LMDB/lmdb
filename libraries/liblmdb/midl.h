@@ -190,8 +190,8 @@ int mdb_mid2l_append( MDB_ID2L ids, MDB_ID2 *id );
 typedef struct MDB_ID3 {
 	MDB_ID mid;		/**< The ID */
 	void *mptr;		/**< The pointer */
-	int mcnt;		/**< Number of pages */
-	int mref;		/**< Refcounter */
+	unsigned int mcnt;		/**< Number of pages */
+	unsigned int mref;		/**< Refcounter */
 } MDB_ID3;
 
 typedef MDB_ID3 *MDB_ID3L;
