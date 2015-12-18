@@ -1926,12 +1926,18 @@ mdb_dlist_free(MDB_txn *txn)
 static void
 mdb_page_unref(MDB_txn *txn, MDB_page *mp)
 {
-	unsigned x;
+	pgno_t pgno;
+	MDB_ID3L tl = txn->mt_rpages;
+	unsigned x, rem;
 	if (mp->mp_flags & (P_SUBP|P_DIRTY))
 		return;
-	x = mdb_mid3l_search(txn->mt_rpages, mp->mp_pgno);
-	if (txn->mt_rpages[x].mref)
-		txn->mt_rpages[x].mref--;
+	rem = mp->mp_pgno & (MDB_RPAGE_CHUNK-1);
+	pgno = mp->mp_pgno ^ rem;
+	x = mdb_mid3l_search(tl, pgno);
+	if (x != tl[0].mid && tl[x+1].mid == mp->mp_pgno)
+		x++;
+	if (tl[x].mref)
+		tl[x].mref--;
 }
 #define MDB_PAGE_UNREF(txn, mp)	mdb_page_unref(txn, mp)
 
@@ -3201,7 +3207,12 @@ mdb_txn_end(MDB_txn *txn, unsigned mode)
 				munmap(tl[i].mptr, tl[i].mcnt * env->me_psize);
 			} else {
 				x = mdb_mid3l_search(el, tl[i].mid);
-				el[x].mref--;
+				if (tl[i].mptr == el[x].mptr) {
+					el[x].mref--;
+				} else {
+					/* another tmp overflow page */
+					munmap(tl[i].mptr, tl[i].mcnt * env->me_psize);
+				}
 			}
 		}
 		UNLOCK_MUTEX(env->me_rpmutex);
@@ -5600,7 +5611,7 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pg0, MDB_page **ret)
 	MDB_ID3 id3;
 	unsigned x, rem;
 	pgno_t pgno;
-	int rc;
+	int rc, retries = 1;
 #ifdef _WIN32
 	LARGE_INTEGER off;
 	SIZE_T len;
@@ -5638,17 +5649,35 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pg0, MDB_page **ret)
 			MAP(rc, env, id3.mptr, len, off);
 			if (rc)
 				return rc;
-			if (!tl[x].mref) {
-				munmap(tl[x].mptr, tl[x].mcnt);
-				tl[x].mptr = id3.mptr;
-				tl[x].mcnt = id3.mcnt;
-			} else {
+			/* check for local-only page */
+			if (rem) {
+				mdb_tassert(txn, tl[x].mid != pg0);
 				/* hope there's room to insert this locally.
 				 * setting mid here tells later code to just insert
 				 * this id3 instead of searching for a match.
 				 */
 				id3.mid = pg0;
 				goto notlocal;
+			} else {
+				/* ignore the mapping we got from env, use new one */
+				tl[x].mptr = id3.mptr;
+				tl[x].mcnt = id3.mcnt;
+				/* if no active ref, see if we can replace in env */
+				if (!tl[x].mref) {
+					unsigned i;
+					LOCK_MUTEX0(env->me_rpmutex);
+					i = mdb_mid3l_search(el, tl[x].mid);
+					if (el[i].mref == 1) {
+						/* just us, replace it */
+						munmap(el[i].mptr, el[i].mcnt * env->me_psize);
+						el[i].mptr = tl[x].mptr;
+						el[i].mcnt = tl[x].mcnt;
+					} else {
+						/* there are others, remove ourself */
+						el[i].mref--;
+					}
+					UNLOCK_MUTEX(env->me_rpmutex);
+				}
 			}
 		}
 		id3.mptr = tl[x].mptr;
@@ -5659,9 +5688,11 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pg0, MDB_page **ret)
 
 notlocal:
 	if (tl[0].mid >= MDB_TRPAGE_MAX - txn->mt_rpcheck) {
-		unsigned i, y = 0;
+		unsigned i, y;
 		/* purge unref'd pages from our list and unref in env */
 		LOCK_MUTEX0(env->me_rpmutex);
+retry:
+		y = 0;
 		for (i=1; i<tl[0].mid; i++) {
 			if (!tl[i].mref) {
 				if (!y) y = i;
@@ -5686,7 +5717,7 @@ notlocal:
 			tl[0].mid = y-1;
 			if (!txn->mt_rpcheck)
 				txn->mt_rpcheck = 1;
-			else if (txn->mt_rpcheck < MDB_TRPAGE_SIZE/2)
+			while (txn->mt_rpcheck < tl[0].mid && txn->mt_rpcheck < MDB_TRPAGE_SIZE/2)
 				txn->mt_rpcheck *= 2;
 		}
 	}
@@ -5737,6 +5768,12 @@ notlocal:
 				}
 			}
 			if (!y) {
+				if (retries) {
+					/* see if we can unref some local pages */
+					retries--;
+					id3.mid = 0;
+					goto retry;
+				}
 				if (el[0].mid >= MDB_ERPAGE_MAX) {
 					UNLOCK_MUTEX(env->me_rpmutex);
 					return MDB_MAP_FULL;
@@ -5749,7 +5786,7 @@ notlocal:
 				el[0].mid = y-1;
 				if (!env->me_rpcheck)
 					env->me_rpcheck = 1;
-				else if (env->me_rpcheck < MDB_ERPAGE_SIZE/2)
+				while (env->me_rpcheck < el[0].mid && env->me_rpcheck < MDB_ERPAGE_SIZE/2)
 					env->me_rpcheck *= 2;
 			}
 		}
@@ -6202,8 +6239,10 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 #ifdef MDB_VL32
 	{
 		int i;
-		/* leave the final page containing the data item, unref the rest */
-		for (i=0; i<mc.mc_top; i++)
+		/* unref all the pages - caller must copy the data
+		 * before doing anything else
+		 */
+		for (i=0; i<mc.mc_snum; i++)
 			MDB_PAGE_UNREF(txn, mc.mc_pg[i]);
 	}
 #endif
