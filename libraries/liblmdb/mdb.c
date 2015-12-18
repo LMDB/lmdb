@@ -1217,6 +1217,9 @@ struct MDB_txn {
 	 * reduce the frequency of mmap/munmap calls.
 	 */
 #define MDB_RPAGE_CHUNK	16
+#define MDB_TRPAGE_SIZE	4096
+#define MDB_TRPAGE_MAX	(MDB_TRPAGE_SIZE-1)
+	unsigned int mt_rpcheck;
 #endif
 	/**	Number of DB records in use, or 0 when the txn is finished.
 	 *	This number only ever increments until the txn finishes; we
@@ -1394,8 +1397,9 @@ struct MDB_env {
 #ifdef MDB_VL32
 	MDB_ID3L	me_rpages;
 	mdb_mutex_t	me_rpmutex;
-#define MDB_RPAGE_SIZE	(MDB_IDL_UM_SIZE*4)
-#define MDB_RPAGE_MAX	(MDB_RPAGE_SIZE-1)
+#define MDB_ERPAGE_SIZE	16384
+#define MDB_ERPAGE_MAX	(MDB_ERPAGE_SIZE-1)
+	unsigned int me_rpcheck;
 #endif
 	void		*me_userctx;	 /**< User-settable context */
 	MDB_assert_func *me_assert_func; /**< Callback for assertion failures */
@@ -2992,11 +2996,13 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 	}
 #ifdef MDB_VL32
 	if (!parent) {
-		txn->mt_rpages = calloc(MDB_IDL_UM_SIZE, sizeof(MDB_ID3));
+		txn->mt_rpages = malloc(MDB_TRPAGE_SIZE * sizeof(MDB_ID3));
 		if (!txn->mt_rpages) {
 			free(txn);
 			return ENOMEM;
 		}
+		txn->mt_rpages[0].mid = 0;
+		txn->mt_rpcheck = MDB_TRPAGE_SIZE/2;
 	}
 #endif
 	txn->mt_dbxs = env->me_dbxs;	/* static */
@@ -3186,22 +3192,22 @@ mdb_txn_end(MDB_txn *txn, unsigned mode)
 	}
 #ifdef MDB_VL32
 	if (!txn->mt_parent) {
-		MDB_ID3L el = env->me_rpages, rl = txn->mt_rpages;
-		unsigned i, x, n = rl[0].mid;
+		MDB_ID3L el = env->me_rpages, tl = txn->mt_rpages;
+		unsigned i, x, n = tl[0].mid;
 		LOCK_MUTEX0(env->me_rpmutex);
 		for (i = 1; i <= n; i++) {
-			if (rl[i].mid & (MDB_RPAGE_CHUNK-1)) {
+			if (tl[i].mid & (MDB_RPAGE_CHUNK-1)) {
 				/* tmp overflow pages that we didn't share in env */
-				munmap(rl[i].mptr, rl[i].mcnt * env->me_psize);
+				munmap(tl[i].mptr, tl[i].mcnt * env->me_psize);
 			} else {
-				x = mdb_mid3l_search(el, rl[i].mid);
+				x = mdb_mid3l_search(el, tl[i].mid);
 				el[x].mref--;
 			}
 		}
 		UNLOCK_MUTEX(env->me_rpmutex);
-		rl[0].mid = 0;
+		tl[0].mid = 0;
 		if (mode & MDB_END_FREE)
-			free(rl);
+			free(tl);
 	}
 #endif
 	if (mode & MDB_END_FREE) {
@@ -5039,9 +5045,11 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 	}
 #ifdef MDB_VL32
 	if (!rc) {
-		env->me_rpages = calloc(MDB_RPAGE_SIZE, sizeof(MDB_ID3));
+		env->me_rpages = malloc(MDB_ERPAGE_SIZE * sizeof(MDB_ID3));
 		if (!env->me_rpages)
 			rc = ENOMEM;
+		env->me_rpages[0].mid = 0;
+		env->me_rpcheck = MDB_ERPAGE_SIZE/2;
 	}
 #endif
 	env->me_flags = flags |= MDB_ENV_ACTIVE;
@@ -5139,11 +5147,13 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 				txn->mt_dbflags = (unsigned char *)(txn->mt_dbiseqs + env->me_maxdbs);
 				txn->mt_env = env;
 #ifdef MDB_VL32
-				txn->mt_rpages = calloc(MDB_IDL_UM_SIZE, sizeof(MDB_ID3));
+				txn->mt_rpages = malloc(MDB_TRPAGE_SIZE * sizeof(MDB_ID3));
 				if (!txn->mt_rpages) {
 					free(txn);
 					rc = ENOMEM;
 				}
+				txn->mt_rpages[0].mid = 0;
+				txn->mt_rpcheck = MDB_TRPAGE_SIZE/2;
 #endif
 				txn->mt_dbxs = env->me_dbxs;
 				txn->mt_flags = MDB_TXN_FINISHED;
@@ -5585,7 +5595,7 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pg0, MDB_page **ret)
 {
 	MDB_env *env = txn->mt_env;
 	MDB_page *p;
-	MDB_ID3L rl = txn->mt_rpages;
+	MDB_ID3L tl = txn->mt_rpages;
 	MDB_ID3L el = env->me_rpages;
 	MDB_ID3 id3;
 	unsigned x, rem;
@@ -5615,23 +5625,23 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pg0, MDB_page **ret)
 	pgno = pg0 ^ rem;
 
 	id3.mid = 0;
-	x = mdb_mid3l_search(rl, pgno);
-	if (x <= rl[0].mid && rl[x].mid == pgno) {
-		if (x != rl[0].mid && rl[x+1].mid == pg0)
+	x = mdb_mid3l_search(tl, pgno);
+	if (x <= tl[0].mid && tl[x].mid == pgno) {
+		if (x != tl[0].mid && tl[x+1].mid == pg0)
 			x++;
 		/* check for overflow size */
-		p = (MDB_page *)((char *)rl[x].mptr + rem * env->me_psize);
-		if (IS_OVERFLOW(p) && p->mp_pages + rem > rl[x].mcnt) {
+		p = (MDB_page *)((char *)tl[x].mptr + rem * env->me_psize);
+		if (IS_OVERFLOW(p) && p->mp_pages + rem > tl[x].mcnt) {
 			id3.mcnt = p->mp_pages + rem;
 			len = id3.mcnt * env->me_psize;
 			SET_OFF(off, pgno * env->me_psize);
 			MAP(rc, env, id3.mptr, len, off);
 			if (rc)
 				return rc;
-			if (!rl[x].mref) {
-				munmap(rl[x].mptr, rl[x].mcnt);
-				rl[x].mptr = id3.mptr;
-				rl[x].mcnt = id3.mcnt;
+			if (!tl[x].mref) {
+				munmap(tl[x].mptr, tl[x].mcnt);
+				tl[x].mptr = id3.mptr;
+				tl[x].mcnt = id3.mcnt;
 			} else {
 				/* hope there's room to insert this locally.
 				 * setting mid here tells later code to just insert
@@ -5641,38 +5651,46 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pg0, MDB_page **ret)
 				goto notlocal;
 			}
 		}
-		id3.mptr = rl[x].mptr;
-		id3.mcnt = rl[x].mcnt;
-		rl[x].mref++;
+		id3.mptr = tl[x].mptr;
+		id3.mcnt = tl[x].mcnt;
+		tl[x].mref++;
 		goto ok;
 	}
 
 notlocal:
-	if (rl[0].mid >= MDB_IDL_UM_MAX) {
+	if (tl[0].mid >= MDB_TRPAGE_MAX - txn->mt_rpcheck) {
 		unsigned i, y = 0;
 		/* purge unref'd pages from our list and unref in env */
 		LOCK_MUTEX0(env->me_rpmutex);
-		for (i=1; i<rl[0].mid; i++) {
-			if (!rl[i].mref) {
+		for (i=1; i<tl[0].mid; i++) {
+			if (!tl[i].mref) {
 				if (!y) y = i;
 				/* tmp overflow pages don't go to env */
-				if (rl[i].mid & (MDB_RPAGE_CHUNK-1)) {
-					munmap(rl[i].mptr, rl[i].mcnt * env->me_psize);
+				if (tl[i].mid & (MDB_RPAGE_CHUNK-1)) {
+					munmap(tl[i].mptr, tl[i].mcnt * env->me_psize);
 					continue;
 				}
-				x = mdb_mid3l_search(el, rl[i].mid);
+				x = mdb_mid3l_search(el, tl[i].mid);
 				el[x].mref--;
 			}
 		}
 		UNLOCK_MUTEX(env->me_rpmutex);
-		if (!y)
-			return MDB_TXN_FULL;
-		for (i=y+1; i<= rl[0].mid; i++)
-			if (rl[i].mref)
-				rl[y++] = rl[i];
-		rl[0].mid = y-1;
+		if (!y) {
+			if (tl[0].mid >= MDB_TRPAGE_MAX)
+				return MDB_TXN_FULL;
+			txn->mt_rpcheck /= 2;
+		} else {
+			for (i=y+1; i<= tl[0].mid; i++)
+				if (tl[i].mref)
+					tl[y++] = tl[i];
+			tl[0].mid = y-1;
+			if (!txn->mt_rpcheck)
+				txn->mt_rpcheck = 1;
+			else if (txn->mt_rpcheck < MDB_TRPAGE_SIZE/2)
+				txn->mt_rpcheck *= 2;
+		}
 	}
-	if (rl[0].mid < MDB_IDL_UM_SIZE) {
+	if (tl[0].mid < MDB_TRPAGE_SIZE) {
 		id3.mref = 1;
 		if (id3.mid)
 			goto found;
@@ -5709,7 +5727,7 @@ notlocal:
 			UNLOCK_MUTEX(env->me_rpmutex);
 			goto found;
 		}
-		if (el[0].mid >= MDB_RPAGE_MAX) {
+		if (el[0].mid >= MDB_ERPAGE_MAX - env->me_rpcheck) {
 			/* purge unref'd pages */
 			unsigned i, y = 0;
 			for (i=1; i<el[0].mid; i++) {
@@ -5719,13 +5737,21 @@ notlocal:
 				}
 			}
 			if (!y) {
-				UNLOCK_MUTEX(env->me_rpmutex);
-				return MDB_MAP_FULL;
+				if (el[0].mid >= MDB_ERPAGE_MAX) {
+					UNLOCK_MUTEX(env->me_rpmutex);
+					return MDB_MAP_FULL;
+				}
+				env->me_rpcheck /= 2;
+			} else {
+				for (i=y+1; i<= el[0].mid; i++)
+					if (el[i].mref)
+						el[y++] = el[i];
+				el[0].mid = y-1;
+				if (!env->me_rpcheck)
+					env->me_rpcheck = 1;
+				else if (env->me_rpcheck < MDB_ERPAGE_SIZE/2)
+					env->me_rpcheck *= 2;
 			}
-			for (i=y+1; i<= el[0].mid; i++)
-				if (el[i].mref)
-					el[y++] = el[i];
-			el[0].mid = y-1;
 		}
 		SET_OFF(off, pgno * env->me_psize);
 		MAP(rc, env, id3.mptr, len, off);
@@ -5764,7 +5790,7 @@ fail:
 		mdb_mid3l_insert(el, &id3);
 		UNLOCK_MUTEX(env->me_rpmutex);
 found:
-		mdb_mid3l_insert(rl, &id3);
+		mdb_mid3l_insert(tl, &id3);
 	} else {
 		return MDB_TXN_FULL;
 	}
