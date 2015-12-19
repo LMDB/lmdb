@@ -186,6 +186,20 @@ int mdb_mid2l_insert( MDB_ID2L ids, MDB_ID2 *id );
 	 */
 int mdb_mid2l_append( MDB_ID2L ids, MDB_ID2 *id );
 
+#ifdef MDB_VL32
+typedef struct MDB_ID3 {
+	MDB_ID mid;		/**< The ID */
+	void *mptr;		/**< The pointer */
+	unsigned int mcnt;		/**< Number of pages */
+	unsigned int mref;		/**< Refcounter */
+} MDB_ID3;
+
+typedef MDB_ID3 *MDB_ID3L;
+
+unsigned mdb_mid3l_search( MDB_ID3L ids, MDB_ID id );
+int mdb_mid3l_insert( MDB_ID3L ids, MDB_ID3 *id );
+
+#endif /* MDB_VL32 */
 /** @} */
 /** @} */
 #ifdef __cplusplus
