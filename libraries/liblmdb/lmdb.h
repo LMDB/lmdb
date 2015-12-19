@@ -40,6 +40,9 @@
  *	corrupt the database. Of course if your application code is known to
  *	be bug-free (...) then this is not an issue.
  *
+ *	If this is your first time using a transactional embedded key/value
+ *	store, you may find the \ref starting page to be helpful.
+ *
  *	@section caveats_sec Caveats
  *	Troubleshooting the lock file, plus semaphores on BSD systems:
  *
