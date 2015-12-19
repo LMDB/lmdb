@@ -4162,7 +4162,7 @@ mdb_env_map(MDB_env *env, void *addr)
 		return rc;
 	map = addr;
 #ifdef MDB_VL32
-	msize = 2 * env->me_psize;
+	msize = NUM_METAS * env->me_psize;
 #endif
 	rc = NtMapViewOfSection(mh, GetCurrentProcess(), &map, 0, 0, NULL, &msize, ViewUnmap, alloctype, pageprot);
 #ifdef MDB_VL32
@@ -5239,7 +5239,7 @@ mdb_env_close0(MDB_env *env, int excl)
 
 	if (env->me_map) {
 #ifdef MDB_VL32
-		munmap(env->me_map, 2*env->me_psize);
+		munmap(env->me_map, NUM_METAS*env->me_psize);
 #else
 		munmap(env->me_map, env->me_mapsize);
 #endif
