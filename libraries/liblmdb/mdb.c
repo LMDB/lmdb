@@ -198,7 +198,7 @@ typedef SSIZE_T	ssize_t;
 #define ESECT
 #endif
 
-#ifdef _MSC_VER
+#ifdef _WIN32
 #define CALL_CONV WINAPI
 #else
 #define CALL_CONV
