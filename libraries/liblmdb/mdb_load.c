@@ -43,6 +43,15 @@ static MDB_val kbuf, dbuf;
 #else
 #define Z	"z"
 #endif
+#ifdef MDB_VL32
+#ifdef _WIN32
+#define	Y	"I64"
+#else
+#define	Y	"ll"
+#endif
+#else
+#define Y	Z
+#endif
 
 #define STRLENOF(s)	(sizeof(s)-1)
 
@@ -112,7 +121,7 @@ static void readhdr(void)
 			int i;
 			ptr = memchr(dbuf.mv_data, '\n', dbuf.mv_size);
 			if (ptr) *ptr = '\0';
-			i = sscanf((char *)dbuf.mv_data+STRLENOF("mapsize="), "%" Z "u", &info.me_mapsize);
+			i = sscanf((char *)dbuf.mv_data+STRLENOF("mapsize="), "%" Y "u", &info.me_mapsize);
 			if (i != 1) {
 				fprintf(stderr, "%s: line %" Z "d: invalid mapsize %s\n",
 					prog, lineno, (char *)dbuf.mv_data+STRLENOF("mapsize="));

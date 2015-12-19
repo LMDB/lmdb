@@ -25,6 +25,15 @@
 #else
 #define Z	"z"
 #endif
+#ifdef MDB_VL32
+#ifdef _WIN32
+#define	Y	"I64"
+#else
+#define	Y	"ll"
+#endif
+#else
+#define Y	Z
+#endif
 
 #define PRINT	1
 static int mode;
@@ -115,7 +124,7 @@ static int dumpit(MDB_txn *txn, MDB_dbi dbi, char *name)
 	if (name)
 		printf("database=%s\n", name);
 	printf("type=btree\n");
-	printf("mapsize=%" Z "u\n", info.me_mapsize);
+	printf("mapsize=%" Y "u\n", info.me_mapsize);
 	if (info.me_mapaddr)
 		printf("mapaddr=%p\n", info.me_mapaddr);
 	printf("maxreaders=%u\n", info.me_maxreaders);
