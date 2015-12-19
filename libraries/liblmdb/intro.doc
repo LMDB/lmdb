@@ -136,7 +136,7 @@ There can be multiple simultaneously active read-only transactions
 but only one that can write. Once a single read-write transaction
 is opened, all further attempts to begin one will block until the
 first one is committed or aborted. This has no effect on read-only
-transactions, however, and they may contine to be opened at any time.
+transactions, however, and they may continue to be opened at any time.
 
 @section dupkeys Duplicate Keys
 
