@@ -1308,6 +1308,9 @@ struct MDB_cursor {
 	unsigned int	mc_flags;	/**< @ref mdb_cursor */
 	MDB_page	*mc_pg[CURSOR_STACK];	/**< stack of pushed pages */
 	indx_t		mc_ki[CURSOR_STACK];	/**< stack of page indices */
+#ifdef MDB_VL32
+	MDB_page	*mc_ovpg;		/**< a referenced overflow page */
+#endif
 };
 
 	/** Context for sorted-dup records.
@@ -1953,6 +1956,10 @@ mdb_cursor_unref(MDB_cursor *mc)
 		return;
 	for (i=0; i<mc->mc_snum; i++)
 		mdb_page_unref(mc->mc_txn, mc->mc_pg[i]);
+	if (mc->mc_ovpg) {
+		mdb_page_unref(mc->mc_txn, mc->mc_ovpg);
+		mc->mc_ovpg = 0;
+	}
 	mc->mc_snum = mc->mc_top = 0;
 	mc->mc_pg[0] = NULL;
 	mc->mc_flags &= ~C_INITIALIZED;
@@ -5655,8 +5662,9 @@ mdb_cursor_push(MDB_cursor *mc, MDB_page *mp)
  * The caller must copy the data if it must be used later in the same txn.
  *
  * Also - our reference counting revolves around cursors, but overflow pages
- * aren't ever pointed to by a cursor. As such, they always remain referenced
- * in a txn until it ends.
+ * aren't pointed to by a cursor's page stack. We have to remember them
+ * explicitly, in the added mc_ovpg field. A single cursor can only hold a
+ * reference to one overflow page at a time.
  *
  * @param[in] txn the transaction for this access.
  * @param[in] pgno the page number for the page to retrieve.
@@ -6277,6 +6285,12 @@ mdb_node_read(MDB_cursor *mc, MDB_node *leaf, MDB_val *data)
 	pgno_t		 pgno;
 	int rc;
 
+#ifdef MDB_VL32
+	if (mc->mc_ovpg) {
+		MDB_PAGE_UNREF(mc->mc_txn, mc->mc_ovpg);
+		mc->mc_ovpg = 0;
+	}
+#endif
 	if (!F_ISSET(leaf->mn_flags, F_BIGDATA)) {
 		data->mv_size = NODEDSZ(leaf);
 		data->mv_data = NODEDATA(leaf);
@@ -6292,6 +6306,9 @@ mdb_node_read(MDB_cursor *mc, MDB_node *leaf, MDB_val *data)
 		return rc;
 	}
 	data->mv_data = METADATA(omp);
+#ifdef MDB_VL32
+	mc->mc_ovpg = omp;
+#endif
 
 	return MDB_SUCCESS;
 }
@@ -8057,6 +8074,9 @@ mdb_xcursor_init0(MDB_cursor *mc)
 	mx->mx_cursor.mc_dbflag = &mx->mx_dbflag;
 	mx->mx_cursor.mc_snum = 0;
 	mx->mx_cursor.mc_top = 0;
+#ifdef MDB_VL32
+	mx->mx_cursor.mc_ovpg = 0;
+#endif
 	mx->mx_cursor.mc_flags = C_SUB | (mc->mc_flags & (C_ORIG_RDONLY|C_WRITEMAP));
 	mx->mx_dbx.md_name.mv_size = 0;
 	mx->mx_dbx.md_name.mv_data = NULL;
@@ -8160,6 +8180,9 @@ mdb_cursor_init(MDB_cursor *mc, MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx)
 	mc->mc_top = 0;
 	mc->mc_pg[0] = 0;
 	mc->mc_ki[0] = 0;
+#ifdef MDB_VL32
+	mc->mc_ovpg = 0;
+#endif
 	mc->mc_flags = txn->mt_flags & (C_ORIG_RDONLY|C_WRITEMAP);
 	if (txn->mt_dbs[dbi].md_flags & MDB_DUPSORT) {
 		mdb_tassert(txn, mx != NULL);
@@ -8774,6 +8797,9 @@ mdb_cursor_copy(const MDB_cursor *csrc, MDB_cursor *cdst)
 	cdst->mc_snum = csrc->mc_snum;
 	cdst->mc_top = csrc->mc_top;
 	cdst->mc_flags = csrc->mc_flags;
+#ifdef MDB_VL32
+	cdst->mc_ovpg = csrc->mc_ovpg;
+#endif
 
 	for (i=0; i<csrc->mc_snum; i++) {
 		cdst->mc_pg[i] = csrc->mc_pg[i];
