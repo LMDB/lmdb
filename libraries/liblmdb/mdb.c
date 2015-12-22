@@ -5689,7 +5689,7 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pg0, MDB_page **ret)
 #define MAP(rc,env,addr,len,off)	\
 	addr = NULL; \
 	rc = NtMapViewOfSection(env->me_fmh, GetCurrentProcess(), &addr, 0, \
-		len, &off, &len, ViewUnmap, MEM_RESERVE, PAGE_READONLY)
+		len, &off, &len, ViewUnmap, (env->me_flags & MDB_RDONLY) ? 0 : MEM_RESERVE, PAGE_READONLY)
 #else
 	off_t off;
 	size_t len;
@@ -5803,9 +5803,13 @@ retry:
 		id3.mref = 1;
 		if (id3.mid)
 			goto found;
-		len = env->me_psize * MDB_RPAGE_CHUNK;
+		/* don't map past last written page */
+		if (pgno + MDB_RPAGE_CHUNK-1 > txn->mt_last_pgno)
+			id3.mcnt = txn->mt_last_pgno + 1 - pgno;
+		else
+			id3.mcnt = MDB_RPAGE_CHUNK;
+		len = id3.mcnt * env->me_psize;
 		id3.mid = pgno;
-		id3.mcnt = MDB_RPAGE_CHUNK;
 
 		/* search for page in env */
 		LOCK_MUTEX0(env->me_rpmutex);
