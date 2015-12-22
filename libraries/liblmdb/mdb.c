@@ -1403,7 +1403,7 @@ struct MDB_env {
 #endif
 #ifdef MDB_VL32
 	MDB_ID3L	me_rpages;	/**< like #mt_rpages, but global to env */
-	mdb_mutex_t	me_rpmutex;	/**< control access to #me_rpages */
+	pthread_mutex_t	me_rpmutex;	/**< control access to #me_rpages */
 #define MDB_ERPAGE_SIZE	16384
 #define MDB_ERPAGE_MAX	(MDB_ERPAGE_SIZE-1)
 	unsigned int me_rpcheck;
@@ -3227,7 +3227,7 @@ mdb_txn_end(MDB_txn *txn, unsigned mode)
 	if (!txn->mt_parent) {
 		MDB_ID3L el = env->me_rpages, tl = txn->mt_rpages;
 		unsigned i, x, n = tl[0].mid;
-		LOCK_MUTEX0(env->me_rpmutex);
+		pthread_mutex_lock(&env->me_rpmutex);
 		for (i = 1; i <= n; i++) {
 			if (tl[i].mid & (MDB_RPAGE_CHUNK-1)) {
 				/* tmp overflow pages that we didn't share in env */
@@ -3242,7 +3242,7 @@ mdb_txn_end(MDB_txn *txn, unsigned mode)
 				}
 			}
 		}
-		UNLOCK_MUTEX(env->me_rpmutex);
+		pthread_mutex_unlock(&env->me_rpmutex);
 		tl[0].mid = 0;
 		if (mode & MDB_END_FREE)
 			free(tl);
@@ -5016,7 +5016,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 #ifdef _WIN32
 	env->me_rpmutex = CreateMutex(NULL, FALSE, NULL);
 #else
-	pthread_mutex_init(env->me_rpmutex, NULL);
+	pthread_mutex_init(&env->me_rpmutex, NULL);
 #endif
 #endif
 
@@ -5352,7 +5352,7 @@ mdb_env_close0(MDB_env *env, int excl)
 #ifdef _WIN32
 	if (env->me_rpmutex) CloseHandle(env->me_rpmutex);
 #else
-	pthread_mutex_destroy(env->me_rpmutex);
+	pthread_mutex_destroy(&env->me_rpmutex);
 #endif
 #endif
 
@@ -5735,7 +5735,7 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pg0, MDB_page **ret)
 				/* if no active ref, see if we can replace in env */
 				if (!tl[x].mref) {
 					unsigned i;
-					LOCK_MUTEX0(env->me_rpmutex);
+					pthread_mutex_lock(&env->me_rpmutex);
 					i = mdb_mid3l_search(el, tl[x].mid);
 					if (el[i].mref == 1) {
 						/* just us, replace it */
@@ -5746,7 +5746,7 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pg0, MDB_page **ret)
 						/* there are others, remove ourself */
 						el[i].mref--;
 					}
-					UNLOCK_MUTEX(env->me_rpmutex);
+					pthread_mutex_unlock(&env->me_rpmutex);
 				}
 			}
 		}
@@ -5760,7 +5760,7 @@ notlocal:
 	if (tl[0].mid >= MDB_TRPAGE_MAX - txn->mt_rpcheck) {
 		unsigned i, y;
 		/* purge unref'd pages from our list and unref in env */
-		LOCK_MUTEX0(env->me_rpmutex);
+		pthread_mutex_lock(&env->me_rpmutex);
 retry:
 		y = 0;
 		for (i=1; i<tl[0].mid; i++) {
@@ -5775,7 +5775,7 @@ retry:
 				el[x].mref--;
 			}
 		}
-		UNLOCK_MUTEX(env->me_rpmutex);
+		pthread_mutex_unlock(&env->me_rpmutex);
 		if (!y) {
 			/* we didn't find any unref'd chunks.
 			 * if we're out of room, fail.
@@ -5812,7 +5812,7 @@ retry:
 		id3.mid = pgno;
 
 		/* search for page in env */
-		LOCK_MUTEX0(env->me_rpmutex);
+		pthread_mutex_lock(&env->me_rpmutex);
 		x = mdb_mid3l_search(el, pgno);
 		if (x <= el[0].mid && el[x].mid == pgno) {
 			id3.mptr = el[x].mptr;
@@ -5832,12 +5832,12 @@ retry:
 					el[x].mcnt = id3.mcnt;
 				} else {
 					id3.mid = pg0;
-					UNLOCK_MUTEX(env->me_rpmutex);
+					pthread_mutex_unlock(&env->me_rpmutex);
 					goto found;
 				}
 			}
 			el[x].mref++;
-			UNLOCK_MUTEX(env->me_rpmutex);
+			pthread_mutex_unlock(&env->me_rpmutex);
 			goto found;
 		}
 		if (el[0].mid >= MDB_ERPAGE_MAX - env->me_rpcheck) {
@@ -5857,7 +5857,7 @@ retry:
 					goto retry;
 				}
 				if (el[0].mid >= MDB_ERPAGE_MAX) {
-					UNLOCK_MUTEX(env->me_rpmutex);
+					pthread_mutex_unlock(&env->me_rpmutex);
 					return MDB_MAP_FULL;
 				}
 				env->me_rpcheck /= 2;
@@ -5876,7 +5876,7 @@ retry:
 		MAP(rc, env, id3.mptr, len, off);
 		if (rc) {
 fail:
-			UNLOCK_MUTEX(env->me_rpmutex);
+			pthread_mutex_unlock(&env->me_rpmutex);
 			return rc;
 		}
 		/* If this page is far enough from the end of the env, scan for
@@ -5911,7 +5911,7 @@ fail:
 			}
 		}
 		mdb_mid3l_insert(el, &id3);
-		UNLOCK_MUTEX(env->me_rpmutex);
+		pthread_mutex_unlock(&env->me_rpmutex);
 found:
 		mdb_mid3l_insert(tl, &id3);
 	} else {
