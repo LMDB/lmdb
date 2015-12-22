@@ -5803,8 +5803,8 @@ retry:
 		id3.mref = 1;
 		if (id3.mid)
 			goto found;
-		/* don't map past last written page */
-		if (pgno + MDB_RPAGE_CHUNK-1 > txn->mt_last_pgno)
+		/* don't map past last written page in read-only envs */
+		if ((env->me_flags & MDB_RDONLY) && pgno + MDB_RPAGE_CHUNK-1 > txn->mt_last_pgno)
 			id3.mcnt = txn->mt_last_pgno + 1 - pgno;
 		else
 			id3.mcnt = MDB_RPAGE_CHUNK;
