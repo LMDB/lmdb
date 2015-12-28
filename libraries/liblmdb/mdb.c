@@ -1952,7 +1952,7 @@ static void
 mdb_cursor_unref(MDB_cursor *mc)
 {
 	int i;
-	if (!mc->mc_pg[0] || IS_SUBP(mc->mc_pg[0]))
+	if (!mc->mc_snum || !mc->mc_pg[0] || IS_SUBP(mc->mc_pg[0]))
 		return;
 	for (i=0; i<mc->mc_snum; i++)
 		mdb_page_unref(mc->mc_txn, mc->mc_pg[i]);
