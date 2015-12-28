@@ -5350,6 +5350,7 @@ mdb_env_close0(MDB_env *env, int excl)
 	}
 #ifdef MDB_VL32
 #ifdef _WIN32
+	if (env->me_fmh) CloseHandle(env->me_fmh);
 	if (env->me_rpmutex) CloseHandle(env->me_rpmutex);
 #else
 	pthread_mutex_destroy(&env->me_rpmutex);
