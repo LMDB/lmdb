@@ -2,6 +2,7 @@ LMDB 0.9 Change Log
 
 LMDB 0.9.18 Release Engineering
 	Fix robust mutex detection on glibc 2.10-11 (ITS#8330)
+	Fix page_search_root assert on FreeDB (ITS#8336)
 	Check for utf8_to_utf16 failures (ITS#7992)
 	Catch strdup failure in mdb_dbi_open
 	Build
