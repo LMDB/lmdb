@@ -5255,14 +5255,16 @@ mdb_env_close0(MDB_env *env, int excl)
 	free(env->me_dbflags);
 	free(env->me_path);
 	free(env->me_dirty_list);
-	free(env->me_txn0);
 #ifdef MDB_VL32
+	if (env->me_txn0 && env->me_txn->mt_rpages)
+		free(env->me_txn0->mt_rpages);
 	{ unsigned int x;
 		for (x=1; x<=env->me_rpages[0].mid; x++)
 		munmap(env->me_rpages[x].mptr, env->me_rpages[x].mcnt * env->me_psize);
 	}
 	free(env->me_rpages);
 #endif
+	free(env->me_txn0);
 	mdb_midl_free(env->me_free_pgs);
 
 	if (env->me_flags & MDB_ENV_TXKEY) {
