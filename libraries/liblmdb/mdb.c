@@ -5766,7 +5766,7 @@ notlocal:
 		pthread_mutex_lock(&env->me_rpmutex);
 retry:
 		y = 0;
-		for (i=1; i<tl[0].mid; i++) {
+		for (i=1; i<=tl[0].mid; i++) {
 			if (!tl[i].mref) {
 				if (!y) y = i;
 				/* tmp overflow pages don't go to env */
@@ -5846,7 +5846,7 @@ retry:
 		if (el[0].mid >= MDB_ERPAGE_MAX - env->me_rpcheck) {
 			/* purge unref'd pages */
 			unsigned i, y = 0;
-			for (i=1; i<el[0].mid; i++) {
+			for (i=1; i<=el[0].mid; i++) {
 				if (!el[i].mref) {
 					if (!y) y = i;
 					munmap(el[i].mptr, env->me_psize * el[i].mcnt);
