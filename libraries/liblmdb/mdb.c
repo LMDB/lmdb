@@ -5256,7 +5256,7 @@ mdb_env_close0(MDB_env *env, int excl)
 	free(env->me_path);
 	free(env->me_dirty_list);
 #ifdef MDB_VL32
-	if (env->me_txn0 && env->me_txn->mt_rpages)
+	if (env->me_txn0 && env->me_txn0->mt_rpages)
 		free(env->me_txn0->mt_rpages);
 	{ unsigned int x;
 		for (x=1; x<=env->me_rpages[0].mid; x++)
