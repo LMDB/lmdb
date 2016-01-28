@@ -6,6 +6,7 @@ LMDB 0.9.18 Release Engineering
 	Fix MDB_APPENDDUP vs. rewrite(single item) (ITS#8334)
 	Fix mdb_copy of large files on Windows
 	Fix subcursor move after delete (ITS#8355)
+	Fix mdb_midl_shirnk off-by-one (ITS#8363)
 	Check for utf8_to_utf16 failures (ITS#7992)
 	Catch strdup failure in mdb_dbi_open
 	Build
