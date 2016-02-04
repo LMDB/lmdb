@@ -9295,7 +9295,7 @@ mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
 #ifdef _WIN32
 	rc = utf8_to_utf16(lpath, -1, &wpath, NULL);
 	if (rc)
-		return rc;
+		goto leave;
 	newfd = CreateFileW(wpath, GENERIC_WRITE, 0, NULL, CREATE_NEW,
 				FILE_FLAG_NO_BUFFERING|FILE_FLAG_WRITE_THROUGH, NULL);
 	free(wpath);
