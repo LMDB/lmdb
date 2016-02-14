@@ -4159,6 +4159,19 @@ mdb_env_create(MDB_env **env)
 	return MDB_SUCCESS;
 }
 
+#ifdef _WIN32
+/** @brief Map a result from an NTAPI call to WIN32. */
+static DWORD
+mdb_nt2win32(NTSTATUS st)
+{
+	OVERLAPPED o = {0};
+	DWORD br;
+	o.Internal = st;
+	GetOverlappedResult(NULL, &o, &br, FALSE);
+	return GetLastError();
+}
+#endif
+
 static int ESECT
 mdb_env_map(MDB_env *env, void *addr)
 {
@@ -4188,7 +4201,7 @@ mdb_env_map(MDB_env *env, void *addr)
 
 	rc = NtCreateSection(&mh, access, NULL, NULL, secprot, SEC_RESERVE, env->me_fd);
 	if (rc)
-		return rc;
+		return mdb_nt2win32(rc);
 	map = addr;
 #ifdef MDB_VL32
 	msize = NUM_METAS * env->me_psize;
@@ -4200,7 +4213,7 @@ mdb_env_map(MDB_env *env, void *addr)
 	NtClose(mh);
 #endif
 	if (rc)
-		return rc;
+		return mdb_nt2win32(rc);
 	env->me_map = map;
 #else
 #ifdef MDB_VL32
@@ -5692,7 +5705,8 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pg0, MDB_page **ret)
 #define MAP(rc,env,addr,len,off)	\
 	addr = NULL; \
 	rc = NtMapViewOfSection(env->me_fmh, GetCurrentProcess(), &addr, 0, \
-		len, &off, &len, ViewUnmap, (env->me_flags & MDB_RDONLY) ? 0 : MEM_RESERVE, PAGE_READONLY)
+		len, &off, &len, ViewUnmap, (env->me_flags & MDB_RDONLY) ? 0 : MEM_RESERVE, PAGE_READONLY); \
+	if (rc) rc = mdb_nt2win32(rc)
 #else
 	off_t off;
 	size_t len;
