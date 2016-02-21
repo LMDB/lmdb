@@ -3904,6 +3904,8 @@ mdb_env_read_header(MDB_env *env, MDB_meta *meta)
 		p = (MDB_page *)&pbuf;
 
 		if (!F_ISSET(p->mp_flags, P_META)) {
+			if (env->me_flags & MDB_RAWPART)
+				return ENOENT;
 			DPRINTF(("page %"Y"u not a meta page", p->mp_pgno));
 			return MDB_INVALID;
 		}
@@ -4229,7 +4231,7 @@ mdb_env_map(MDB_env *env, void *addr)
 	int prot = PROT_READ;
 	if (flags & MDB_WRITEMAP) {
 		prot |= PROT_WRITE;
-		if (ftruncate(env->me_fd, env->me_mapsize) < 0)
+		if (!(flags & MDB_RAWPART) && ftruncate(env->me_fd, env->me_mapsize) < 0)
 			return ErrCode();
 	}
 	env->me_map = mmap(addr, env->me_mapsize, prot, MAP_SHARED,
@@ -5054,7 +5056,7 @@ fail:
 	 */
 #define	CHANGEABLE	(MDB_NOSYNC|MDB_NOMETASYNC|MDB_MAPASYNC|MDB_NOMEMINIT)
 #define	CHANGELESS	(MDB_FIXEDMAP|MDB_NOSUBDIR|MDB_RDONLY| \
-	MDB_WRITEMAP|MDB_NOTLS|MDB_NOLOCK|MDB_NORDAHEAD)
+	MDB_WRITEMAP|MDB_NOTLS|MDB_NOLOCK|MDB_NORDAHEAD|MDB_RAWPART)
 
 #if VALID_FLAGS & PERSISTENT_FLAGS & (CHANGEABLE|CHANGELESS)
 # error "Persistent DB flags & env flags overlap, but both go in mm_flags"
@@ -5086,6 +5088,8 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 	len = strlen(path);
 	if (flags & MDB_NOSUBDIR) {
 		rc = len + sizeof(LOCKSUFF) + len + 1;
+	} else if (flags & MDB_RAWPART) {
+		rc = len + sizeof(LOCKSUFF) + len + sizeof("/tmp");
 	} else {
 		rc = len + sizeof(LOCKNAME) + len + sizeof(DATANAME);
 	}
@@ -5096,6 +5100,14 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 		dpath = lpath + len + sizeof(LOCKSUFF);
 		sprintf(lpath, "%s" LOCKSUFF, path);
 		strcpy(dpath, path);
+	} else if (flags & MDB_RAWPART) {
+		char *ptr;
+		dpath = lpath + len + sizeof(LOCKSUFF) + sizeof("/tmp");
+		sprintf(lpath, "/tmp%s" LOCKSUFF, path);
+		strcpy(dpath, path);
+		ptr = lpath + sizeof("/tmp");
+		while ((ptr=strchr(ptr, '/')))
+			*ptr++ = '_';
 	} else {
 		dpath = lpath + len + sizeof(LOCKNAME);
 		sprintf(lpath, "%s" LOCKNAME, path);
