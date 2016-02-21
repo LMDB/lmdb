@@ -1351,6 +1351,8 @@ struct MDB_env {
 #define	MDB_ENV_TXKEY	0x10000000U
 	/** fdatasync is unreliable */
 #define	MDB_FSYNCONLY	0x08000000U
+	/** using a raw block device */
+#define	MDB_RAWPART		0x04000000U
 	uint32_t 	me_flags;		/**< @ref mdb_env */
 	unsigned int	me_psize;	/**< DB page size, inited from me_os_psize */
 	unsigned int	me_os_psize;	/**< OS page size, from #GET_PAGESIZE */
@@ -5056,7 +5058,7 @@ fail:
 	 */
 #define	CHANGEABLE	(MDB_NOSYNC|MDB_NOMETASYNC|MDB_MAPASYNC|MDB_NOMEMINIT)
 #define	CHANGELESS	(MDB_FIXEDMAP|MDB_NOSUBDIR|MDB_RDONLY| \
-	MDB_WRITEMAP|MDB_NOTLS|MDB_NOLOCK|MDB_NORDAHEAD|MDB_RAWPART)
+	MDB_WRITEMAP|MDB_NOTLS|MDB_NOLOCK|MDB_NORDAHEAD)
 
 #if VALID_FLAGS & PERSISTENT_FLAGS & (CHANGEABLE|CHANGELESS)
 # error "Persistent DB flags & env flags overlap, but both go in mm_flags"
@@ -5070,6 +5072,10 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 #ifdef _WIN32
 	wchar_t *wpath;
 #endif
+#ifndef _WIN32
+	struct stat st;
+#endif
+
 
 	if (env->me_fd!=INVALID_HANDLE_VALUE || (flags & ~(CHANGEABLE|CHANGELESS)))
 		return EINVAL;
@@ -5088,9 +5094,16 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 	len = strlen(path);
 	if (flags & MDB_NOSUBDIR) {
 		rc = len + sizeof(LOCKSUFF) + len + 1;
-	} else if (flags & MDB_RAWPART) {
-		rc = len + sizeof(LOCKSUFF) + len + sizeof("/tmp");
 	} else {
+#ifndef _WIN32
+		rc = stat(path, &st);
+		if (rc)
+			return ErrCode();
+		if (S_ISBLK(st.st_mode)) {
+			flags |= MDB_RAWPART;
+			rc = len + sizeof(LOCKSUFF) + sizeof("/tmp/LMDB#0000");
+		} else
+#endif
 		rc = len + sizeof(LOCKNAME) + len + sizeof(DATANAME);
 	}
 	lpath = malloc(rc);
@@ -5101,13 +5114,11 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 		sprintf(lpath, "%s" LOCKSUFF, path);
 		strcpy(dpath, path);
 	} else if (flags & MDB_RAWPART) {
-		char *ptr;
-		dpath = lpath + len + sizeof(LOCKSUFF) + sizeof("/tmp");
-		sprintf(lpath, "/tmp%s" LOCKSUFF, path);
+		dpath = lpath + sizeof(LOCKSUFF) + sizeof("/tmp/LMDB#0000");
+#ifndef _WIN32
+		sprintf(lpath, "/tmp/LMDB#%04x" LOCKSUFF, (unsigned)st.st_rdev);
+#endif
 		strcpy(dpath, path);
-		ptr = lpath + sizeof("/tmp");
-		while ((ptr=strchr(ptr, '/')))
-			*ptr++ = '_';
 	} else {
 		dpath = lpath + len + sizeof(LOCKNAME);
 		sprintf(lpath, "%s" LOCKNAME, path);
