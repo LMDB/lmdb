@@ -5644,8 +5644,8 @@ mdb_cursor_next(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 	if (mc->mc_flags & C_EOF) {
 		return MDB_NOTFOUND;
 	}
-
-	mdb_cassert(mc, mc->mc_flags & C_INITIALIZED);
+	if (!(mc->mc_flags & C_INITIALIZED))
+		return mdb_cursor_first(mc, key, data);
 
 	mp = mc->mc_pg[mc->mc_top];
 
@@ -5724,7 +5724,12 @@ mdb_cursor_prev(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 	MDB_node	*leaf;
 	int rc;
 
-	mdb_cassert(mc, mc->mc_flags & C_INITIALIZED);
+	if (!(mc->mc_flags & C_INITIALIZED)) {
+		rc = mdb_cursor_last(mc, key, data);
+		if (rc)
+			return rc;
+		mc->mc_ki[mc->mc_top]++;
+	}
 
 	mp = mc->mc_pg[mc->mc_top];
 
@@ -6170,10 +6175,7 @@ mdb_cursor_get(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 			rc = MDB_INCOMPATIBLE;
 			break;
 		}
-		if (!(mc->mc_flags & C_INITIALIZED))
-			rc = mdb_cursor_first(mc, key, data);
-		else
-			rc = mdb_cursor_next(mc, key, data, MDB_NEXT_DUP);
+		rc = mdb_cursor_next(mc, key, data, MDB_NEXT_DUP);
 		if (rc == MDB_SUCCESS) {
 			if (mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED) {
 				MDB_cursor *mx;
@@ -6191,21 +6193,11 @@ fetchm:
 	case MDB_NEXT:
 	case MDB_NEXT_DUP:
 	case MDB_NEXT_NODUP:
-		if (!(mc->mc_flags & C_INITIALIZED))
-			rc = mdb_cursor_first(mc, key, data);
-		else
-			rc = mdb_cursor_next(mc, key, data, op);
+		rc = mdb_cursor_next(mc, key, data, op);
 		break;
 	case MDB_PREV:
 	case MDB_PREV_DUP:
 	case MDB_PREV_NODUP:
-		if (!(mc->mc_flags & C_INITIALIZED)) {
-			rc = mdb_cursor_last(mc, key, data);
-			if (rc)
-				break;
-			mc->mc_flags |= C_INITIALIZED;
-			mc->mc_ki[mc->mc_top]++;
-		}
 		rc = mdb_cursor_prev(mc, key, data, op);
 		break;
 	case MDB_FIRST:
@@ -8208,8 +8200,6 @@ mdb_cursor_del0(MDB_cursor *mc)
 			if (m3->mc_pg[mc->mc_top] == mp) {
 				if (m3->mc_ki[mc->mc_top] == ki) {
 					m3->mc_flags |= C_DEL;
-					if (mc->mc_db->md_flags & MDB_DUPSORT)
-						m3->mc_xcursor->mx_cursor.mc_flags &= ~C_INITIALIZED;
 				} else if (m3->mc_ki[mc->mc_top] > ki) {
 					m3->mc_ki[mc->mc_top]--;
 				}
@@ -8243,11 +8233,21 @@ mdb_cursor_del0(MDB_cursor *mc)
 				continue;
 			if (m3->mc_pg[mc->mc_top] == mp) {
 				/* if m3 points past last node in page, find next sibling */
-				if (m3->mc_ki[mc->mc_top] >= nkeys) {
-					rc = mdb_cursor_sibling(m3, 1);
-					if (rc == MDB_NOTFOUND) {
-						m3->mc_flags |= C_EOF;
-						rc = MDB_SUCCESS;
+				if (m3->mc_ki[mc->mc_top] >= mc->mc_ki[mc->mc_top]) {
+					if (m3->mc_ki[mc->mc_top] >= nkeys) {
+						rc = mdb_cursor_sibling(m3, 1);
+						if (rc == MDB_NOTFOUND) {
+							m3->mc_flags |= C_EOF;
+							rc = MDB_SUCCESS;
+							continue;
+						}
+					}
+					if (mc->mc_db->md_flags & MDB_DUPSORT) {
+						MDB_node *node = NODEPTR(m3->mc_pg[m3->mc_top], m3->mc_ki[m3->mc_top]);
+						if (node->mn_flags & F_DUPDATA) {
+							mdb_xcursor_init1(m3, node);
+							m3->mc_xcursor->mx_cursor.mc_flags |= C_DEL;
+						}
 					}
 				}
 			}
