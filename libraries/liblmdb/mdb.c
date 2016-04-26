@@ -6417,7 +6417,8 @@ mdb_cursor_next(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 	MDB_node	*leaf;
 	int rc;
 
-	if (mc->mc_flags & C_EOF) {
+	if ((mc->mc_flags & C_EOF) ||
+		((mc->mc_flags & C_DEL) && op == MDB_NEXT_DUP)) {
 		return MDB_NOTFOUND;
 	}
 	if (!(mc->mc_flags & C_INITIALIZED))
