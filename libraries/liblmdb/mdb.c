@@ -6635,8 +6635,13 @@ current:
 					/* Note - this page is already counted in parent's dirty_room */
 					rc2 = mdb_mid2l_insert(mc->mc_txn->mt_u.dirty_list, &id2);
 					mdb_cassert(mc, rc2 == 0);
+					/* Currently we make the page look as with put() in the
+					 * parent txn, in case the user peeks at MDB_RESERVEd
+					 * or unused parts. Some users treat ovpages specially.
+					 */
 					if (!(flags & MDB_RESERVE)) {
-						/* Copy end of page, adjusting alignment so
+						/* Skip the part where LMDB will put *data.
+						 * Copy end of page, adjusting alignment so
 						 * compiler may copy words instead of bytes.
 						 */
 						off = (PAGEHDRSZ + data->mv_size) & -sizeof(size_t);
