@@ -8890,7 +8890,7 @@ mdb_env_cthr_toggle(mdb_copy *my, int st)
 static int ESECT
 mdb_env_cwalk(mdb_copy *my, pgno_t *pg, int flags)
 {
-	MDB_cursor mc;
+	MDB_cursor mc = {0};
 	MDB_txn *txn = my->mc_txn;
 	MDB_node *ni;
 	MDB_page *mo, *mp, *leaf;
@@ -8903,7 +8903,6 @@ mdb_env_cwalk(mdb_copy *my, pgno_t *pg, int flags)
 		return MDB_SUCCESS;
 
 	mc.mc_snum = 1;
-	mc.mc_top = 0;
 	mc.mc_txn = txn;
 
 	rc = mdb_page_get(my->mc_txn, *pg, &mc.mc_pg[0], NULL);
