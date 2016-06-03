@@ -4960,6 +4960,8 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		if (semctl(semid, 0, SETALL, semu) < 0)
 			goto fail_errno;
 		env->me_txns->mti_semid = semid;
+		env->me_txns->mti_rlocked = 0;
+		env->me_txns->mti_wlocked = 0;
 #else	/* MDB_USE_POSIX_MUTEX: */
 		pthread_mutexattr_t mattr;
 
