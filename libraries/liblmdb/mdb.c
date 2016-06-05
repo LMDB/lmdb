@@ -4628,15 +4628,18 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		memset(env->me_txns->mti_rmutex, 0, sizeof(*env->me_txns->mti_rmutex));
 		memset(env->me_txns->mti_wmutex, 0, sizeof(*env->me_txns->mti_wmutex));
 
-		if ((rc = pthread_mutexattr_init(&mattr))
-			|| (rc = pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED))
-#ifdef MDB_ROBUST_SUPPORTED
-			|| (rc = pthread_mutexattr_setrobust(&mattr, PTHREAD_MUTEX_ROBUST))
-#endif
-			|| (rc = pthread_mutex_init(env->me_txns->mti_rmutex, &mattr))
-			|| (rc = pthread_mutex_init(env->me_txns->mti_wmutex, &mattr)))
+		if ((rc = pthread_mutexattr_init(&mattr)))
 			goto fail;
+
+		rc = pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
+#ifdef MDB_ROBUST_SUPPORTED
+		if (!rc) rc = pthread_mutexattr_setrobust(&mattr, PTHREAD_MUTEX_ROBUST);
+#endif
+		if (!rc) rc = pthread_mutex_init(env->me_txns->mti_rmutex, &mattr);
+		if (!rc) rc = pthread_mutex_init(env->me_txns->mti_wmutex, &mattr);
 		pthread_mutexattr_destroy(&mattr);
+		if (rc)
+			goto fail;
 #endif	/* _WIN32 || MDB_USE_POSIX_SEM */
 
 		env->me_txns->mti_magic = MDB_MAGIC;
