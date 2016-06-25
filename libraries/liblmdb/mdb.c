@@ -9093,6 +9093,7 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
 	mdb_copy my = {0};
 	MDB_txn *txn = NULL;
 	pthread_t thr;
+	pgno_t root, new_root;
 	int rc = MDB_SUCCESS;
 
 #ifdef _WIN32
@@ -9154,10 +9155,12 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
 	*(MDB_meta *)METADATA(mp) = *mm;
 	mm = (MDB_meta *)METADATA(mp);
 
-	/* Count the number of free pages, subtract from lastpg to find
-	 * number of active pages
-	 */
-	{
+	/* Set metapage 1 with current main DB */
+	root = new_root = txn->mt_dbs[MAIN_DBI].md_root;
+	if (root != P_INVALID) {
+		/* Count free pages + freeDB pages.  Subtract from last_pg
+		 * to find the new last_pg, which also becomes the new root.
+		 */
 		MDB_ID freecount = 0;
 		MDB_cursor mc;
 		MDB_val key, data;
@@ -9170,19 +9173,26 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
 			txn->mt_dbs[FREE_DBI].md_leaf_pages +
 			txn->mt_dbs[FREE_DBI].md_overflow_pages;
 
-		/* Set metapage 1 */
-		mm->mm_last_pg = txn->mt_next_pgno - freecount - 1;
+		new_root = txn->mt_next_pgno - 1 - freecount;
+		mm->mm_last_pg = new_root;
 		mm->mm_dbs[MAIN_DBI] = txn->mt_dbs[MAIN_DBI];
-		if (mm->mm_last_pg > NUM_METAS-1) {
-			mm->mm_dbs[MAIN_DBI].md_root = mm->mm_last_pg;
-			mm->mm_txnid = 1;
-		} else {
-			mm->mm_dbs[MAIN_DBI].md_root = P_INVALID;
-		}
+		mm->mm_dbs[MAIN_DBI].md_root = new_root;
+	} else {
+		/* When the DB is empty, handle it specially to
+		 * fix any breakage like page leaks from ITS#8174.
+		 */
+		mm->mm_dbs[MAIN_DBI].md_flags = txn->mt_dbs[MAIN_DBI].md_flags;
 	}
+	if (root != P_INVALID || mm->mm_dbs[MAIN_DBI].md_flags) {
+		mm->mm_txnid = 1;		/* use metapage 1 */
+	}
+
 	my.mc_wlen[0] = env->me_psize * NUM_METAS;
 	my.mc_txn = txn;
-	rc = mdb_env_cwalk(&my, &txn->mt_dbs[MAIN_DBI].md_root, 0);
+	rc = mdb_env_cwalk(&my, &root, 0);
+	if (rc == MDB_SUCCESS && root != new_root) {
+		rc = MDB_INCOMPATIBLE;	/* page leak or corrupt DB */
+	}
 
 finish:
 	if (rc)
