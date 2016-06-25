@@ -688,6 +688,7 @@ int  mdb_env_copyfd(MDB_env *env, mdb_filehandle_t fd);
 	 *	<li>#MDB_CP_COMPACT - Perform compaction while copying: omit free
 	 *		pages and sequentially renumber all pages in output. This option
 	 *		consumes more CPU and runs more slowly than the default.
+	 *		Currently it fails if the environment has suffered a page leak.
 	 * </ul>
 	 * @return A non-zero error value on failure and 0 on success.
 	 */
