@@ -9922,9 +9922,10 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
 		goto done;
 	}
 #else
-	if ((rc = pthread_mutex_init(&my.mc_mutex, NULL)) ||
-		(rc = pthread_cond_init(&my.mc_cond, NULL)))
+	if ((rc = pthread_mutex_init(&my.mc_mutex, NULL)) != 0)
 		return rc;
+	if ((rc = pthread_cond_init(&my.mc_cond, NULL)) != 0)
+		goto done2;
 #ifdef HAVE_MEMALIGN
 	my.mc_wbuf[0] = memalign(env->me_os_psize, MDB_WBUF*2);
 	if (my.mc_wbuf[0] == NULL) {
@@ -9932,9 +9933,12 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
 		goto done;
 	}
 #else
-	rc = posix_memalign((void **)&my.mc_wbuf[0], env->me_os_psize, MDB_WBUF*2);
-	if (rc)
-		goto done;
+	{
+		void *p;
+		if ((rc = posix_memalign(&p, env->me_os_psize, MDB_WBUF*2)) != 0)
+			goto done;
+		my.mc_wbuf[0] = p;
+	}
 #endif
 #endif
 	memset(my.mc_wbuf[0], 0, MDB_WBUF*2);
@@ -10012,13 +10016,14 @@ finish:
 
 done:
 #ifdef _WIN32
+	if (my.mc_wbuf[0]) _aligned_free(my.mc_wbuf[0]);
 	if (my.mc_cond)  CloseHandle(my.mc_cond);
 	if (my.mc_mutex) CloseHandle(my.mc_mutex);
-	_aligned_free(my.mc_wbuf[0]);
 #else
-	pthread_cond_destroy(&my.mc_cond);
-	pthread_mutex_destroy(&my.mc_mutex);
 	free(my.mc_wbuf[0]);
+	pthread_cond_destroy(&my.mc_cond);
+done2:
+	pthread_mutex_destroy(&my.mc_mutex);
 #endif
 	return rc ? rc : my.mc_error;
 }
