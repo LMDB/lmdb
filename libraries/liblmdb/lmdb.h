@@ -456,8 +456,10 @@ typedef enum MDB_cursor_op {
 #define MDB_BAD_VALSIZE		(-30781)
 	/** The specified DBI was changed unexpectedly */
 #define MDB_BAD_DBI		(-30780)
+	/** Unexpected problem - txn should abort */
+#define MDB_PROBLEM		(-30779)
 	/** The last defined error code */
-#define MDB_LAST_ERRCODE	MDB_BAD_DBI
+#define MDB_LAST_ERRCODE	MDB_PROBLEM
 /** @} */
 
 /** @brief Statistics for a database in the environment */
