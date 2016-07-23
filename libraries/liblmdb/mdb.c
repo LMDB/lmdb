@@ -5957,9 +5957,6 @@ static int
 mdb_page_get(MDB_cursor *mc, pgno_t pgno, MDB_page **ret, int *lvl)
 {
 	MDB_txn *txn = mc->mc_txn;
-#ifndef MDB_VL32
-	MDB_env *env = txn->mt_env;
-#endif
 	MDB_page *p = NULL;
 	int level;
 
@@ -5978,14 +5975,7 @@ mdb_page_get(MDB_cursor *mc, pgno_t pgno, MDB_page **ret, int *lvl)
 				MDB_ID pn = pgno << 1;
 				x = mdb_midl_search(tx2->mt_spill_pgs, pn);
 				if (x <= tx2->mt_spill_pgs[0] && tx2->mt_spill_pgs[x] == pn) {
-#ifdef MDB_VL32
-					int rc = mdb_rpage_get(txn, pgno, &p);
-					if (rc)
-						return rc;
-#else
-					p = (MDB_page *)(env->me_map + env->me_psize * pgno);
-#endif
-					goto done;
+					goto mapped;
 				}
 			}
 			if (dl[0].mid) {
@@ -5999,21 +5989,24 @@ mdb_page_get(MDB_cursor *mc, pgno_t pgno, MDB_page **ret, int *lvl)
 		} while ((tx2 = tx2->mt_parent) != NULL);
 	}
 
-	if (pgno < txn->mt_next_pgno) {
-		level = 0;
-#ifdef MDB_VL32
-		{
-			int rc = mdb_rpage_get(txn, pgno, &p);
-			if (rc)
-				return rc;
-		}
-#else
-		p = (MDB_page *)(env->me_map + env->me_psize * pgno);
-#endif
-	} else {
+	if (pgno >= txn->mt_next_pgno) {
 		DPRINTF(("page %"Y"u not found", pgno));
 		txn->mt_flags |= MDB_TXN_ERROR;
 		return MDB_PAGE_NOTFOUND;
+	}
+
+	level = 0;
+
+mapped:
+	{
+#ifdef MDB_VL32
+		int rc = mdb_rpage_get(txn, pgno, &p);
+		if (rc)
+			return rc;
+#else
+		MDB_env *env = txn->mt_env;
+		p = (MDB_page *)(env->me_map + env->me_psize * pgno);
+#endif
 	}
 
 done:
