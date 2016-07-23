@@ -153,7 +153,7 @@ int main(int argc, char *argv[])
 	if (freinfo) {
 		MDB_cursor *cursor;
 		MDB_val key, data;
-		size_t pages = 0, *iptr;
+		mdb_size_t pages = 0, *iptr;
 
 		printf("Freelist Status\n");
 		dbi = 0;
@@ -173,7 +173,7 @@ int main(int argc, char *argv[])
 			pages += *iptr;
 			if (freinfo > 1) {
 				char *bad = "";
-				size_t pg, prev;
+				mdb_size_t pg, prev;
 				ssize_t i, j, span = 0;
 				j = *iptr++;
 				for (i = j, prev = 1; --i >= 0; ) {
@@ -184,20 +184,20 @@ int main(int argc, char *argv[])
 					pg += span;
 					for (; i >= span && iptr[i-span] == pg; span++, pg++) ;
 				}
-				printf("    Transaction %"Z"u, %"Z"d pages, maxspan %"Z"d%s\n",
-					*(size_t *)key.mv_data, j, span, bad);
+				printf("    Transaction %"Y"u, %"Z"d pages, maxspan %"Z"d%s\n",
+					*(mdb_size_t *)key.mv_data, j, span, bad);
 				if (freinfo > 2) {
 					for (--j; j >= 0; ) {
 						pg = iptr[j];
 						for (span=1; --j >= 0 && iptr[j] == pg+span; span++) ;
-						printf(span>1 ? "     %9"Z"u[%"Z"d]\n" : "     %9"Z"u\n",
+						printf(span>1 ? "     %9"Y"u[%"Z"d]\n" : "     %9"Y"u\n",
 							pg, span);
 					}
 				}
 			}
 		}
 		mdb_cursor_close(cursor);
-		printf("  Free pages: %"Z"u\n", pages);
+		printf("  Free pages: %"Y"u\n", pages);
 	}
 
 	rc = mdb_open(txn, subname, 0, &dbi);
