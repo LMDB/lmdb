@@ -167,6 +167,7 @@
 
 #include <sys/types.h>
 #include <inttypes.h>
+#include <limits.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -185,19 +186,24 @@ typedef	mode_t	mdb_mode_t;
 # define MDB_FMT_Z	"z"			/**< printf/scanf format modifier for size_t */
 #endif
 
-#ifdef MDB_VL32
-typedef uint64_t	mdb_size_t;
-#define MDB_SIZE_MAX UINT64_MAX
-#ifdef _WIN32
-# define MDB_FMT_Y	"I64"
-#else
-# define MDB_FMT_Y	"ll"
-#endif
-#define mdb_env_create	mdb_env_create_vl32	/**< Prevent mixing with non-VL32 builds */
-#else
+#if !defined(MDB_VL32) || SIZE_MAX > 0xffffffffU
 typedef size_t	mdb_size_t;
 # define MDB_SIZE_MAX	SIZE_MAX	/**< max #mdb_size_t */
 # define MDB_FMT_Y		MDB_FMT_Z	/**< Obsolescent, see #MDB_PRIz()/#MDB_SCNz() */
+/* TODO: For VL32, use uint64_t (trivial) and therefore PRI<c>64 (big patch) */
+#elif defined(_WIN32)
+typedef unsigned __int64 mdb_size_t;
+# define MDB_SIZE_MAX	_UI64_MAX
+# define MDB_FMT_Y		"I64"
+#elif defined(ULLONG_MAX)
+typedef unsigned long long	mdb_size_t;
+# define MDB_SIZE_MAX	ULLONG_MAX
+# define MDB_FMT_Y		"ll"
+#else
+# error "Found no acceptable integer type for mdb_size_t"
+#endif
+#ifdef MDB_VL32
+# define mdb_env_create	mdb_env_create_vl32	/**< Prevent mixing with non-VL32 builds */
 #endif
 
 /** #mdb_size_t printf formats, \b t = one of [diouxX] without quotes */
