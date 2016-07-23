@@ -339,7 +339,8 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
 #define MDB_REVERSEKEY	0x02
 	/** use sorted duplicates */
 #define MDB_DUPSORT		0x04
-	/** numeric keys in native byte order: either unsigned int or size_t.
+	/** numeric keys in native byte order, either unsigned int or #mdb_size_t.
+	 *	(lmdb expects 32-bit int <= size_t <= 32/64-bit mdb_size_t.)
 	 *  The keys must all be of the same size. */
 #define MDB_INTEGERKEY	0x08
 	/** with #MDB_DUPSORT, sorted dup items have fixed size */
@@ -1126,7 +1127,8 @@ int  mdb_txn_renew(MDB_txn *txn);
 	 *		keys must be unique and may have only a single data item.
 	 *	<li>#MDB_INTEGERKEY
 	 *		Keys are binary integers in native byte order, either unsigned int
-	 *		or size_t, and will be sorted as such.
+	 *		or #mdb_size_t, and will be sorted as such.
+	 *		(lmdb expects 32-bit int <= size_t <= 32/64-bit mdb_size_t.)
 	 *		The keys must all be of the same size.
 	 *	<li>#MDB_DUPFIXED
 	 *		This flag may only be used in combination with #MDB_DUPSORT. This option

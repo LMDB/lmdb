@@ -1514,7 +1514,7 @@ static int mdb_reader_check0(MDB_env *env, int rlocked, int *dead);
 static MDB_cmp_func	mdb_cmp_memn, mdb_cmp_memnr, mdb_cmp_int, mdb_cmp_cint, mdb_cmp_long;
 /** @endcond */
 
-/** Compare two items pointing at size_t's of unknown alignment. */
+/** Compare two items pointing at '#mdb_size_t's of unknown alignment. */
 #ifdef MISALIGNED_OK
 # define mdb_cmp_clong mdb_cmp_long
 #else
