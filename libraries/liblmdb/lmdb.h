@@ -179,12 +179,31 @@ typedef	int	mdb_mode_t;
 typedef	mode_t	mdb_mode_t;
 #endif
 
+#ifdef _WIN32
+# define MDB_FMT_Z	"I"
+#else
+# define MDB_FMT_Z	"z"			/**< printf/scanf format modifier for size_t */
+#endif
+
 #ifdef MDB_VL32
 typedef uint64_t	mdb_size_t;
+#define MDB_SIZE_MAX UINT64_MAX
+#ifdef _WIN32
+# define MDB_FMT_Y	"I64"
+#else
+# define MDB_FMT_Y	"ll"
+#endif
 #define mdb_env_create	mdb_env_create_vl32	/**< Prevent mixing with non-VL32 builds */
 #else
 typedef size_t	mdb_size_t;
+# define MDB_SIZE_MAX	SIZE_MAX	/**< max #mdb_size_t */
+# define MDB_FMT_Y		MDB_FMT_Z	/**< Obsolescent, see #MDB_PRIz()/#MDB_SCNz() */
 #endif
+
+/** #mdb_size_t printf formats, \b t = one of [diouxX] without quotes */
+#define MDB_PRIz(t)	MDB_FMT_Y #t
+/** #mdb_size_t scanf formats, \b t = one of [dioux] without quotes */
+#define MDB_SCNz(t)	MDB_FMT_Y #t
 
 /** An abstraction for a file handle.
  *	On POSIX systems file handles are small integers. On Windows

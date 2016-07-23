@@ -20,20 +20,7 @@
 #include <signal.h>
 #include "lmdb.h"
 
-#ifdef _WIN32
-#define Z	"I"
-#else
-#define Z	"z"
-#endif
-#ifdef MDB_VL32
-#ifdef _WIN32
-#define	Y	"I64"
-#else
-#define	Y	"ll"
-#endif
-#else
-#define Y	Z
-#endif
+#define Y	MDB_FMT_Y
 
 #define PRINT	1
 static int mode;

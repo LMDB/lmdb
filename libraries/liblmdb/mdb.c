@@ -355,12 +355,10 @@ typedef HANDLE mdb_mutex_t, mdb_mutexref_t;
 #else
 #define MDB_PROCESS_QUERY_LIMITED_INFORMATION 0x1000
 #endif
-#define	Z	"I"
 #else
 #define THREAD_RET	void *
 #define THREAD_CREATE(thr,start,arg)	pthread_create(&thr,NULL,start,arg)
 #define THREAD_FINISH(thr)	pthread_join(thr,NULL)
-#define	Z	"z"			/**< printf format modifier for size_t */
 
 	/** For MDB_LOCK_FORMAT: True if readers take a pid lock in the lockfile */
 #define MDB_PIDLOCK			1
@@ -458,15 +456,8 @@ typedef pthread_mutex_t mdb_mutex_t[1], *mdb_mutexref_t;
 #define	GET_PAGESIZE(x)	((x) = sysconf(_SC_PAGE_SIZE))
 #endif
 
-#ifdef MDB_VL32
-#ifdef _WIN32
-#define	Y	"I64"
-#else
-#define	Y	"ll"
-#endif
-#else
-#define Y	Z
-#endif
+#define	Z	MDB_FMT_Z	/**< printf/scanf format modifier for size_t */
+#define	Y	MDB_FMT_Y	/**< printf/scanf format modifier for #mdb_size_t */
 
 #if defined(_WIN32) || defined(MDB_USE_POSIX_SEM)
 #define MNAME_LEN	32
