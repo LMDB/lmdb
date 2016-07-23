@@ -1304,6 +1304,11 @@ struct MDB_cursor {
 	indx_t		mc_ki[CURSOR_STACK];	/**< stack of page indices */
 #ifdef MDB_VL32
 	MDB_page	*mc_ovpg;		/**< a referenced overflow page */
+#	define MC_OVPG(mc)			((mc)->mc_ovpg)
+#	define MC_SET_OVPG(mc, pg)	((mc)->mc_ovpg = (pg))
+#else
+#	define MC_OVPG(mc)			((MDB_page *)0)
+#	define MC_SET_OVPG(mc, pg)	((void)0)
 #endif
 };
 
@@ -1515,6 +1520,11 @@ static MDB_cmp_func	mdb_cmp_memn, mdb_cmp_memnr, mdb_cmp_int, mdb_cmp_cint, mdb_
 #else
 # define mdb_cmp_clong mdb_cmp_cint
 #endif
+
+/** True if we need #mdb_cmp_clong() instead of \b cmp for #MDB_INTEGERDUP */
+#define NEED_CMP_CLONG(cmp, ksize) \
+	(UINT_MAX < MDB_SIZE_MAX && \
+	 (cmp) == mdb_cmp_int && (ksize) == sizeof(mdb_size_t))
 
 #ifdef _WIN32
 static SECURITY_DESCRIPTOR mdb_null_sd;
@@ -1842,10 +1852,8 @@ int
 mdb_dcmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b)
 {
 	MDB_cmp_func *dcmp = txn->mt_dbxs[dbi].md_dcmp;
-#if UINT_MAX < SIZE_MAX || defined(MDB_VL32)
-	if (dcmp == mdb_cmp_int && a->mv_size == sizeof(mdb_size_t))
+	if (NEED_CMP_CLONG(dcmp, a->mv_size))
 		dcmp = mdb_cmp_clong;
-#endif
 	return dcmp(a, b);
 }
 
@@ -1960,8 +1968,14 @@ mdb_cursor_unref(MDB_cursor *mc)
 	mc->mc_pg[0] = NULL;
 	mc->mc_flags &= ~C_INITIALIZED;
 }
+#define MDB_CURSOR_UNREF(mc, force) \
+	(((force) || ((mc)->mc_flags & C_INITIALIZED)) \
+	 ? mdb_cursor_unref(mc) \
+	 : (void)0)
+
 #else
 #define MDB_PAGE_UNREF(txn, mp)
+#define MDB_CURSOR_UNREF(mc, force) ((void)0)
 #endif /* MDB_VL32 */
 
 /** Loosen or free a single page.
@@ -6292,12 +6306,10 @@ mdb_node_read(MDB_cursor *mc, MDB_node *leaf, MDB_val *data)
 	pgno_t		 pgno;
 	int rc;
 
-#ifdef MDB_VL32
-	if (mc->mc_ovpg) {
-		MDB_PAGE_UNREF(mc->mc_txn, mc->mc_ovpg);
-		mc->mc_ovpg = 0;
+	if (MC_OVPG(mc)) {
+		MDB_PAGE_UNREF(mc->mc_txn, MC_OVPG(mc));
+		MC_SET_OVPG(mc, NULL);
 	}
-#endif
 	if (!F_ISSET(leaf->mn_flags, F_BIGDATA)) {
 		data->mv_size = NODEDSZ(leaf);
 		data->mv_data = NODEDATA(leaf);
@@ -6313,9 +6325,7 @@ mdb_node_read(MDB_cursor *mc, MDB_node *leaf, MDB_val *data)
 		return rc;
 	}
 	data->mv_data = METADATA(omp);
-#ifdef MDB_VL32
-	mc->mc_ovpg = omp;
-#endif
+	MC_SET_OVPG(mc, omp);
 
 	return MDB_SUCCESS;
 }
@@ -6339,14 +6349,10 @@ mdb_get(MDB_txn *txn, MDB_dbi dbi,
 
 	mdb_cursor_init(&mc, txn, dbi, &mx);
 	rc = mdb_cursor_set(&mc, key, data, MDB_SET, &exact);
-#ifdef MDB_VL32
-	{
-		/* unref all the pages - caller must copy the data
-		 * before doing anything else
-		 */
-		mdb_cursor_unref(&mc);
-	}
-#endif
+	/* unref all the pages when MDB_VL32 - caller must copy the data
+	 * before doing anything else
+	 */
+	MDB_CURSOR_UNREF(&mc, 1);
 	return rc;
 }
 
@@ -6443,13 +6449,9 @@ mdb_cursor_next(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 					return rc;
 				}
 			}
-#ifdef MDB_VL32
 			else {
-				if (mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED) {
-					mdb_cursor_unref(&mc->mc_xcursor->mx_cursor);
-				}
+				MDB_CURSOR_UNREF(&mc->mc_xcursor->mx_cursor, 0);
 			}
-#endif
 		} else {
 			mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
 			if (op == MDB_NEXT_DUP)
@@ -6536,13 +6538,9 @@ mdb_cursor_prev(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 					return rc;
 				}
 			}
-#ifdef MDB_VL32
 			else {
-				if (mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED) {
-					mdb_cursor_unref(&mc->mc_xcursor->mx_cursor);
-				}
+				MDB_CURSOR_UNREF(&mc->mc_xcursor->mx_cursor, 0);
 			}
-#endif
 		} else {
 			mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
 			if (op == MDB_PREV_DUP)
@@ -6744,11 +6742,8 @@ set1:
 		return MDB_SUCCESS;
 	}
 
-#ifdef MDB_VL32
-	if (mc->mc_xcursor && mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED) {
-		mdb_cursor_unref(&mc->mc_xcursor->mx_cursor);
-	}
-#endif
+	if (mc->mc_xcursor)
+		MDB_CURSOR_UNREF(&mc->mc_xcursor->mx_cursor, 0);
 	if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
 		mdb_xcursor_init1(mc, leaf);
 	}
@@ -6774,10 +6769,8 @@ set1:
 			if ((rc = mdb_node_read(mc, leaf, &olddata)) != MDB_SUCCESS)
 				return rc;
 			dcmp = mc->mc_dbx->md_dcmp;
-#if UINT_MAX < SIZE_MAX || defined(MDB_VL32)
-			if (dcmp == mdb_cmp_int && olddata.mv_size == sizeof(mdb_size_t))
+			if (NEED_CMP_CLONG(dcmp, olddata.mv_size))
 				dcmp = mdb_cmp_clong;
-#endif
 			rc = dcmp(data, &olddata);
 			if (rc) {
 				if (op == MDB_GET_BOTH || rc > 0)
@@ -6810,11 +6803,7 @@ mdb_cursor_first(MDB_cursor *mc, MDB_val *key, MDB_val *data)
 	MDB_node	*leaf;
 
 	if (mc->mc_xcursor) {
-#ifdef MDB_VL32
-		if (mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED) {
-			mdb_cursor_unref(&mc->mc_xcursor->mx_cursor);
-		}
-#endif
+		MDB_CURSOR_UNREF(&mc->mc_xcursor->mx_cursor, 0);
 		mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
 	}
 
@@ -6860,11 +6849,7 @@ mdb_cursor_last(MDB_cursor *mc, MDB_val *key, MDB_val *data)
 	MDB_node	*leaf;
 
 	if (mc->mc_xcursor) {
-#ifdef MDB_VL32
-		if (mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED) {
-			mdb_cursor_unref(&mc->mc_xcursor->mx_cursor);
-		}
-#endif
+		MDB_CURSOR_UNREF(&mc->mc_xcursor->mx_cursor, 0);
 		mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
 	}
 
@@ -7320,10 +7305,8 @@ more:
 				if (flags == MDB_CURRENT)
 					goto current;
 				dcmp = mc->mc_dbx->md_dcmp;
-#if UINT_MAX < SIZE_MAX || defined(MDB_VL32)
-				if (dcmp == mdb_cmp_int && olddata.mv_size == sizeof(mdb_size_t))
+				if (NEED_CMP_CLONG(dcmp, olddata.mv_size))
 					dcmp = mdb_cmp_clong;
-#endif
 				/* does data match? */
 				if (!dcmp(data, &olddata)) {
 					if (flags & (MDB_NODUPDATA|MDB_APPENDDUP))
@@ -8107,9 +8090,7 @@ mdb_xcursor_init0(MDB_cursor *mc)
 	mx->mx_cursor.mc_dbflag = &mx->mx_dbflag;
 	mx->mx_cursor.mc_snum = 0;
 	mx->mx_cursor.mc_top = 0;
-#ifdef MDB_VL32
-	mx->mx_cursor.mc_ovpg = 0;
-#endif
+	MC_SET_OVPG(&mx->mx_cursor, NULL);
 	mx->mx_cursor.mc_flags = C_SUB | (mc->mc_flags & (C_ORIG_RDONLY|C_WRITEMAP));
 	mx->mx_dbx.md_name.mv_size = 0;
 	mx->mx_dbx.md_name.mv_data = NULL;
@@ -8160,10 +8141,8 @@ mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
 	DPRINTF(("Sub-db -%u root page %"Y"u", mx->mx_cursor.mc_dbi,
 		mx->mx_db.md_root));
 	mx->mx_dbflag = DB_VALID|DB_USRVALID|DB_DIRTY; /* DB_DIRTY guides mdb_cursor_touch */
-#if UINT_MAX < SIZE_MAX || defined(MDB_VL32)
-	if (mx->mx_dbx.md_cmp == mdb_cmp_int && mx->mx_db.md_pad == sizeof(mdb_size_t))
+	if (NEED_CMP_CLONG(mx->mx_dbx.md_cmp, mx->mx_db.md_pad))
 		mx->mx_dbx.md_cmp = mdb_cmp_clong;
-#endif
 }
 
 
@@ -8213,9 +8192,7 @@ mdb_cursor_init(MDB_cursor *mc, MDB_txn *txn, MDB_dbi dbi, MDB_xcursor *mx)
 	mc->mc_top = 0;
 	mc->mc_pg[0] = 0;
 	mc->mc_ki[0] = 0;
-#ifdef MDB_VL32
-	mc->mc_ovpg = 0;
-#endif
+	MC_SET_OVPG(mc, NULL);
 	mc->mc_flags = txn->mt_flags & (C_ORIG_RDONLY|C_WRITEMAP);
 	if (txn->mt_dbs[dbi].md_flags & MDB_DUPSORT) {
 		mdb_tassert(txn, mx != NULL);
@@ -8830,9 +8807,7 @@ mdb_cursor_copy(const MDB_cursor *csrc, MDB_cursor *cdst)
 	cdst->mc_snum = csrc->mc_snum;
 	cdst->mc_top = csrc->mc_top;
 	cdst->mc_flags = csrc->mc_flags;
-#ifdef MDB_VL32
-	cdst->mc_ovpg = csrc->mc_ovpg;
-#endif
+	MC_SET_OVPG(cdst, MC_OVPG(csrc));
 
 	for (i=0; i<csrc->mc_snum; i++) {
 		cdst->mc_pg[i] = csrc->mc_pg[i];
@@ -10605,10 +10580,8 @@ pop:
 done:
 		if (rc)
 			txn->mt_flags |= MDB_TXN_ERROR;
-#ifdef MDB_VL32
 		/* drop refcount for mx's pages */
-		mdb_cursor_unref(&mx);
-#endif
+		MDB_CURSOR_UNREF(&mx, 0);
 	} else if (rc == MDB_NOTFOUND) {
 		rc = MDB_SUCCESS;
 	}
