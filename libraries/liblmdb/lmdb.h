@@ -186,30 +186,20 @@ typedef	mode_t	mdb_mode_t;
 # define MDB_FMT_Z	"z"			/**< printf/scanf format modifier for size_t */
 #endif
 
-#if !defined(MDB_VL32) || SIZE_MAX > 0xffffffffU
+#ifndef MDB_VL32
 typedef size_t	mdb_size_t;
 # define MDB_SIZE_MAX	SIZE_MAX	/**< max #mdb_size_t */
-# define MDB_FMT_Y		MDB_FMT_Z	/**< Obsolescent, see #MDB_PRIz()/#MDB_SCNz() */
-/* TODO: For VL32, use uint64_t (trivial) and therefore PRI<c>64 (big patch) */
-#elif defined(_WIN32)
-typedef unsigned __int64 mdb_size_t;
-# define MDB_SIZE_MAX	_UI64_MAX
-# define MDB_FMT_Y		"I64"
-#elif defined(ULLONG_MAX)
-typedef unsigned long long	mdb_size_t;
-# define MDB_SIZE_MAX	ULLONG_MAX
-# define MDB_FMT_Y		"ll"
+/** #mdb_size_t printf formats, \b t = one of [diouxX] without quotes */
+# define MDB_PRIy(t)	MDB_FMT_Z #t
+/** #mdb_size_t scanf formats, \b t = one of [dioux] without quotes */
+# define MDB_SCNy(t)	MDB_FMT_Z #t
 #else
-# error "Found no acceptable integer type for mdb_size_t"
-#endif
-#ifdef MDB_VL32
+typedef uint64_t	mdb_size_t;
+# define MDB_SIZE_MAX	UINT64_MAX
+# define MDB_PRIy(t)	PRI##t##64
+# define MDB_SCNy(t)	SCN##t##64
 # define mdb_env_create	mdb_env_create_vl32	/**< Prevent mixing with non-VL32 builds */
 #endif
-
-/** #mdb_size_t printf formats, \b t = one of [diouxX] without quotes */
-#define MDB_PRIz(t)	MDB_FMT_Y #t
-/** #mdb_size_t scanf formats, \b t = one of [dioux] without quotes */
-#define MDB_SCNz(t)	MDB_FMT_Y #t
 
 /** An abstraction for a file handle.
  *	On POSIX systems file handles are small integers. On Windows

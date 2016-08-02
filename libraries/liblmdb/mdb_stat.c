@@ -18,7 +18,7 @@
 #include "lmdb.h"
 
 #define Z	MDB_FMT_Z
-#define Y	MDB_FMT_Y
+#define Yu	MDB_PRIy(u)
 
 static void prstat(MDB_stat *ms)
 {
@@ -26,10 +26,10 @@ static void prstat(MDB_stat *ms)
 	printf("  Page size: %u\n", ms->ms_psize);
 #endif
 	printf("  Tree depth: %u\n", ms->ms_depth);
-	printf("  Branch pages: %"Y"u\n", ms->ms_branch_pages);
-	printf("  Leaf pages: %"Y"u\n", ms->ms_leaf_pages);
-	printf("  Overflow pages: %"Y"u\n", ms->ms_overflow_pages);
-	printf("  Entries: %"Y"u\n", ms->ms_entries);
+	printf("  Branch pages: %"Yu"\n",   ms->ms_branch_pages);
+	printf("  Leaf pages: %"Yu"\n",     ms->ms_leaf_pages);
+	printf("  Overflow pages: %"Yu"\n", ms->ms_overflow_pages);
+	printf("  Entries: %"Yu"\n",        ms->ms_entries);
 }
 
 static void usage(char *prog)
@@ -122,11 +122,11 @@ int main(int argc, char *argv[])
 		(void)mdb_env_info(env, &mei);
 		printf("Environment Info\n");
 		printf("  Map address: %p\n", mei.me_mapaddr);
-		printf("  Map size: %"Y"u\n", mei.me_mapsize);
+		printf("  Map size: %"Yu"\n", mei.me_mapsize);
 		printf("  Page size: %u\n", mst.ms_psize);
-		printf("  Max pages: %"Y"u\n", mei.me_mapsize / mst.ms_psize);
-		printf("  Number of pages used: %"Y"u\n", mei.me_last_pgno+1);
-		printf("  Last transaction ID: %"Y"u\n", mei.me_last_txnid);
+		printf("  Max pages: %"Yu"\n", mei.me_mapsize / mst.ms_psize);
+		printf("  Number of pages used: %"Yu"\n", mei.me_last_pgno+1);
+		printf("  Last transaction ID: %"Yu"\n", mei.me_last_txnid);
 		printf("  Max readers: %u\n", mei.me_maxreaders);
 		printf("  Number of readers used: %u\n", mei.me_numreaders);
 	}
@@ -184,20 +184,20 @@ int main(int argc, char *argv[])
 					pg += span;
 					for (; i >= span && iptr[i-span] == pg; span++, pg++) ;
 				}
-				printf("    Transaction %"Y"u, %"Z"d pages, maxspan %"Z"d%s\n",
+				printf("    Transaction %"Yu", %"Z"d pages, maxspan %"Z"d%s\n",
 					*(mdb_size_t *)key.mv_data, j, span, bad);
 				if (freinfo > 2) {
 					for (--j; j >= 0; ) {
 						pg = iptr[j];
 						for (span=1; --j >= 0 && iptr[j] == pg+span; span++) ;
-						printf(span>1 ? "     %9"Y"u[%"Z"d]\n" : "     %9"Y"u\n",
+						printf(span>1 ? "     %9"Yu"[%"Z"d]\n" : "     %9"Yu"\n",
 							pg, span);
 					}
 				}
 			}
 		}
 		mdb_cursor_close(cursor);
-		printf("  Free pages: %"Y"u\n", pages);
+		printf("  Free pages: %"Yu"\n", pages);
 	}
 
 	rc = mdb_open(txn, subname, 0, &dbi);

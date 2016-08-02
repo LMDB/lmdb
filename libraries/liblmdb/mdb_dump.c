@@ -20,7 +20,7 @@
 #include <signal.h>
 #include "lmdb.h"
 
-#define Y	MDB_FMT_Y
+#define Yu	MDB_PRIy(u)
 
 #define PRINT	1
 static int mode;
@@ -111,7 +111,7 @@ static int dumpit(MDB_txn *txn, MDB_dbi dbi, char *name)
 	if (name)
 		printf("database=%s\n", name);
 	printf("type=btree\n");
-	printf("mapsize=%" Y "u\n", info.me_mapsize);
+	printf("mapsize=%"Yu"\n", info.me_mapsize);
 	if (info.me_mapaddr)
 		printf("mapaddr=%p\n", info.me_mapaddr);
 	printf("maxreaders=%u\n", info.me_maxreaders);
