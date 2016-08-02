@@ -868,9 +868,23 @@ typedef struct MDB_txninfo {
 	  + (((MDB_PIDLOCK) != 0) << 16)))
 /** @} */
 
-/** Common header for all page types.
- * Overflow records occupy a number of contiguous pages with no
- * headers on any page after the first.
+/** Common header for all page types. The page type depends on #mp_flags.
+ *
+ * #P_BRANCH and #P_LEAF pages have unsorted '#MDB_node's at the end, with
+ * sorted #mp_ptrs[] entries referring to them. Exception: #P_LEAF2 pages
+ * omit mp_ptrs and pack sorted #MDB_DUPFIXED values after the page header.
+ *
+ * #P_OVERFLOW records occupy one or more contiguous pages where only the
+ * first has a page header. They hold the real data of #F_BIGDATA nodes.
+ *
+ * #P_SUBP sub-pages are small leaf "pages" with duplicate data.
+ * A node with flag #F_DUPDATA but not #F_SUBDATA contains a sub-page.
+ * (Duplicate data can also go in sub-databases, which use normal pages.)
+ *
+ * #P_META pages contain #MDB_meta, the start point of an LMDB snapshot.
+ *
+ * Each non-metapage up to #MDB_meta.%mm_last_pg is reachable exactly once
+ * in the snapshot: Either used by a database or listed in a freeDB record.
  */
 typedef struct MDB_page {
 #define	mp_pgno	mp_p.p_pgno
@@ -879,7 +893,7 @@ typedef struct MDB_page {
 		pgno_t		p_pgno;	/**< page number */
 		struct MDB_page *p_next; /**< for in-memory list of freed pages */
 	} mp_p;
-	uint16_t	mp_pad;
+	uint16_t	mp_pad;			/**< key size if this is a LEAF2 page */
 /**	@defgroup mdb_page	Page Flags
  *	@ingroup internal
  *	Flags for the page headers.
@@ -946,7 +960,9 @@ typedef struct MDB_page {
 	/** The number of overflow pages needed to store the given size. */
 #define OVPAGES(size, psize)	((PAGEHDRSZ-1 + (size)) / (psize) + 1)
 
-	/** Link in #MDB_txn.%mt_loose_pgs list */
+	/** Link in #MDB_txn.%mt_loose_pgs list.
+	 *  Kept outside the page header, which is needed when reusing the page.
+	 */
 #define NEXT_LOOSE_PAGE(p)		(*(MDB_page **)((p) + 2))
 
 	/** Header for a single key/data pair within a page.
