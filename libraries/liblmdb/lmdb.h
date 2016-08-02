@@ -187,6 +187,11 @@ typedef	mode_t	mdb_mode_t;
 #endif
 
 #ifndef MDB_VL32
+/** Unsigned type used for mapsize, entry counts and page/transaction IDs.
+ *
+ *	It is normally size_t, hence the name. Defining MDB_VL32 makes it
+ *	uint64_t, but do not try this unless you know what you are doing.
+ */
 typedef size_t	mdb_size_t;
 # define MDB_SIZE_MAX	SIZE_MAX	/**< max #mdb_size_t */
 /** #mdb_size_t printf formats, \b t = one of [diouxX] without quotes */
