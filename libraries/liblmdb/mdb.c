@@ -258,6 +258,10 @@ typedef SSIZE_T	ssize_t;
 #  define MDB_USE_ROBUST	0
 # else
 #  define MDB_USE_ROBUST	1
+# endif
+#endif /* !MDB_USE_ROBUST */
+
+#if defined(MDB_USE_POSIX_MUTEX) && (MDB_USE_ROBUST)
 /* glibc < 2.12 only provided _np API */
 #  if (defined(__GLIBC__) && GLIBC_VER < 0x02000c) || \
 	(defined(PTHREAD_MUTEX_ROBUST_NP) && !defined(PTHREAD_MUTEX_ROBUST))
@@ -265,10 +269,9 @@ typedef SSIZE_T	ssize_t;
 #   define pthread_mutexattr_setrobust(attr, flag)	pthread_mutexattr_setrobust_np(attr, flag)
 #   define pthread_mutex_consistent(mutex)	pthread_mutex_consistent_np(mutex)
 #  endif
-# endif
-#endif /* MDB_USE_ROBUST */
+#endif /* MDB_USE_POSIX_MUTEX && MDB_USE_ROBUST */
 
-#if defined(MDB_OWNERDEAD) && MDB_USE_ROBUST
+#if defined(MDB_OWNERDEAD) && (MDB_USE_ROBUST)
 #define MDB_ROBUST_SUPPORTED	1
 #endif
 
