@@ -1739,7 +1739,7 @@ mdb_page_list(MDB_page *mp)
 			pgno, ((MDB_meta *)METADATA(mp))->mm_txnid);
 		return;
 	default:
-		fprintf(stderr, "Bad page %"Yu" flags 0x%u\n", pgno, mp->mp_flags);
+		fprintf(stderr, "Bad page %"Yu" flags 0x%X\n", pgno, mp->mp_flags);
 		return;
 	}
 
