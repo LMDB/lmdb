@@ -9628,12 +9628,12 @@ mdb_put(MDB_txn *txn, MDB_dbi dbi,
 
 	/** State needed for a double-buffering compacting copy. */
 typedef struct mdb_copy {
+	MDB_env *mc_env;
+	MDB_txn *mc_txn;
 	pthread_mutex_t mc_mutex;
 	pthread_cond_t mc_cond;	/**< Condition variable for #mc_new */
 	char *mc_wbuf[2];
 	char *mc_over[2];
-	MDB_env *mc_env;
-	MDB_txn *mc_txn;
 	int mc_wlen[2];
 	int mc_olen[2];
 	pgno_t mc_next_pgno;
