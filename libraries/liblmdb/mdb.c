@@ -4523,7 +4523,7 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		if (rc == MDB_ERRCODE_ROFS && (env->me_flags & MDB_RDONLY)) {
 			return MDB_SUCCESS;
 		}
-		goto fail_errno;
+		goto fail;
 	}
 #if ! ((MDB_CLOEXEC) || defined(_WIN32))
 	/* Lose record locks when exec*() */
