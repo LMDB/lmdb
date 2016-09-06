@@ -4499,9 +4499,9 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 #ifdef O_CLOEXEC	/* Linux: Open file and set FD_CLOEXEC atomically */
 #	define MDB_CLOEXEC		O_CLOEXEC
 #else
-	int fdflags;
 #	define MDB_CLOEXEC		0
 #endif
+	int fdflags;
 #endif
 	int rc;
 	off_t size, rsize;
@@ -4525,10 +4525,10 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 		}
 		goto fail;
 	}
-#if ! ((MDB_CLOEXEC) || defined(_WIN32))
+#ifndef _WIN32
 	/* Lose record locks when exec*() */
-	if ((fdflags = fcntl(env->me_lfd, F_GETFD) | FD_CLOEXEC) >= 0)
-			fcntl(env->me_lfd, F_SETFD, fdflags);
+	if (!(MDB_CLOEXEC) && (fdflags = fcntl(env->me_lfd, F_GETFD)) != -1)
+			fcntl(env->me_lfd, F_SETFD, fdflags | FD_CLOEXEC);
 #endif
 
 	if (!(env->me_flags & MDB_NOTLS)) {
