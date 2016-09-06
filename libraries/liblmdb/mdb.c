@@ -10886,25 +10886,31 @@ mdb_mutex_failed(MDB_env *env, mdb_mutexref_t mutex, int rc)
 	return rc;
 }
 #endif	/* MDB_ROBUST_SUPPORTED */
-/** @} */
 
 #if defined(_WIN32)
-static int utf8_to_utf16(const char *src, int srcsize, wchar_t **dst, int *dstsize)
+static int ESECT
+utf8_to_utf16(const char *src, int srcsize, wchar_t **dst, int *dstsize)
 {
-	int need;
-	wchar_t *result;
-	need = MultiByteToWideChar(CP_UTF8, 0, src, srcsize, NULL, 0);
-	if (need == 0xFFFD)
-		return EILSEQ;
-	if (need == 0)
-		return EINVAL;
-	result = malloc(sizeof(wchar_t) * need);
-	if (!result)
-		return ENOMEM;
-	MultiByteToWideChar(CP_UTF8, 0, src, srcsize, result, need);
-	if (dstsize)
-		*dstsize = need;
-	*dst = result;
-	return 0;
+	int rc, need = 0;
+	wchar_t *result = NULL;
+	for (;;) {					/* malloc result, then fill it in */
+		need = MultiByteToWideChar(CP_UTF8, 0, src, srcsize, result, need);
+		if (!need) {
+			rc = ErrCode();
+			free(result);
+			return rc;
+		}
+		if (!result) {
+			result = malloc(sizeof(wchar_t) * need);
+			if (!result)
+				return ENOMEM;
+			continue;
+		}
+		if (dstsize)
+			*dstsize = need;
+		*dst = result;
+		return MDB_SUCCESS;
+	}
 }
 #endif /* defined(_WIN32) */
+/** @} */
