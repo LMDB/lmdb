@@ -10169,17 +10169,12 @@ mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
 	}
 
 	if (env->me_psize >= env->me_os_psize) {
-#ifdef O_DIRECT
+#ifdef F_NOCACHE	/* __APPLE__ */
+	(void) fcntl(newfd, F_NOCACHE, 1);
+#elif defined O_DIRECT
 	/* Set O_DIRECT if the file system supports it */
 	if ((rc = fcntl(newfd, F_GETFL)) != -1)
 		(void) fcntl(newfd, F_SETFL, rc | O_DIRECT);
-#endif
-#ifdef F_NOCACHE	/* __APPLE__ */
-	rc = fcntl(newfd, F_NOCACHE, 1);
-	if (rc) {
-		rc = ErrCode();
-		goto leave;
-	}
 #endif
 	}
 
