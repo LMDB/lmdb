@@ -41,6 +41,8 @@
 #ifdef _WIN32
 #include <malloc.h>
 #include <windows.h>
+#include <wchar.h>				/* get wcscpy() */
+
 /** getpid() returns int; MinGW defines pid_t but MinGW64 typedefs it
  *  as int64 which is wrong. MSVC doesn't define it at all, so just
  *  don't use it.
@@ -1415,7 +1417,8 @@ static SECURITY_DESCRIPTOR mdb_null_sd;
 static SECURITY_ATTRIBUTES mdb_all_sa;
 static int mdb_sec_inited;
 
-static int utf8_to_utf16(const char *src, int srcsize, wchar_t **dst, int *dstsize);
+struct MDB_name;
+static int utf8_to_utf16(const char *src, struct MDB_name *dst, int xtra);
 #endif
 
 /** Return the library version info. */
@@ -4079,6 +4082,79 @@ mdb_fsize(HANDLE fd, size_t *size)
 	return MDB_SUCCESS;
 }
 
+
+#ifdef _WIN32
+typedef wchar_t	mdb_nchar_t;
+# define MDB_NAME(str)	L##str
+# define mdb_name_cpy	wcscpy
+#else
+/** Character type for file names: char on Unix, wchar_t on Windows */
+typedef char	mdb_nchar_t;
+# define MDB_NAME(str)	str		/**< #mdb_nchar_t[] string literal */
+# define mdb_name_cpy	strcpy	/**< Copy name (#mdb_nchar_t string) */
+#endif
+
+/** Filename - string of #mdb_nchar_t[] */
+typedef struct MDB_name {
+	int mn_len;					/**< Length  */
+	int mn_alloced;				/**< True if #mn_val was malloced */
+	mdb_nchar_t	*mn_val;		/**< Contents */
+} MDB_name;
+
+/** Filename suffixes [datafile,lockfile][without,with MDB_NOSUBDIR] */
+static const mdb_nchar_t *const mdb_suffixes[2][2] = {
+	{ MDB_NAME("/data.mdb"), MDB_NAME("")      },
+	{ MDB_NAME("/lock.mdb"), MDB_NAME("-lock") }
+};
+
+#define MDB_SUFFLEN 9	/**< Max string length in #mdb_suffixes[] */
+
+/** Set up filename + scratch area for filename suffix, for opening files.
+ * It should be freed with #mdb_fname_destroy().
+ * On Windows, paths are converted from char *UTF-8 to wchar_t *UTF-16.
+ *
+ * @param[in] path Pathname for #mdb_env_open().
+ * @param[in] envflags Whether a subdir and/or lockfile will be used.
+ * @param[out] fname Resulting filename, with room for a suffix if necessary.
+ */
+static int ESECT
+mdb_fname_init(const char *path, unsigned envflags, MDB_name *fname)
+{
+	int no_suffix = F_ISSET(envflags, MDB_NOSUBDIR|MDB_NOLOCK);
+	fname->mn_alloced = 0;
+#ifdef _WIN32
+	return utf8_to_utf16(path, fname, no_suffix ? 0 : MDB_SUFFLEN);
+#else
+	fname->mn_len = strlen(path);
+	if (no_suffix)
+		fname->mn_val = (char *) path;
+	else if ((fname->mn_val = malloc(fname->mn_len + MDB_SUFFLEN+1)) != NULL) {
+		fname->mn_alloced = 1;
+		strcpy(fname->mn_val, path);
+	}
+	else
+		return ENOMEM;
+	return MDB_SUCCESS;
+#endif
+}
+
+/** Destroy \b fname from #mdb_fname_init() */
+#define mdb_fname_destroy(fname) \
+	do { if ((fname).mn_alloced) free((fname).mn_val); } while (0)
+
+enum mdb_fopen_type {
+	MDB_O_DATA, MDB_O_LOCKS
+};
+
+static void ESECT
+mdb_fname_suffix_set(MDB_env *env, MDB_name *fname, enum mdb_fopen_type which)
+{
+	if (fname->mn_alloced)		/* modifiable copy */
+		mdb_name_cpy(fname->mn_val + fname->mn_len,
+			mdb_suffixes[which==MDB_O_LOCKS][F_ISSET(env->me_flags, MDB_NOSUBDIR)]);
+}
+
+
 #ifdef BROKEN_FDATASYNC
 #include <sys/utsname.h>
 #include <sys/vfs.h>
@@ -4484,13 +4560,13 @@ mdb_hash_enc(MDB_val *val, char *encbuf)
 
 /** Open and/or initialize the lock region for the environment.
  * @param[in] env The LMDB environment.
- * @param[in] lpath The pathname of the file used for the lock region.
+ * @param[in] fname Filename + scratch area, from #mdb_fname_init().
  * @param[in] mode The Unix permissions for the file, if we create it.
  * @param[in,out] excl In -1, out lock type: -1 none, 0 shared, 1 exclusive
  * @return 0 on success, non-zero on failure.
  */
 static int ESECT
-mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
+mdb_env_setup_locks(MDB_env *env, MDB_name *fname, int mode, int *excl)
 {
 #ifdef _WIN32
 #	define MDB_ERRCODE_ROFS	ERROR_WRITE_PROTECT
@@ -4506,17 +4582,13 @@ mdb_env_setup_locks(MDB_env *env, char *lpath, int mode, int *excl)
 	int rc;
 	off_t size, rsize;
 
+	mdb_fname_suffix_set(env, fname, MDB_O_LOCKS);
 #ifdef _WIN32
-	wchar_t *wlpath;
-	rc = utf8_to_utf16(lpath, -1, &wlpath, NULL);
-	if (rc)
-		return rc;
-	env->me_lfd = CreateFileW(wlpath, GENERIC_READ|GENERIC_WRITE,
+	env->me_lfd = CreateFileW(fname->mn_val, GENERIC_READ|GENERIC_WRITE,
 		FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_ALWAYS,
 		FILE_ATTRIBUTE_NORMAL, NULL);
-	free(wlpath);
 #else
-	env->me_lfd = open(lpath, O_RDWR|O_CREAT|MDB_CLOEXEC, mode);
+	env->me_lfd = open(fname->mn_val, O_RDWR|O_CREAT|MDB_CLOEXEC, mode);
 #endif
 	if (env->me_lfd == INVALID_HANDLE_VALUE) {
 		rc = ErrCode();
@@ -4719,12 +4791,6 @@ fail:
 	return rc;
 }
 
-	/** The name of the lock file in the DB environment */
-#define LOCKNAME	"/lock.mdb"
-	/** The name of the data file in the DB environment */
-#define DATANAME	"/data.mdb"
-	/** The suffix of the lock file when no subdir is used */
-#define LOCKSUFF	"-lock"
 	/** Only a subset of the @ref mdb_env flags can be changed
 	 *	at runtime. Changing other flags requires closing the
 	 *	environment and re-opening it with the new flags.
@@ -4741,35 +4807,17 @@ int ESECT
 mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode)
 {
 	int		oflags, rc, len, excl = -1;
-	char *lpath, *dpath;
-#ifdef _WIN32
-	wchar_t *wpath;
-#endif
+	MDB_name fname;
 
 	if (env->me_fd!=INVALID_HANDLE_VALUE || (flags & ~(CHANGEABLE|CHANGELESS)))
 		return EINVAL;
 
-	len = strlen(path);
-	if (flags & MDB_NOSUBDIR) {
-		rc = len + sizeof(LOCKSUFF) + len + 1;
-	} else {
-		rc = len + sizeof(LOCKNAME) + len + sizeof(DATANAME);
-	}
-	lpath = malloc(rc);
-	if (!lpath)
-		return ENOMEM;
-	if (flags & MDB_NOSUBDIR) {
-		dpath = lpath + len + sizeof(LOCKSUFF);
-		sprintf(lpath, "%s" LOCKSUFF, path);
-		strcpy(dpath, path);
-	} else {
-		dpath = lpath + len + sizeof(LOCKNAME);
-		sprintf(lpath, "%s" LOCKNAME, path);
-		sprintf(dpath, "%s" DATANAME, path);
-	}
-
-	rc = MDB_SUCCESS;
 	flags |= env->me_flags;
+
+	rc = mdb_fname_init(path, flags, &fname);
+	if (rc)
+		return rc;
+
 	if (flags & MDB_RDONLY) {
 		/* silently ignore WRITEMAP when we're only getting read access */
 		flags &= ~MDB_WRITEMAP;
@@ -4794,11 +4842,12 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 
 	/* For RDONLY, get lockfile after we know datafile exists */
 	if (!(flags & (MDB_RDONLY|MDB_NOLOCK))) {
-		rc = mdb_env_setup_locks(env, lpath, mode, &excl);
+		rc = mdb_env_setup_locks(env, &fname, mode, &excl);
 		if (rc)
 			goto leave;
 	}
 
+	mdb_fname_suffix_set(env, &fname, MDB_O_DATA);
 #ifdef _WIN32
 	if (F_ISSET(flags, MDB_RDONLY)) {
 		oflags = GENERIC_READ;
@@ -4808,19 +4857,15 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 		len = OPEN_ALWAYS;
 	}
 	mode = FILE_ATTRIBUTE_NORMAL;
-	rc = utf8_to_utf16(dpath, -1, &wpath, NULL);
-	if (rc)
-		goto leave;
-	env->me_fd = CreateFileW(wpath, oflags, FILE_SHARE_READ|FILE_SHARE_WRITE,
+	env->me_fd = CreateFileW(fname.mn_val, oflags, FILE_SHARE_READ|FILE_SHARE_WRITE,
 		NULL, len, mode, NULL);
-	free(wpath);
 #else
 	if (F_ISSET(flags, MDB_RDONLY))
 		oflags = O_RDONLY;
 	else
 		oflags = O_RDWR | O_CREAT;
 
-	env->me_fd = open(dpath, oflags, mode);
+	env->me_fd = open(fname.mn_val, oflags, mode);
 #endif
 	if (env->me_fd == INVALID_HANDLE_VALUE) {
 		rc = ErrCode();
@@ -4828,7 +4873,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 	}
 
 	if ((flags & (MDB_RDONLY|MDB_NOLOCK)) == MDB_RDONLY) {
-		rc = mdb_env_setup_locks(env, lpath, mode, &excl);
+		rc = mdb_env_setup_locks(env, &fname, mode, &excl);
 		if (rc)
 			goto leave;
 	}
@@ -4840,18 +4885,15 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 			/* Synchronous fd for meta writes. Needed even with
 			 * MDB_NOSYNC/MDB_NOMETASYNC, in case these get reset.
 			 */
+			mdb_fname_suffix_set(env, &fname, MDB_O_DATA);
 #ifdef _WIN32
 			len = OPEN_EXISTING;
-			rc = utf8_to_utf16(dpath, -1, &wpath, NULL);
-			if (rc)
-				goto leave;
-			env->me_mfd = CreateFileW(wpath, oflags,
+			env->me_mfd = CreateFileW(fname.mn_val, oflags,
 				FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, len,
 				mode | FILE_FLAG_WRITE_THROUGH, NULL);
-			free(wpath);
 #else
 			oflags &= ~O_CREAT;
-			env->me_mfd = open(dpath, oflags | MDB_DSYNC, mode);
+			env->me_mfd = open(fname.mn_val, oflags | MDB_DSYNC, mode);
 #endif
 			if (env->me_mfd == INVALID_HANDLE_VALUE) {
 				rc = ErrCode();
@@ -4889,7 +4931,7 @@ leave:
 	if (rc) {
 		mdb_env_close0(env, excl);
 	}
-	free(lpath);
+	mdb_fname_destroy(fname);
 	return rc;
 }
 
@@ -9356,37 +9398,24 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
 int ESECT
 mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
 {
-	int rc, len;
-	char *lpath;
+	int rc;
+	MDB_name fname;
 	HANDLE newfd = INVALID_HANDLE_VALUE;
-#ifdef _WIN32
-	wchar_t *wpath;
-#endif
 
-	if (env->me_flags & MDB_NOSUBDIR) {
-		lpath = (char *)path;
-	} else {
-		len = strlen(path);
-		len += sizeof(DATANAME);
-		lpath = malloc(len);
-		if (!lpath)
-			return ENOMEM;
-		sprintf(lpath, "%s" DATANAME, path);
-	}
+	rc = mdb_fname_init(path, env->me_flags | MDB_NOLOCK, &fname);
+	if (rc)
+		return rc;
+	mdb_fname_suffix_set(env, &fname, MDB_O_DATA);
 
 	/* The destination path must exist, but the destination file must not.
 	 * We don't want the OS to cache the writes, since the source data is
 	 * already in the OS cache.
 	 */
 #ifdef _WIN32
-	rc = utf8_to_utf16(lpath, -1, &wpath, NULL);
-	if (rc)
-		goto leave;
-	newfd = CreateFileW(wpath, GENERIC_WRITE, 0, NULL, CREATE_NEW,
+	newfd = CreateFileW(fname.mn_val, GENERIC_WRITE, 0, NULL, CREATE_NEW,
 				FILE_FLAG_NO_BUFFERING|FILE_FLAG_WRITE_THROUGH, NULL);
-	free(wpath);
 #else
-	newfd = open(lpath, O_WRONLY|O_CREAT|O_EXCL, 0666);
+	newfd = open(fname.mn_val, O_WRONLY|O_CREAT|O_EXCL, 0666);
 #endif
 	if (newfd == INVALID_HANDLE_VALUE) {
 		rc = ErrCode();
@@ -9406,8 +9435,7 @@ mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
 	rc = mdb_env_copyfd2(env, newfd, flags);
 
 leave:
-	if (!(env->me_flags & MDB_NOSUBDIR))
-		free(lpath);
+	mdb_fname_destroy(fname);
 	if (newfd != INVALID_HANDLE_VALUE)
 		if (close(newfd) < 0 && rc == MDB_SUCCESS)
 			rc = ErrCode();
@@ -10106,27 +10134,28 @@ mdb_mutex_failed(MDB_env *env, mdb_mutexref_t mutex, int rc)
 #endif	/* MDB_ROBUST_SUPPORTED */
 
 #if defined(_WIN32)
+/** Convert \b src to new wchar_t[] string with room for \b xtra extra chars */
 static int ESECT
-utf8_to_utf16(const char *src, int srcsize, wchar_t **dst, int *dstsize)
+utf8_to_utf16(const char *src, MDB_name *dst, int xtra)
 {
 	int rc, need = 0;
 	wchar_t *result = NULL;
 	for (;;) {					/* malloc result, then fill it in */
-		need = MultiByteToWideChar(CP_UTF8, 0, src, srcsize, result, need);
+		need = MultiByteToWideChar(CP_UTF8, 0, src, -1, result, need);
 		if (!need) {
 			rc = ErrCode();
 			free(result);
 			return rc;
 		}
 		if (!result) {
-			result = malloc(sizeof(wchar_t) * need);
+			result = malloc(sizeof(wchar_t) * (need + xtra));
 			if (!result)
 				return ENOMEM;
 			continue;
 		}
-		if (dstsize)
-			*dstsize = need;
-		*dst = result;
+		dst->mn_alloced = 1;
+		dst->mn_len = need - 1;
+		dst->mn_val = result;
 		return MDB_SUCCESS;
 	}
 }
