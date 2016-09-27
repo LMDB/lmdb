@@ -4747,7 +4747,11 @@ mdb_env_reader_dest(void *ptr)
 {
 	MDB_reader *reader = ptr;
 
-	reader->mr_pid = 0;
+#ifndef _WIN32
+	if (reader->mr_pid == getpid()) /* catch pthread_exit() in child process */
+#endif
+		/* We omit the mutex, so do this atomically (i.e. skip mr_txnid) */
+		reader->mr_pid = 0;
 }
 
 #ifdef _WIN32
