@@ -4156,8 +4156,8 @@ enum mdb_fopen_type {
 	/* A comment in mdb_fopen() explains some O_* flag choices. */
 	MDB_O_RDONLY= O_RDONLY,                            /**< for RDONLY me_fd */
 	MDB_O_RDWR  = O_RDWR  |O_CREAT,                    /**< for me_fd */
-	MDB_O_META  = O_RDWR  |MDB_DSYNC,                  /**< for me_mfd */
-	MDB_O_COPY  = O_WRONLY|O_CREAT|O_EXCL,             /**< for #mdb_env_copy() */
+	MDB_O_META  = O_RDWR  |MDB_DSYNC     |MDB_CLOEXEC, /**< for me_mfd */
+	MDB_O_COPY  = O_WRONLY|O_CREAT|O_EXCL|MDB_CLOEXEC, /**< for #mdb_env_copy() */
 	/** Bitmask for open() flags in enum #mdb_fopen_type.  The other bits
 	 * distinguish otherwise-equal MDB_O_* constants from each other.
 	 */
@@ -4201,6 +4201,9 @@ mdb_fopen(const MDB_env *env, MDB_name *fname,
 	 *
 	 * The lockfile needs FD_CLOEXEC (close file descriptor on exec*())
 	 * to avoid the flock() issues noted under Caveats in lmdb.h.
+	 * Also set it for other filehandles which the user cannot get at
+	 * and close himself, which he may need after fork().  I.e. all but
+	 * me_fd, which programs do use via mdb_env_get_fd().
 	 */
 
 #ifdef _WIN32
@@ -4234,7 +4237,7 @@ mdb_fopen(const MDB_env *env, MDB_name *fname,
 		rc = ErrCode();
 #ifndef _WIN32
 	else {
-		if (which == MDB_O_LOCKS) {
+		if (which != MDB_O_RDONLY && which != MDB_O_RDWR) {
 			/* Set CLOEXEC if we could not pass it to open() */
 			if (!MDB_CLOEXEC && (flags = fcntl(fd, F_GETFD)) != -1)
 				(void) fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
