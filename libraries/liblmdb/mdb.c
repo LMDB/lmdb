@@ -1362,7 +1362,7 @@ typedef struct MDB_pgstate {
 struct MDB_env {
 	HANDLE		me_fd;		/**< The main data file */
 	HANDLE		me_lfd;		/**< The lock file */
-	HANDLE		me_mfd;			/**< just for writing the meta pages */
+	HANDLE		me_mfd;		/**< For writing and syncing the meta pages */
 #if defined(MDB_VL32) && defined(_WIN32)
 	HANDLE		me_fmh;		/**< File Mapping handle */
 #endif
@@ -4100,7 +4100,10 @@ mdb_env_write_meta(MDB_txn *txn)
 	len = sizeof(MDB_meta) - off;
 	off += (char *)mp - env->me_map;
 
-	/* Write to the SYNC fd */
+	/* Write to the SYNC fd unless MDB_NOSYNC/MDB_NOMETASYNC.
+	 * (me_mfd goes to the same file as me_fd, but writing to it
+	 * also syncs to disk.  Avoids a separate fdatasync() call.)
+	 */
 	mfd = (flags & (MDB_NOSYNC|MDB_NOMETASYNC)) ? env->me_fd : env->me_mfd;
 #ifdef _WIN32
 	{
@@ -4462,7 +4465,7 @@ enum mdb_fopen_type {
 	/* A comment in mdb_fopen() explains some O_* flag choices. */
 	MDB_O_RDONLY= O_RDONLY,                            /**< for RDONLY me_fd */
 	MDB_O_RDWR  = O_RDWR  |O_CREAT,                    /**< for me_fd */
-	MDB_O_META  = O_RDWR  |MDB_DSYNC     |MDB_CLOEXEC, /**< for me_mfd */
+	MDB_O_META  = O_WRONLY|MDB_DSYNC     |MDB_CLOEXEC, /**< for me_mfd */
 	MDB_O_COPY  = O_WRONLY|O_CREAT|O_EXCL|MDB_CLOEXEC, /**< for #mdb_env_copy() */
 	/** Bitmask for open() flags in enum #mdb_fopen_type.  The other bits
 	 * distinguish otherwise-equal MDB_O_* constants from each other.
@@ -4523,6 +4526,7 @@ mdb_fopen(const MDB_env *env, MDB_name *fname,
 		disp = OPEN_EXISTING;
 		break;
 	case MDB_O_META:			/* for writing metapages */
+		acc = GENERIC_WRITE;
 		disp = OPEN_EXISTING;
 		attrs = FILE_ATTRIBUTE_NORMAL|FILE_FLAG_WRITE_THROUGH;
 		break;
@@ -5339,9 +5343,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 	}
 
 	if ((rc = mdb_env_open2(env)) == MDB_SUCCESS) {
-		if (flags & (MDB_RDONLY|MDB_WRITEMAP)) {
-			env->me_mfd = env->me_fd;
-		} else {
+		if (!(flags & (MDB_RDONLY|MDB_WRITEMAP))) {
 			/* Synchronous fd for meta writes. Needed even with
 			 * MDB_NOSYNC/MDB_NOMETASYNC, in case these get reset.
 			 */
@@ -5447,7 +5449,7 @@ mdb_env_close0(MDB_env *env, int excl)
 		munmap(env->me_map, env->me_mapsize);
 #endif
 	}
-	if (env->me_mfd != env->me_fd && env->me_mfd != INVALID_HANDLE_VALUE)
+	if (env->me_mfd != INVALID_HANDLE_VALUE)
 		(void) close(env->me_mfd);
 	if (env->me_fd != INVALID_HANDLE_VALUE)
 		(void) close(env->me_fd);
