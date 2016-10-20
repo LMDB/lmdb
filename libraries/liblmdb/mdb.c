@@ -129,6 +129,7 @@ typedef SSIZE_T	ssize_t;
 
 #ifndef _WIN32
 #include <pthread.h>
+#include <signal.h>
 #ifdef MDB_USE_POSIX_SEM
 # define MDB_USE_HASH		1
 #include <semaphore.h>
@@ -8995,10 +8996,17 @@ mdb_env_copythr(void *arg)
 #define DO_WRITE(rc, fd, ptr, w2, len)	rc = WriteFile(fd, ptr, w2, &len, NULL)
 #else
 	int len;
+	sigset_t set;
 #define DO_WRITE(rc, fd, ptr, w2, len)	len = write(fd, ptr, w2); rc = (len >= 0)
+
+	sigemptyset(&set);
+	sigaddset(&set, SIGPIPE);
 #endif
 
 	pthread_mutex_lock(&my->mc_mutex);
+#ifndef _WIN32
+	my->mc_error = pthread_sigmask(SIG_BLOCK, &set, NULL);
+#endif
 	for(;;) {
 		while (!my->mc_new)
 			pthread_cond_wait(&my->mc_cond, &my->mc_mutex);
@@ -9012,6 +9020,12 @@ again:
 			DO_WRITE(rc, my->mc_fd, ptr, wsize, len);
 			if (!rc) {
 				rc = ErrCode();
+#ifndef _WIN32
+				if (rc == EPIPE) {
+					int tmp;
+					sigwait(&set, &tmp);
+				}
+#endif
 				break;
 			} else if (len > 0) {
 				rc = MDB_SUCCESS;
