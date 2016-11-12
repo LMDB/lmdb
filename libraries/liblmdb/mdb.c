@@ -9198,9 +9198,11 @@ mdb_cursor_del0(MDB_cursor *mc)
 					}
 					if (mc->mc_db->md_flags & MDB_DUPSORT) {
 						MDB_node *node = NODEPTR(m3->mc_pg[m3->mc_top], m3->mc_ki[m3->mc_top]);
-						if (node->mn_flags & F_DUPDATA) {
+						/* If this node is a fake page, it needs to be reinited
+						 * because its data has moved.
+						 */
+						if ((node->mn_flags & (F_DUPDATA|F_SUBDATA)) == F_DUPDATA) {
 							mdb_xcursor_init1(m3, node);
-							m3->mc_xcursor->mx_cursor.mc_flags |= C_DEL;
 						}
 					}
 				}
