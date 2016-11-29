@@ -8222,6 +8222,11 @@ mdb_cursor_del0(MDB_cursor *mc)
 			if (m3->mc_pg[mc->mc_top] == mp) {
 				if (m3->mc_ki[mc->mc_top] == ki) {
 					m3->mc_flags |= C_DEL;
+					if (mc->mc_db->md_flags & MDB_DUPSORT) {
+						/* Sub-cursor referred into dataset which is gone */
+						m3->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
+					}
+					continue;
 				} else if (m3->mc_ki[mc->mc_top] > ki) {
 					m3->mc_ki[mc->mc_top]--;
 				}
@@ -8266,9 +8271,15 @@ mdb_cursor_del0(MDB_cursor *mc)
 					}
 					if (mc->mc_db->md_flags & MDB_DUPSORT) {
 						MDB_node *node = NODEPTR(m3->mc_pg[m3->mc_top], m3->mc_ki[m3->mc_top]);
-						if (node->mn_flags & F_DUPDATA) {
-							mdb_xcursor_init1(m3, node);
-							m3->mc_xcursor->mx_cursor.mc_flags |= C_DEL;
+						/* If this node is a fake page, it needs to be reinited
+						 * because its data has moved. But just reset mc_pg[0]
+						 * if the xcursor is already live.
+						 */
+						if ((node->mn_flags & (F_DUPDATA|F_SUBDATA)) == F_DUPDATA) {
+							if (m3->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED)
+								m3->mc_xcursor->mx_cursor.mc_pg[0] = NODEDATA(node);
+							else
+								mdb_xcursor_init1(m3, node);
 						}
 					}
 				}
