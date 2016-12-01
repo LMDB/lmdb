@@ -247,10 +247,9 @@ typedef SSIZE_T	ssize_t;
 /** Some platforms define the EOWNERDEAD error code
  * even though they don't support Robust Mutexes.
  * Compile with -DMDB_USE_ROBUST=0, or use some other
- * mechanism like -DMDB_USE_SYSV_SEM instead of
- * -DMDB_USE_POSIX_MUTEX. (SysV semaphores are
- * also Robust, but some systems don't support them
- * either.)
+ * mechanism like -DMDB_USE_POSIX_SEM instead of
+ * -DMDB_USE_POSIX_MUTEX.
+ * (Posix semaphores are not robust.)
  */
 #ifndef MDB_USE_ROBUST
 /* Android currently lacks Robust Mutex support. So does glibc < 2.4. */
