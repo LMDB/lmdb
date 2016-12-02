@@ -5246,13 +5246,6 @@ mdb_env_setup_locks(MDB_env *env, MDB_name *fname, int mode, int *excl)
 	env->me_rmutex->locked = &env->me_txns->mti_rlocked;
 	env->me_wmutex->locked = &env->me_txns->mti_wlocked;
 #endif
-#ifdef MDB_VL32
-#ifdef _WIN32
-	env->me_rpmutex = CreateMutex(NULL, FALSE, NULL);
-#else
-	pthread_mutex_init(&env->me_rpmutex, NULL);
-#endif
-#endif
 
 	return MDB_SUCCESS;
 
@@ -5299,6 +5292,21 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 	if (rc)
 		return rc;
 
+#ifdef MDB_VL32
+#ifdef _WIN32
+	env->me_rpmutex = CreateMutex(NULL, FALSE, NULL);
+	if (!env->me_rpmutex) {
+		rc = ErrCode();
+		goto leave;
+	}
+#else
+	rc = pthread_mutex_init(&env->me_rpmutex, NULL);
+	if (rc)
+		goto leave;
+#endif
+#endif
+	flags |= MDB_ENV_ACTIVE;	/* tell mdb_env_close0() to clean up */
+
 	if (flags & MDB_RDONLY) {
 		/* silently ignore WRITEMAP when we're only getting read access */
 		flags &= ~MDB_WRITEMAP;
@@ -5307,8 +5315,13 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 			  (env->me_dirty_list = calloc(MDB_IDL_UM_SIZE, sizeof(MDB_ID2)))))
 			rc = ENOMEM;
 	}
+
+	env->me_flags = flags;
+	if (rc)
+		goto leave;
+
 #ifdef MDB_VL32
-	if (!rc) {
+	{
 		env->me_rpages = malloc(MDB_ERPAGE_SIZE * sizeof(MDB_ID3));
 		if (!env->me_rpages) {
 			rc = ENOMEM;
@@ -5318,9 +5331,6 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 		env->me_rpcheck = MDB_ERPAGE_SIZE/2;
 	}
 #endif
-	env->me_flags = flags |= MDB_ENV_ACTIVE;
-	if (rc)
-		goto leave;
 
 	env->me_path = strdup(path);
 	env->me_dbxs = calloc(env->me_maxdbs, sizeof(MDB_dbx));
@@ -5429,11 +5439,13 @@ mdb_env_close0(MDB_env *env, int excl)
 #ifdef MDB_VL32
 	if (env->me_txn0 && env->me_txn0->mt_rpages)
 		free(env->me_txn0->mt_rpages);
-	{ unsigned int x;
-		for (x=1; x<=env->me_rpages[0].mid; x++)
-		munmap(env->me_rpages[x].mptr, env->me_rpages[x].mcnt * env->me_psize);
+	if (env->me_rpages) {
+		MDB_ID3L el = env->me_rpages;
+		unsigned int x;
+		for (x=1; x<=el[0].mid; x++)
+			munmap(el[x].mptr, el[x].mcnt * env->me_psize);
+		free(el);
 	}
-	free(env->me_rpages);
 #endif
 	free(env->me_txn0);
 	mdb_midl_free(env->me_free_pgs);
