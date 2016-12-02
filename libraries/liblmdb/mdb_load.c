@@ -16,7 +16,13 @@
 #include <errno.h>
 #include <string.h>
 #include <ctype.h>
+//#include <unistd.h>
+#ifdef WIN32
+#include <windows.h>
+#include "wingetopt.h"
+#else
 #include <unistd.h>
+#endif
 #include "lmdb.h"
 
 #define PRINT	1
