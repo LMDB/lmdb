@@ -110,5 +110,7 @@ foreach( test  ${mtests} )
     endif()
 endforeach()
 
+#[[
 add_executable(example example.cpp)
 target_link_libraries(example ${ProName})
+]]
