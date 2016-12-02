@@ -6150,8 +6150,10 @@ mapped:
 	{
 #ifdef MDB_VL32
 		int rc = mdb_rpage_get(txn, pgno, &p);
-		if (rc)
+		if (rc) {
+			txn->mt_flags |= MDB_TXN_ERROR;
 			return rc;
+		}
 #else
 		MDB_env *env = txn->mt_env;
 		p = (MDB_page *)(env->me_map + env->me_psize * pgno);
