@@ -1129,7 +1129,7 @@ typedef struct MDB_meta {
 #else
 	void		*mm_address;		/**< address for fixed mapping */
 #endif
-	pgno_t		mm_mapsize;			/**< size of mmap region */
+	mdb_size_t	mm_mapsize;			/**< size of mmap region */
 	MDB_db		mm_dbs[CORE_DBS];	/**< first is free space, 2nd is main db */
 	/** The size of pages used in this DB */
 #define	mm_psize	mm_dbs[FREE_DBI].md_pad
