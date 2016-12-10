@@ -6714,8 +6714,6 @@ mdb_cursor_prev(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 	} else
 		mc->mc_ki[mc->mc_top]--;
 
-	mc->mc_flags &= ~C_EOF;
-
 	DPRINTF(("==> cursor points to page %"Yu" with %u keys, key index %u",
 	    mdb_dbg_pgno(mp), NUMKEYS(mp), mc->mc_ki[mc->mc_top]));
 
