@@ -10515,7 +10515,8 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 		memset(&dummy, 0, sizeof(dummy));
 		dummy.md_root = P_INVALID;
 		dummy.md_flags = flags & PERSISTENT_FLAGS;
-		rc = mdb_cursor_put(&mc, &key, &data, F_SUBDATA);
+		WITH_CURSOR_TRACKING(mc,
+			rc = mdb_cursor_put(&mc, &key, &data, F_SUBDATA));
 		dbflag |= DB_DIRTY;
 	}
 
