@@ -9548,7 +9548,7 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 			} else {
 				/* find right page's left sibling */
 				mc->mc_ki[ptop] = mn.mc_ki[ptop];
-				mdb_cursor_sibling(mc, 0);
+				rc = mdb_cursor_sibling(mc, 0);
 			}
 		}
 	} else {
@@ -9557,6 +9557,8 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 		mn.mc_top++;
 	}
 	if (rc != MDB_SUCCESS) {
+		if (rc == MDB_NOTFOUND) /* improper mdb_cursor_sibling() result */
+			rc = MDB_PROBLEM;
 		goto done;
 	}
 	if (nflags & MDB_APPEND) {
