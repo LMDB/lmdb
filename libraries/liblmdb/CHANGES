@@ -8,6 +8,19 @@ LMDB 0.9.19 Release Engineering
 	Optimize mdb_drop
 	Fix xcursors after mdb_cursor_del (ITS#8406)
 	Fix MDB_NEXT_DUP after mdb_cursor_del (ITS#8412)
+	Fix mdb_cursor_put resetting C_EOF (ITS#8489)
+	Fix mdb_env_copyfd2 to return EPIPE on SIGPIPE (ITS#8504)
+	Fix mdb_env_copy with empty DB (ITS#8209)
+	Fix behaviors with fork (ITS#8505)
+	Fix mdb_dbi_open with mainDB cursors (ITS#8542)
+	Fix utf8_to_utf16 error checks (ITS#7992)
+	Fix F_NOCACHE on MacOS, error is non-fatal (ITS#7682)
+	Build
+		Make shared lib suffix overridable (ITS#8481)
+	Documentation
+		Cleanup doxygen nits
+		Note reserved vs actual mem/disk usage
+
 
 LMDB 0.9.18 Release (2016/02/05)
 	Fix robust mutex detection on glibc 2.10-11 (ITS#8330)
