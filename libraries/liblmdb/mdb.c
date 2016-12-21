@@ -879,6 +879,11 @@ typedef struct MDB_page {
 	 * pgno on branch nodes.  On 64 bit platforms, #mn_flags is also used
 	 * for pgno.  (Branch nodes have no flags).  Lo and hi are in host byte
 	 * order in case some accesses can be optimized to 32-bit word access.
+	 *
+	 * Leaf node flags describe node contents.  #F_BIGDATA says the node's
+	 * data part is the page number of an overflow page with actual data.
+	 * #F_DUPDATA and #F_SUBDATA can be combined giving duplicate data in
+	 * a sub-page/sub-database, and named databases (just #F_SUBDATA).
 	 */
 typedef struct MDB_node {
 	/** part of data size or pgno
