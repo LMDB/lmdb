@@ -341,15 +341,15 @@ mdb_sem_wait(sem_t *sem)
 }
 
 #else	/* MDB_USE_POSIX_MUTEX: */
-	/** Shared mutex/semaphore as it is stored (mdb_mutex_t), and as
-	 *	local variables keep it (mdb_mutexref_t).
+	/** Shared mutex/semaphore as the original is stored.
 	 *
-	 *	When #mdb_mutexref_t is a pointer declaration and #mdb_mutex_t is
-	 *	not, then it is array[size 1] so it can be assigned to a pointer.
-	 *	@{
+	 *	Not for copies.  Instead it can be assigned to an #mdb_mutexref_t.
+	 *	When mdb_mutexref_t is a pointer and mdb_mutex_t is not, then it
+	 *	is array[size 1] so it can be assigned to the pointer.
 	 */
-typedef pthread_mutex_t mdb_mutex_t[1], *mdb_mutexref_t;
-	/*	@} */
+typedef pthread_mutex_t mdb_mutex_t[1];
+	/** Reference to an #mdb_mutex_t */
+typedef pthread_mutex_t *mdb_mutexref_t;
 	/** Lock the reader or writer mutex.
 	 *	Returns 0 or a code to give #mdb_mutex_failed(), as in #LOCK_MUTEX().
 	 */
@@ -874,19 +874,21 @@ typedef struct MDB_page {
 	/** Header for a single key/data pair within a page.
 	 * Used in pages of type #P_BRANCH and #P_LEAF without #P_LEAF2.
 	 * We guarantee 2-byte alignment for 'MDB_node's.
+	 *
+	 * #mn_lo and #mn_hi are used for data size on leaf nodes, and for child
+	 * pgno on branch nodes.  On 64 bit platforms, #mn_flags is also used
+	 * for pgno.  (Branch nodes have no flags).  Lo and hi are in host byte
+	 * order in case some accesses can be optimized to 32-bit word access.
 	 */
 typedef struct MDB_node {
-	/** lo and hi are used for data size on leaf nodes and for
-	 * child pgno on branch nodes. On 64 bit platforms, flags
-	 * is also used for pgno. (Branch nodes have no flags).
-	 * They are in host byte order in case that lets some
-	 * accesses be optimized into a 32-bit word access.
-	 */
+	/** part of data size or pgno
+	 *	@{ */
 #if BYTE_ORDER == LITTLE_ENDIAN
-	unsigned short	mn_lo, mn_hi;	/**< part of data size or pgno */
+	unsigned short	mn_lo, mn_hi;
 #else
 	unsigned short	mn_hi, mn_lo;
 #endif
+	/** @} */
 /** @defgroup mdb_node Node Flags
  *	@ingroup internal
  *	Flags for node headers.
