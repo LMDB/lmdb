@@ -13,6 +13,7 @@ LMDB 0.9.19 Release Engineering
 	Fix mdb_env_copy with empty DB (ITS#8209)
 	Fix behaviors with fork (ITS#8505)
 	Fix mdb_dbi_open with mainDB cursors (ITS#8542)
+	Fix robust mutexes on kFreeBSD (ITS#8554)
 	Fix utf8_to_utf16 error checks (ITS#7992)
 	Fix F_NOCACHE on MacOS, error is non-fatal (ITS#7682)
 	Build
