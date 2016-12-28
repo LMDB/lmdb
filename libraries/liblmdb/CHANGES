@@ -1,6 +1,6 @@
 LMDB 0.9 Change Log
 
-LMDB 0.9.19 Release Engineering
+LMDB 0.9.19 Release (2016/12/28)
 	Fix mdb_env_cwalk cursor init (ITS#8424)
 	Fix robust mutexes on Solaris 10/11 (ITS#8339)
 	Tweak Win32 error message buffer
