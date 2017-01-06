@@ -248,7 +248,8 @@ badend:
 					c2 += 2;
 				}
 			} else {
-				c1++; c2++;
+				/* copies are redundant when no escapes were used */
+				*c1++ = *c2++;
 			}
 		}
 	} else {
