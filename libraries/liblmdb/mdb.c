@@ -6596,14 +6596,16 @@ mdb_cursor_next(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 	MDB_node	*leaf;
 	int rc;
 
-	if ((mc->mc_flags & C_EOF) ||
-		((mc->mc_flags & C_DEL) && op == MDB_NEXT_DUP)) {
+	if ((mc->mc_flags & C_DEL && op == MDB_NEXT_DUP))
 		return MDB_NOTFOUND;
-	}
+
 	if (!(mc->mc_flags & C_INITIALIZED))
 		return mdb_cursor_first(mc, key, data);
 
 	mp = mc->mc_pg[mc->mc_top];
+
+	if ((mc->mc_flags & C_EOF) && mc->mc_ki[mc->mc_top] >= NUMKEYS(mp)-1)
+		return MDB_NOTFOUND;
 
 	if (mc->mc_db->md_flags & MDB_DUPSORT) {
 		leaf = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
