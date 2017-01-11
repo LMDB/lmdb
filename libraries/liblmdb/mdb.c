@@ -5821,14 +5821,19 @@ mdb_cursor_next(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
 	MDB_node	*leaf;
 	int rc;
 
-	if ((mc->mc_flags & C_EOF) ||
-		((mc->mc_flags & C_DEL) && op == MDB_NEXT_DUP)) {
+	if ((mc->mc_flags & C_DEL && op == MDB_NEXT_DUP))
 		return MDB_NOTFOUND;
-	}
+
 	if (!(mc->mc_flags & C_INITIALIZED))
 		return mdb_cursor_first(mc, key, data);
 
 	mp = mc->mc_pg[mc->mc_top];
+
+	if (mc->mc_flags & C_EOF) {
+		if (mc->mc_ki[mc->mc_top] >= NUMKEYS(mp)-1)
+			return MDB_NOTFOUND;
+		mc->mc_flags ^= C_EOF;
+	}
 
 	if (mc->mc_db->md_flags & MDB_DUPSORT) {
 		leaf = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
@@ -6340,10 +6345,19 @@ mdb_cursor_get(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 			rc = MDB_INCOMPATIBLE;
 			break;
 		}
-		rc = MDB_SUCCESS;
-		if (!(mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED) ||
-			(mc->mc_xcursor->mx_cursor.mc_flags & C_EOF))
+		if (!(mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED)) {
+			rc = EINVAL;
 			break;
+		}
+		if (mc->mc_xcursor->mx_cursor.mc_flags & C_EOF) {
+			MDB_cursor *mx = &mc->mc_xcursor->mx_cursor;
+			if (mx->mc_ki[mx->mc_top] >= NUMKEYS(mx->mc_pg[mx->mc_top])-1) {
+				rc = MDB_NOTFOUND;
+				break;
+			}
+			mx->mc_flags ^= C_EOF;
+		}
+		rc = MDB_SUCCESS;
 		goto fetchm;
 	case MDB_NEXT_MULTIPLE:
 		if (data == NULL) {
@@ -7651,8 +7665,14 @@ mdb_cursor_count(MDB_cursor *mc, size_t *countp)
 	if (!(mc->mc_flags & C_INITIALIZED))
 		return EINVAL;
 
-	if (!mc->mc_snum || (mc->mc_flags & C_EOF))
+	if (!mc->mc_snum)
 		return MDB_NOTFOUND;
+
+	if (mc->mc_flags & C_EOF) {
+		if (mc->mc_ki[mc->mc_top] >= NUMKEYS(mc->mc_pg[mc->mc_top]))
+			return MDB_NOTFOUND;
+		mc->mc_flags ^= C_EOF;
+	}
 
 	leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
 	if (!F_ISSET(leaf->mn_flags, F_DUPDATA)) {
