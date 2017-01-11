@@ -6209,8 +6209,8 @@ mdb_page_search_root(MDB_cursor *mc, MDB_val *key, int flags)
 				/* if already init'd, see if we're already in right place */
 				if (mc->mc_flags & C_INITIALIZED) {
 					if (mc->mc_ki[mc->mc_top] == i) {
-						mp = mc->mc_pg[mc->mc_top];
 						mc->mc_top = mc->mc_snum++;
+						mp = mc->mc_pg[mc->mc_top];
 						goto ready;
 					}
 				}
