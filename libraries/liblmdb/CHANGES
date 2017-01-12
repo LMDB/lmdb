@@ -1,6 +1,6 @@
 LMDB 0.9 Change Log
 
-LMDB 0.9.20 Release (2017/01/11)
+LMDB 0.9.20 Release Engineering
 	Fix mdb_load with escaped plaintext (ITS#8558)
 	Fix mdb_cursor_last / mdb_put interaction (ITS#8557)
 
