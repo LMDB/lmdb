@@ -6346,16 +6346,9 @@ mdb_cursor_get(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 			break;
 		}
 		rc = MDB_SUCCESS;
-		if (!(mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED))
+		if (!(mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED) ||
+			(mc->mc_xcursor->mx_cursor.mc_flags & C_EOF))
 			break;
-		if (mc->mc_xcursor->mx_cursor.mc_flags & C_EOF) {
-			MDB_cursor *mx = &mc->mc_xcursor->mx_cursor;
-			if (mx->mc_ki[mx->mc_top] >= NUMKEYS(mx->mc_pg[mx->mc_top])-1) {
-				rc = MDB_NOTFOUND;
-				break;
-			}
-			mx->mc_flags ^= C_EOF;
-		}
 		goto fetchm;
 	case MDB_NEXT_MULTIPLE:
 		if (data == NULL) {
