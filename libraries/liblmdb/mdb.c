@@ -620,7 +620,7 @@ static txnid_t mdb_debug_start;
 	/**	The version number for a database's datafile format. */
 #define MDB_DATA_VERSION	 ((MDB_DEVEL) ? 999 : 1)
 	/**	The version number for a database's lockfile format. */
-#define MDB_LOCK_VERSION	 ((MDB_DEVEL) ? 999 : 1)
+#define MDB_LOCK_VERSION	 ((MDB_DEVEL) ? 999 : 2)
 
 	/**	@brief The max size of a key we can write, or 0 for computed max.
 	 *
