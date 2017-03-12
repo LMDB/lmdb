@@ -4965,31 +4965,21 @@ mdb_env_excl_lock(MDB_env *env, int *excl)
  * Share and Enjoy!	:-)
  */
 
-#define MDB_HASH_INIT ((mdb_hash_t)0xcbf29ce484222325ULL)
-
 /** perform a 64 bit Fowler/Noll/Vo FNV-1a hash on a buffer
  * @param[in] val	value to hash
- * @param[in] hval	initial value for hash
+ * @param[in] len	length of value
  * @return 64 bit hash
- *
- * NOTE: To use the recommended 64 bit FNV-1a hash, use MDB_HASH_INIT as the
- * 	 hval arg on the first call.
  */
 static mdb_hash_t
-mdb_hash_val(MDB_val *val, mdb_hash_t hval)
+mdb_hash(const void *val, size_t len)
 {
-	unsigned char *s = (unsigned char *)val->mv_data;	/* unsigned string */
-	unsigned char *end = s + val->mv_size;
+	const unsigned char *s = (const unsigned char *) val, *end = s + len;
+	mdb_hash_t hval = 0xcbf29ce484222325ULL;
 	/*
-	 * FNV-1a hash each octet of the string
+	 * FNV-1a hash each octet of the buffer
 	 */
 	while (s < end) {
-		/* xor the bottom with the current octet */
-		hval ^= (mdb_hash_t)*s++;
-
-		/* multiply by the 64 bit FNV magic prime mod 2^64 */
-		hval += (hval << 1) + (hval << 4) + (hval << 5) +
-			(hval << 7) + (hval << 8) + (hval << 40);
+		hval = (hval ^ *s++) * 0x100000001b3ULL;
 	}
 	/* return our new hash value */
 	return hval;
@@ -5130,7 +5120,6 @@ mdb_env_setup_locks(MDB_env *env, MDB_name *fname, int mode, int *excl)
 			DWORD nhigh;
 			DWORD nlow;
 		} idbuf;
-		MDB_val val;
 
 		if (!mdb_sec_inited) {
 			InitializeSecurityDescriptor(&mdb_null_sd,
@@ -5145,9 +5134,7 @@ mdb_env_setup_locks(MDB_env *env, MDB_name *fname, int mode, int *excl)
 		idbuf.volume = stbuf.dwVolumeSerialNumber;
 		idbuf.nhigh  = stbuf.nFileIndexHigh;
 		idbuf.nlow   = stbuf.nFileIndexLow;
-		val.mv_data = &idbuf;
-		val.mv_size = sizeof(idbuf);
-		env->me_txns->mti_mutexid = mdb_hash_val(&val, MDB_HASH_INIT);
+		env->me_txns->mti_mutexid = mdb_hash(&idbuf, sizeof(idbuf));
 		mdb_env_mname_init(env);
 		env->me_rmutex = CreateMutexA(&mdb_all_sa, FALSE, MUTEXNAME(env, 'r'));
 		if (!env->me_rmutex) goto fail_errno;
@@ -5159,7 +5146,6 @@ mdb_env_setup_locks(MDB_env *env, MDB_name *fname, int mode, int *excl)
 			dev_t dev;
 			ino_t ino;
 		} idbuf;
-		MDB_val val;
 
 #if defined(__NetBSD__)
 #define	MDB_SHORT_SEMNAMES	1	/* limited to 14 chars */
@@ -5167,9 +5153,7 @@ mdb_env_setup_locks(MDB_env *env, MDB_name *fname, int mode, int *excl)
 		if (fstat(env->me_lfd, &stbuf)) goto fail_errno;
 		idbuf.dev = stbuf.st_dev;
 		idbuf.ino = stbuf.st_ino;
-		val.mv_data = &idbuf;
-		val.mv_size = sizeof(idbuf);
-		env->me_txns->mti_mutexid = mdb_hash_val(&val, MDB_HASH_INIT)
+		env->me_txns->mti_mutexid = mdb_hash(&idbuf, sizeof(idbuf))
 #ifdef MDB_SHORT_SEMNAMES
 			/* Max 9 base85-digits.  We truncate here instead of in
 			 * mdb_env_mname_init() to keep the latter portable.
