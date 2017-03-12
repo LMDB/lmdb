@@ -480,12 +480,6 @@ typedef pthread_mutex_t *mdb_mutexref_t;
 #define MUTEXNAME_PREFIX		"/MDB"
 #endif
 
-#ifdef MDB_USE_SYSV_SEM
-#define SYSV_SEM_FLAG	1		/**< SysV sems in lockfile format */
-#else
-#define SYSV_SEM_FLAG	0
-#endif
-
 /** @} */
 
 #ifdef MDB_ROBUST_SUPPORTED
@@ -628,6 +622,10 @@ static txnid_t mdb_debug_start;
 #define MDB_DATA_VERSION	 ((MDB_DEVEL) ? 999 : 1)
 	/**	The version number for a database's lockfile format. */
 #define MDB_LOCK_VERSION	 ((MDB_DEVEL) ? 999 : 2)
+	/** Number of bits representing #MDB_LOCK_VERSION in #MDB_LOCK_FORMAT.
+	 *	The remaining bits must leave room for #MDB_lock_desc.
+	 */
+#define MDB_LOCK_VERSION_BITS 12
 
 	/**	@brief The max size of a key we can write, or 0 for computed max.
 	 *
@@ -692,6 +690,19 @@ static txnid_t mdb_debug_start;
 
 	/** Round \b n up to an even number. */
 #define EVEN(n)		(((n) + 1U) & -2) /* sign-extending -2 to match n+1U */
+
+	/** Least significant 1-bit of \b n.  n must be of an unsigned type. */
+#define LOW_BIT(n)		((n) & (-(n)))
+
+	/** (log2(\b p2) % \b n), for p2 = power of 2 and 0 < n < 8. */
+#define LOG2_MOD(p2, n)	(7 - 86 / ((p2) % ((1U<<(n))-1) + 11))
+	/* Explanation: Let p2 = 2**(n*y + x), x<n and M = (1U<<n)-1. Now p2 =
+	 * (M+1)**y * 2**x = 2**x (mod M). Finally "/" "happens" to return 7-x.
+	 */
+
+	/** Should be alignment of \b type. Ensure it is a power of 2. */
+#define ALIGNOF2(type) \
+	LOW_BIT(offsetof(struct { char ch_; type align_; }, align_))
 
 	/**	Used for offsets within a single page.
 	 *	Since memory pages are typically 4 or 8KB in size, 12-13 bits,
@@ -849,7 +860,6 @@ typedef struct MDB_txninfo {
 #define mti_magic	mt1.mtb.mtb_magic
 #define mti_format	mt1.mtb.mtb_format
 #define mti_rmutex	mt1.mtb.mtb_rmutex
-#define mti_rmname	mt1.mtb.mtb_rmname
 #define mti_txnid	mt1.mtb.mtb_txnid
 #define mti_numreaders	mt1.mtb.mtb_numreaders
 #define mti_mutexid	mt1.mtb.mtb_mutexid
@@ -876,11 +886,54 @@ typedef struct MDB_txninfo {
 
 	/** Lockfile format signature: version, features and field layout */
 #define MDB_LOCK_FORMAT \
-	((uint32_t) \
-	 ((MDB_LOCK_VERSION) \
-	  /* Flags which describe functionality */ \
-	  + (SYSV_SEM_FLAG << 18) \
-	  + (((MDB_PIDLOCK) != 0) << 16)))
+	((uint32_t)         \
+	 (((MDB_LOCK_VERSION) % (1U << MDB_LOCK_VERSION_BITS)) \
+	  + MDB_lock_desc     * (1U << MDB_LOCK_VERSION_BITS)))
+
+	/** Lock type and layout. Values 0-119. _WIN32 implies #MDB_PIDLOCK.
+	 *	Some low values are reserved for future tweaks.
+	 */
+#ifdef _WIN32
+# define MDB_LOCK_TYPE	(0 + ALIGNOF2(mdb_hash_t)/8 % 2)
+#elif defined MDB_USE_POSIX_SEM
+# define MDB_LOCK_TYPE	(4 + ALIGNOF2(mdb_hash_t)/8 % 2)
+#elif defined MDB_USE_SYSV_SEM
+# define MDB_LOCK_TYPE	(8)
+#elif defined MDB_USE_POSIX_MUTEX
+/* We do not know the inside of a POSIX mutex and how to check if mutexes
+ * used by two executables are compatible. Just check alignment and size.
+ */
+# define MDB_LOCK_TYPE	(10 + \
+		LOG2_MOD(ALIGNOF2(pthread_mutex_t), 5) + \
+		sizeof(pthread_mutex_t) / 4U % 22 * 5)
+#endif
+
+enum {
+	/** Magic number for lockfile layout and features.
+	 *
+	 *  This *attempts* to stop liblmdb variants compiled with conflicting
+	 *	options from using the lockfile at the same time and thus breaking
+	 *	it.  It describes locking types, and sizes and sometimes alignment
+	 *	of the various lockfile items.
+	 *
+	 *	The detected ranges are mostly guesswork, or based simply on how
+	 *	big they could be without using more bits.  So we can tweak them
+	 *	in good conscience when updating #MDB_LOCK_VERSION.
+	 */
+	MDB_lock_desc =
+	/* Default CACHELINE=64 vs. other values (have seen mention of 32-256) */
+	(CACHELINE==64 ? 0 : 1 + LOG2_MOD(CACHELINE >> (CACHELINE>64), 5))
+	+ 6  * (sizeof(MDB_PID_T)/4 % 3)    /* legacy(2) to word(4/8)? */
+	+ 18 * (sizeof(pthread_t)/4 % 5)    /* can be struct{id, active data} */
+	+ 90 * (sizeof(MDB_txbody) / CACHELINE % 3)
+	+ 270 * (MDB_LOCK_TYPE % 120)
+	/* The above is < 270*120 < 2**15 */
+	+ ((sizeof(txnid_t) == 8) << 15)    /* 32bit/64bit */
+	+ ((sizeof(MDB_reader) > CACHELINE) << 16)
+	/* Not really needed - implied by MDB_LOCK_TYPE != (_WIN32 locking) */
+	+ (((MDB_PIDLOCK) != 0)   << 17)
+	/* 18 bits total: Must be <= (32 - MDB_LOCK_VERSION_BITS). */
+};
 /** @} */
 
 /** Common header for all page types. The page type depends on #mp_flags.
