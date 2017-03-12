@@ -465,12 +465,19 @@ typedef pthread_mutex_t *mdb_mutexref_t;
 #define	Yu	MDB_PRIy(u)	/**< printf format for #mdb_size_t */
 #define	Yd	MDB_PRIy(d)	/**< printf format for 'signed #mdb_size_t' */
 
-#if defined(_WIN32) || defined(MDB_USE_POSIX_SEM)
-#define MNAME_LEN	32
-#elif defined(MDB_USE_SYSV_SEM)
+#ifdef MDB_USE_SYSV_SEM
 #define MNAME_LEN	(sizeof(int))
 #else
 #define MNAME_LEN	(sizeof(pthread_mutex_t))
+#endif
+
+/** Initial part of #MDB_env.me_mutexname[].
+ *	Changes to this code must be reflected in #MDB_LOCK_FORMAT.
+ */
+#ifdef _WIN32
+#define MUTEXNAME_PREFIX		"Global\\MDB"
+#elif defined MDB_USE_POSIX_SEM
+#define MUTEXNAME_PREFIX		"/MDB"
 #endif
 
 #ifdef MDB_USE_SYSV_SEM
@@ -692,6 +699,8 @@ static txnid_t mdb_debug_start;
 	 */
 typedef uint16_t	 indx_t;
 
+typedef unsigned long long	mdb_hash_t;
+
 	/**	Default size of memory map.
 	 *	This is certainly too small for any actual applications. Apps should always set
 	 *	the size explicitly using #mdb_env_set_mapsize().
@@ -820,7 +829,8 @@ typedef struct MDB_txbody {
 		 */
 	volatile unsigned	mtb_numreaders;
 #if defined(_WIN32) || defined(MDB_USE_POSIX_SEM)
-	char	mtb_rmname[MNAME_LEN];
+		/** Binary form of names of the reader/writer locks */
+	mdb_hash_t			mtb_mutexid;
 #elif defined(MDB_USE_SYSV_SEM)
 	int 	mtb_semid;
 	int		mtb_rlocked;
@@ -842,17 +852,16 @@ typedef struct MDB_txninfo {
 #define mti_rmname	mt1.mtb.mtb_rmname
 #define mti_txnid	mt1.mtb.mtb_txnid
 #define mti_numreaders	mt1.mtb.mtb_numreaders
+#define mti_mutexid	mt1.mtb.mtb_mutexid
 #ifdef MDB_USE_SYSV_SEM
 #define	mti_semid	mt1.mtb.mtb_semid
 #define	mti_rlocked	mt1.mtb.mtb_rlocked
 #endif
 		char pad[(sizeof(MDB_txbody)+CACHELINE-1) & ~(CACHELINE-1)];
 	} mt1;
+#if !(defined(_WIN32) || defined(MDB_USE_POSIX_SEM))
 	union {
-#if defined(_WIN32) || defined(MDB_USE_POSIX_SEM)
-		char mt2_wmname[MNAME_LEN];
-#define	mti_wmname	mt2.mt2_wmname
-#elif defined MDB_USE_SYSV_SEM
+#ifdef MDB_USE_SYSV_SEM
 		int mt2_wlocked;
 #define mti_wlocked	mt2.mt2_wlocked
 #else
@@ -861,6 +870,7 @@ typedef struct MDB_txninfo {
 #endif
 		char pad[(MNAME_LEN+CACHELINE-1) & ~(CACHELINE-1)];
 	} mt2;
+#endif
 	MDB_reader	mti_readers[1];
 } MDB_txninfo;
 
@@ -1447,6 +1457,10 @@ struct MDB_env {
 #else
 	mdb_mutex_t	me_rmutex;
 	mdb_mutex_t	me_wmutex;
+# if defined(_WIN32) || defined(MDB_USE_POSIX_SEM)
+	/** Half-initialized name of mutexes, to be completed by #MUTEXNAME() */
+	char		me_mutexname[sizeof(MUTEXNAME_PREFIX) + 11];
+# endif
 #endif
 #ifdef MDB_VL32
 	MDB_ID3L	me_rpages;	/**< like #mt_rpages, but global to env */
@@ -4951,7 +4965,6 @@ mdb_env_excl_lock(MDB_env *env, int *excl)
  * Share and Enjoy!	:-)
  */
 
-typedef unsigned long long	mdb_hash_t;
 #define MDB_HASH_INIT ((mdb_hash_t)0xcbf29ce484222325ULL)
 
 /** perform a 64 bit Fowler/Noll/Vo FNV-1a hash on a buffer
@@ -4993,25 +5006,33 @@ mdb_hash_val(MDB_val *val, mdb_hash_t hval)
 static const char mdb_a85[]= "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~";
 
 static void ESECT
-mdb_pack85(unsigned long l, char *out)
+mdb_pack85(unsigned long long l, char *out)
 {
 	int i;
 
-	for (i=0; i<5; i++) {
+	for (i=0; i<10 && l; i++) {
 		*out++ = mdb_a85[l % 85];
 		l /= 85;
 	}
+	*out = '\0';
 }
 
+/** Init #MDB_env.me_mutexname[] except the char which #MUTEXNAME() will set.
+ *	Changes to this code must be reflected in #MDB_LOCK_FORMAT.
+ */
 static void ESECT
-mdb_hash_enc(MDB_val *val, char *encbuf)
+mdb_env_mname_init(MDB_env *env)
 {
-	mdb_hash_t h = mdb_hash_val(val, MDB_HASH_INIT);
-
-	mdb_pack85(h, encbuf);
-	mdb_pack85(h>>32, encbuf+5);
-	encbuf[10] = '\0';
+	char *nm = env->me_mutexname;
+	strcpy(nm, MUTEXNAME_PREFIX);
+	mdb_pack85(env->me_txns->mti_mutexid, nm + sizeof(MUTEXNAME_PREFIX));
 }
+
+/** Return env->me_mutexname after filling in ch ('r'/'w') for convenience */
+#define MUTEXNAME(env, ch) ( \
+		(void) ((env)->me_mutexname[sizeof(MUTEXNAME_PREFIX)-1] = (ch)), \
+		(env)->me_mutexname)
+
 #endif
 
 /** Open and/or initialize the lock region for the environment.
@@ -5110,7 +5131,6 @@ mdb_env_setup_locks(MDB_env *env, MDB_name *fname, int mode, int *excl)
 			DWORD nlow;
 		} idbuf;
 		MDB_val val;
-		char encbuf[11];
 
 		if (!mdb_sec_inited) {
 			InitializeSecurityDescriptor(&mdb_null_sd,
@@ -5127,12 +5147,11 @@ mdb_env_setup_locks(MDB_env *env, MDB_name *fname, int mode, int *excl)
 		idbuf.nlow   = stbuf.nFileIndexLow;
 		val.mv_data = &idbuf;
 		val.mv_size = sizeof(idbuf);
-		mdb_hash_enc(&val, encbuf);
-		sprintf(env->me_txns->mti_rmname, "Global\\MDBr%s", encbuf);
-		sprintf(env->me_txns->mti_wmname, "Global\\MDBw%s", encbuf);
-		env->me_rmutex = CreateMutexA(&mdb_all_sa, FALSE, env->me_txns->mti_rmname);
+		env->me_txns->mti_mutexid = mdb_hash_val(&val, MDB_HASH_INIT);
+		mdb_env_mname_init(env);
+		env->me_rmutex = CreateMutexA(&mdb_all_sa, FALSE, MUTEXNAME(env, 'r'));
 		if (!env->me_rmutex) goto fail_errno;
-		env->me_wmutex = CreateMutexA(&mdb_all_sa, FALSE, env->me_txns->mti_wmname);
+		env->me_wmutex = CreateMutexA(&mdb_all_sa, FALSE, MUTEXNAME(env, 'w'));
 		if (!env->me_wmutex) goto fail_errno;
 #elif defined(MDB_USE_POSIX_SEM)
 		struct stat stbuf;
@@ -5141,7 +5160,6 @@ mdb_env_setup_locks(MDB_env *env, MDB_name *fname, int mode, int *excl)
 			ino_t ino;
 		} idbuf;
 		MDB_val val;
-		char encbuf[11];
 
 #if defined(__NetBSD__)
 #define	MDB_SHORT_SEMNAMES	1	/* limited to 14 chars */
@@ -5151,22 +5169,23 @@ mdb_env_setup_locks(MDB_env *env, MDB_name *fname, int mode, int *excl)
 		idbuf.ino = stbuf.st_ino;
 		val.mv_data = &idbuf;
 		val.mv_size = sizeof(idbuf);
-		mdb_hash_enc(&val, encbuf);
+		env->me_txns->mti_mutexid = mdb_hash_val(&val, MDB_HASH_INIT)
 #ifdef MDB_SHORT_SEMNAMES
-		encbuf[9] = '\0';	/* drop name from 15 chars to 14 chars */
+			/* Max 9 base85-digits.  We truncate here instead of in
+			 * mdb_env_mname_init() to keep the latter portable.
+			 */
+			% ((mdb_hash_t)85*85*85*85*85*85*85*85*85)
 #endif
-		sprintf(env->me_txns->mti_rmname, "/MDBr%s", encbuf);
-		sprintf(env->me_txns->mti_wmname, "/MDBw%s", encbuf);
+			;
+		mdb_env_mname_init(env);
 		/* Clean up after a previous run, if needed:  Try to
 		 * remove both semaphores before doing anything else.
 		 */
-		sem_unlink(env->me_txns->mti_rmname);
-		sem_unlink(env->me_txns->mti_wmname);
-		env->me_rmutex = sem_open(env->me_txns->mti_rmname,
-			O_CREAT|O_EXCL, mode, 1);
+		sem_unlink(MUTEXNAME(env, 'r'));
+		sem_unlink(MUTEXNAME(env, 'w'));
+		env->me_rmutex = sem_open(MUTEXNAME(env, 'r'), O_CREAT|O_EXCL, mode, 1);
 		if (env->me_rmutex == SEM_FAILED) goto fail_errno;
-		env->me_wmutex = sem_open(env->me_txns->mti_wmname,
-			O_CREAT|O_EXCL, mode, 1);
+		env->me_wmutex = sem_open(MUTEXNAME(env, 'w'), O_CREAT|O_EXCL, mode, 1);
 		if (env->me_wmutex == SEM_FAILED) goto fail_errno;
 #elif defined(MDB_USE_SYSV_SEM)
 		unsigned short vals[2] = {1, 1};
@@ -5230,14 +5249,16 @@ mdb_env_setup_locks(MDB_env *env, MDB_name *fname, int mode, int *excl)
 			goto fail;
 		}
 #ifdef _WIN32
-		env->me_rmutex = OpenMutexA(SYNCHRONIZE, FALSE, env->me_txns->mti_rmname);
+		mdb_env_mname_init(env);
+		env->me_rmutex = OpenMutexA(SYNCHRONIZE, FALSE, MUTEXNAME(env, 'r'));
 		if (!env->me_rmutex) goto fail_errno;
-		env->me_wmutex = OpenMutexA(SYNCHRONIZE, FALSE, env->me_txns->mti_wmname);
+		env->me_wmutex = OpenMutexA(SYNCHRONIZE, FALSE, MUTEXNAME(env, 'w'));
 		if (!env->me_wmutex) goto fail_errno;
 #elif defined(MDB_USE_POSIX_SEM)
-		env->me_rmutex = sem_open(env->me_txns->mti_rmname, 0);
+		mdb_env_mname_init(env);
+		env->me_rmutex = sem_open(MUTEXNAME(env, 'r'), 0);
 		if (env->me_rmutex == SEM_FAILED) goto fail_errno;
-		env->me_wmutex = sem_open(env->me_txns->mti_wmname, 0);
+		env->me_wmutex = sem_open(MUTEXNAME(env, 'w'), 0);
 		if (env->me_wmutex == SEM_FAILED) goto fail_errno;
 #elif defined(MDB_USE_SYSV_SEM)
 		semid = env->me_txns->mti_semid;
@@ -5517,8 +5538,8 @@ mdb_env_close0(MDB_env *env, int excl)
 			if (excl == 0)
 				mdb_env_excl_lock(env, &excl);
 			if (excl > 0) {
-				sem_unlink(env->me_txns->mti_rmname);
-				sem_unlink(env->me_txns->mti_wmname);
+				sem_unlink(MUTEXNAME(env, 'r'));
+				sem_unlink(MUTEXNAME(env, 'w'));
 			}
 		}
 #elif defined(MDB_USE_SYSV_SEM)
