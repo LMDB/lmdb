@@ -716,7 +716,7 @@ typedef unsigned long long	mdb_hash_t;
 	 *	This is certainly too small for any actual applications. Apps should always set
 	 *	the size explicitly using #mdb_env_set_mapsize().
 	 */
-#define DEFAULT_MAPSIZE	1048576
+#define DEFAULT_MAPSIZE	10485760
 
 /**	@defgroup readers	Reader Lock Table
  *	Readers don't acquire any locks for their data access. Instead, they
