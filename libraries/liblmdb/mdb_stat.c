@@ -14,7 +14,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+//#include <unistd.h>
+#ifdef WIN32
+#include <windows.h>
+#include "wingetopt.h"
+#else
 #include <unistd.h>
+#endif
 #include "lmdb.h"
 
 #define Z	MDB_FMT_Z
@@ -174,7 +180,7 @@ int main(int argc, char *argv[])
 			if (freinfo > 1) {
 				char *bad = "";
 				mdb_size_t pg, prev;
-				ssize_t i, j, span = 0;
+				size_t i, j, span = 0;
 				j = *iptr++;
 				for (i = j, prev = 1; --i >= 0; ) {
 					pg = iptr[i];

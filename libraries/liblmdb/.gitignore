@@ -21,3 +21,4 @@ core.*
 valgrind.*
 man/
 html/
+build/*

@@ -16,7 +16,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+//#include <unistd.h>
+#ifdef WIN32
+#include <windows.h>
+#include "wingetopt.h"
+#else
 #include <unistd.h>
+#endif
 #include <signal.h>
 #include "lmdb.h"
 
@@ -74,7 +80,7 @@ static void text(MDB_val *v)
 	putchar('\n');
 }
 
-static void byte(MDB_val *v)
+static void tobyte(MDB_val *v)
 {
 	unsigned char *c, *end;
 
@@ -138,8 +144,8 @@ static int dumpit(MDB_txn *txn, MDB_dbi dbi, char *name)
 			text(&key);
 			text(&data);
 		} else {
-			byte(&key);
-			byte(&data);
+			tobyte(&key);
+			tobyte(&data);
 		}
 	}
 	printf("DATA=END\n");
