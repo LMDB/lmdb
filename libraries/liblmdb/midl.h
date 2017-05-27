@@ -178,7 +178,7 @@ int mdb_mid2l_insert( MDB_ID2L ids, MDB_ID2 *id );
 	 */
 int mdb_mid2l_append( MDB_ID2L ids, MDB_ID2 *id );
 
-#ifdef MDB_VL32
+#if MDB_RPAGE_CACHE
 typedef struct MDB_ID3 {
 	MDB_ID mid;		/**< The ID */
 	void *mptr;		/**< The pointer */
@@ -191,7 +191,7 @@ typedef MDB_ID3 *MDB_ID3L;
 unsigned mdb_mid3l_search( MDB_ID3L ids, MDB_ID id );
 int mdb_mid3l_insert( MDB_ID3L ids, MDB_ID3 *id );
 
-#endif /* MDB_VL32 */
+#endif /* MDB_RPAGE_CACHE */
 /** @} */
 /** @} */
 #ifdef __cplusplus

@@ -187,6 +187,10 @@ typedef	mode_t	mdb_mode_t;
 # define MDB_FMT_Z	"z"			/**< printf/scanf format modifier for size_t */
 #endif
 
+#if !defined(MDB_RPAGE_CACHE) || (defined(MDB_VL32) && !(MDB_RPAGE_CACHE))
+#define MDB_RPAGE_CACHE	1
+#endif
+
 #ifndef MDB_VL32
 /** Unsigned type used for mapsize, entry counts and page/transaction IDs.
  *
