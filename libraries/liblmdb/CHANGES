@@ -1,6 +1,9 @@
 LMDB 0.9 Change Log
 
-LMDB 0.9.20 Release Engineering
+LMDB 0.9.21 Release (2017/06/01)
+	Fix xcursor after cursor_del (ITS#8622)
+
+LMDB 0.9.20 (Withdrawn)
 	Fix mdb_load with escaped plaintext (ITS#8558)
 	Fix mdb_cursor_last / mdb_put interaction (ITS#8557)
 
