@@ -188,6 +188,7 @@ typedef	mode_t	mdb_mode_t;
 #endif
 
 #if !defined(MDB_RPAGE_CACHE) || (defined(MDB_VL32) && !(MDB_RPAGE_CACHE))
+/** Support #MDB_REMAP_CHUNKS. Implied by MDB_VL32. Define as 0 to disable. */
 #define MDB_RPAGE_CACHE	1
 #endif
 
@@ -336,6 +337,8 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
 #define MDB_NORDAHEAD	0x800000
 	/** don't initialize malloc'd memory before writing to datafile */
 #define MDB_NOMEMINIT	0x1000000
+	/** don't use a single mmap, remap individual chunks (needs MDB_RPAGE_CACHE) */
+#define MDB_REMAP_CHUNKS	0x2000000
 /** @} */
 
 /**	@defgroup	mdb_dbi_open	Database Flags
