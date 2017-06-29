@@ -312,11 +312,28 @@ typedef int  (MDB_cmp_func)(const MDB_val *a, const MDB_val *b);
  */
 typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *relctx);
 
+#if MDB_RPAGE_CACHE
+/** @brief A callback function used to encrypt/decrypt pages in the env.
+ *
+ * Encrypt or decrypt the data in src and store the result in dst using the
+ * provided key. The result must be the same number of bytes as the input.
+ * The input size will always be a multiple of the page size.
+ * @param[in] src The input data to be transformed.
+ * @param[out] dst Storage for the result.
+ * @param[in] key An array of two values: key[0] is the encryption key,
+ * and key[1] is the initialization vector.
+ * @param[in] encdec 1 to encrypt, 0 to decrypt.
+ */
+typedef void (MDB_enc_func)(const MDB_val *src, MDB_val *dst, const MDB_val *key, int encdec);
+#endif
+
 /** @defgroup	mdb_env	Environment Flags
  *	@{
  */
 	/** mmap at a fixed address (experimental) */
 #define MDB_FIXEDMAP	0x01
+	/** encrypted DB - read-only flag, set by #mdb_env_set_encrypt() */
+#define MDB_ENCRYPT		0x2000U
 	/** no environment directory */
 #define MDB_NOSUBDIR	0x4000
 	/** don't fsync after commit */
@@ -974,6 +991,20 @@ typedef void MDB_assert_func(MDB_env *env, const char *msg);
 	 * @return A non-zero error value on failure and 0 on success.
 	 */
 int  mdb_env_set_assert(MDB_env *env, MDB_assert_func *func);
+
+#if MDB_RPAGE_CACHE
+	/** @brief Set encryption on an environment.
+	 *
+	 * This must be called before #mdb_env_open(). It implicitly sets #MDB_REMAP_CHUNK
+	 * on the env.
+	 * @param[in] env An environment handle returned by #mdb_env_create().
+	 * @param[in] func An #MDB_enc_func function.
+	 * @param[in] key An array of two values: key[0] is the encryption key,
+	 * and key[1] is the initialization vector.
+	 * @return A non-zero error value on failure and 0 on success.
+	 */
+int mdb_env_set_encrypt(MDB_env *env, MDB_enc_func *func, const MDB_val *key);
+#endif
 
 	/** @brief Create a transaction for use with the environment.
 	 *

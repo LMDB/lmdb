@@ -1521,6 +1521,8 @@ struct MDB_env {
 #define MDB_ERPAGE_SIZE	16384
 #define MDB_ERPAGE_MAX	(MDB_ERPAGE_SIZE-1)
 	unsigned int me_rpcheck;
+	MDB_enc_func *me_encfunc;	/**< encrypt env data */
+	MDB_val		me_enckey[2];	/**< key and IV for env encryption */
 #endif
 	void		*me_userctx;	 /**< User-settable context */
 	MDB_assert_func *me_assert_func; /**< Callback for assertion failures */
@@ -1985,7 +1987,7 @@ mdb_dcmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b)
  * Set #MDB_TXN_ERROR on failure.
  */
 static MDB_page *
-mdb_page_malloc(MDB_txn *txn, unsigned num)
+mdb_page_malloc(MDB_txn *txn, unsigned num, int init)
 {
 	MDB_env *env = txn->mt_env;
 	MDB_page *ret = env->me_dpages;
@@ -2009,7 +2011,7 @@ mdb_page_malloc(MDB_txn *txn, unsigned num)
 	}
 	if ((ret = malloc(sz)) != NULL) {
 		VGMEMP_ALLOC(env, ret, sz);
-		if (!(env->me_flags & MDB_NOMEMINIT)) {
+		if (init && !(env->me_flags & MDB_NOMEMINIT)) {
 			memset((char *)ret + off, 0, psize);
 			ret->mp_pad = 0;
 		}
@@ -2042,6 +2044,24 @@ mdb_dpage_free(MDB_env *env, MDB_page *dp)
 		free(dp);
 	}
 }
+
+#if MDB_RPAGE_CACHE
+/** Free an encrypted dirty page
+ * We can't check if it's an overflow page,
+ * caller must tell us how many are being freed.
+ */
+static void
+mdb_dpage_free_n(MDB_env *env, MDB_page *dp, int num)
+{
+	if (num == 1)
+		mdb_page_free(env, dp);
+	else {
+		/* large pages just get freed directly */
+		VGMEMP_FREE(env, dp);
+		free(dp);
+	}
+}
+#endif
 
 /**	Return all dirty pages to dpage list */
 static void
@@ -2589,7 +2609,7 @@ search_done:
 	if (env->me_flags & MDB_WRITEMAP) {
 		np = (MDB_page *)(env->me_map + env->me_psize * pgno);
 	} else {
-		if (!(np = mdb_page_malloc(txn, num))) {
+		if (!(np = mdb_page_malloc(txn, num, 1))) {
 			rc = ENOMEM;
 			goto fail;
 		}
@@ -2669,7 +2689,7 @@ mdb_page_unspill(MDB_txn *txn, MDB_page *mp, MDB_page **ret)
 			if (env->me_flags & MDB_WRITEMAP) {
 				np = mp;
 			} else {
-				np = mdb_page_malloc(txn, num);
+				np = mdb_page_malloc(txn, num, 1);
 				if (!np)
 					return ENOMEM;
 				if (num > 1)
@@ -2757,7 +2777,7 @@ mdb_page_touch(MDB_cursor *mc)
 		}
 		mdb_cassert(mc, dl[0].mid < MDB_IDL_UM_MAX);
 		/* No - copy it */
-		np = mdb_page_malloc(txn, 1);
+		np = mdb_page_malloc(txn, 1, 1);
 		if (!np)
 			return ENOMEM;
 		mid.mid = pgno;
@@ -3372,13 +3392,23 @@ mdb_txn_end(MDB_txn *txn, unsigned mode)
 			if (tl[i].mid & (MDB_RPAGE_CHUNK-1)) {
 				/* tmp overflow pages that we didn't share in env */
 				munmap(tl[i].mptr, tl[i].mcnt * env->me_psize);
+				if (tl[i].menc) {
+					free(tl[i].menc);
+					tl[i].menc = NULL;
+				}
 			} else {
 				x = mdb_mid3l_search(el, tl[i].mid);
 				if (tl[i].mptr == el[x].mptr) {
 					el[x].mref--;
+					if (!el[x].mref)
+						el[x].muse = 0;
 				} else {
 					/* another tmp overflow page */
 					munmap(tl[i].mptr, tl[i].mcnt * env->me_psize);
+					if (tl[i].menc) {
+						free(tl[i].menc);
+						tl[i].menc = NULL;
+					}
 				}
 			}
 		}
@@ -3628,6 +3658,10 @@ mdb_page_flush(MDB_txn *txn, int keep)
 	off_t		pos = 0;
 	pgno_t		pgno = 0;
 	MDB_page	*dp = NULL;
+#if MDB_RPAGE_CACHE
+	int			nump = 1;
+	MDB_page	*encp;
+#endif
 #ifdef _WIN32
 	OVERLAPPED	ov;
 #else
@@ -3669,11 +3703,33 @@ mdb_page_flush(MDB_txn *txn, int keep)
 			dp->mp_flags &= ~P_DIRTY;
 			pos = pgno * psize;
 			size = psize;
+#if MDB_RPAGE_CACHE
+			nump = 1;
+			if (IS_OVERFLOW(dp)) {
+				nump = dp->mp_pages;
+				size *= dp->mp_pages;
+			}
+#else
 			if (IS_OVERFLOW(dp)) size *= dp->mp_pages;
+#endif
 		}
 #ifdef _WIN32
 		else break;
 
+#if MDB_RPAGE_CACHE
+		if (env->me_encfunc) {
+			MDB_val in, out;
+			encp = mdb_page_malloc(txn, nump. 0);
+			if (!encp)
+				return ENOMEM;
+			in.mv_size = size;
+			in.mv_data = dp;
+			out.mv_size = size;
+			out.mv_data = encp;
+			env->me_encfunc(&in, &out, env->me_enckey, 1);
+			dp = encp;
+		}
+#endif
 		/* Windows actually supports scatter/gather I/O, but only on
 		 * unbuffered file handles. Since we're relying on the OS page
 		 * cache for all our data, that's self-defeating. So we just
@@ -3685,8 +3741,14 @@ mdb_page_flush(MDB_txn *txn, int keep)
 		memset(&ov, 0, sizeof(ov));
 		ov.Offset = pos & 0xffffffff;
 		ov.OffsetHigh = pos >> 16 >> 16;
-		if (!WriteFile(env->me_fd, dp, size, NULL, &ov)) {
+		rc = 0;
+		if (!WriteFile(env->me_fd, dp, size, NULL, &ov))
 			rc = ErrCode();
+#if MDB_RPAGE_CACHE
+		if (env->me_encfunc)
+			mdb_dpage_free_n(env, dp, nump);
+#endif
+		if (rc) {
 			DPRINTF(("WriteFile: %d", rc));
 			return rc;
 		}
@@ -3695,6 +3757,7 @@ mdb_page_flush(MDB_txn *txn, int keep)
 		if (pos!=next_pos || n==MDB_COMMIT_PAGES || wsize+size>MAX_WRITE) {
 			if (n) {
 retry_write:
+				rc = 0;
 				/* Write previous page(s) */
 #ifdef MDB_USE_PWRITEV
 				wres = pwritev(env->me_fd, iov, n, wpos);
@@ -3708,9 +3771,11 @@ retry_seek:
 						if (rc == EINTR)
 							goto retry_seek;
 						DPRINTF(("lseek: %s", strerror(rc)));
-						return rc;
+						wres = wsize;
+					} else {
+						rc = 0;
+						wres = writev(env->me_fd, iov, n);
 					}
-					wres = writev(env->me_fd, iov, n);
 				}
 #endif
 				if (wres != wsize) {
@@ -3723,8 +3788,18 @@ retry_seek:
 						rc = EIO; /* TODO: Use which error code? */
 						DPUTS("short write, filesystem full?");
 					}
-					return rc;
 				}
+#if MDB_RPAGE_CACHE
+				if (env->me_encfunc) {
+					int j, num1;
+					for (j=0; j<n; j++) {
+						num1 = 1 + (iov[j].iov_len > psize);
+						mdb_dpage_free_n(env, (MDB_page *)iov[j].iov_base, num1);
+					}
+				}
+#endif
+				if (rc)
+					return rc;
 				n = 0;
 			}
 			if (i > pagecount)
@@ -3732,6 +3807,20 @@ retry_seek:
 			wpos = pos;
 			wsize = 0;
 		}
+#if MDB_RPAGE_CACHE
+		if (env->me_encfunc) {
+			MDB_val in, out;
+			encp = mdb_page_malloc(txn, nump, 0);
+			if (!encp)
+				return ENOMEM;
+			in.mv_size = size;
+			in.mv_data = dp;
+			out.mv_size = size;
+			out.mv_data = encp;
+			env->me_encfunc(&in, &out, env->me_enckey, 1);
+			dp = encp;
+		}
+#endif
 		DPRINTF(("committing page %"Yu, pgno));
 		next_pos = pos + size;
 		iov[n].iov_len = size;
@@ -4820,6 +4909,8 @@ mdb_env_open2(MDB_env *env)
 			return i;
 		}
 	}
+	if ((env->me_flags ^ env->me_metas[0]->mm_flags) & MDB_ENCRYPT)
+		return MDB_INCOMPATIBLE;
 
 	env->me_maxfree_1pg = (env->me_psize - PAGEHDRSZ) / sizeof(pgno_t) - 1;
 	env->me_nodemax = (((env->me_psize - PAGEHDRSZ) / MDB_MINKEYS) & -2)
@@ -5660,6 +5751,9 @@ mdb_env_close(MDB_env *env)
 	}
 
 	mdb_env_close_active(env, 0);
+#if MDB_RPAGE_CACHE
+	free(env->me_enckey[0].mv_data);
+#endif
 	free(env);
 }
 
@@ -5909,6 +6003,8 @@ mdb_cursor_push(MDB_cursor *mc, MDB_page *mp)
 }
 
 #if MDB_RPAGE_CACHE
+static void mdb_rpage_decrypt(MDB_env *env, MDB_ID3 *id3, int rem, int numpgs);
+
 /** Map a read-only page.
  * There are two levels of tracking in use, a per-txn list and a per-env list.
  * ref'ing and unref'ing the per-txn list is faster since it requires no
@@ -5966,6 +6062,7 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pg0, int numpgs, MDB_page **ret)
 	MDB_ID3L tl = txn->mt_rpages;
 	MDB_ID3L el = env->me_rpages;
 	MDB_ID3 id3;
+	char *base;
 	unsigned x, rem;
 	pgno_t pgno;
 	int rc, retries = 1;
@@ -5994,6 +6091,8 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pg0, int numpgs, MDB_page **ret)
 	pgno = pg0 ^ rem;
 
 	id3.mid = 0;
+	id3.menc = NULL;
+	id3.muse = 0;
 	x = mdb_mid3l_search(tl, pgno);
 	if (x <= tl[0].mid && tl[x].mid == pgno) {
 		if (x != tl[0].mid && tl[x+1].mid == pg0)
@@ -6006,6 +6105,12 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pg0, int numpgs, MDB_page **ret)
 			MAP(rc, env, id3.mptr, len, off);
 			if (rc)
 				return rc;
+			/* setup for encryption */
+			if (env->me_encfunc) {
+				id3.menc = malloc(len);
+				if (!id3.menc)
+					return ENOMEM;
+			}
 			/* check for local-only page */
 			if (rem) {
 				mdb_tassert(txn, tl[x].mid != pg0);
@@ -6019,6 +6124,10 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pg0, int numpgs, MDB_page **ret)
 				/* ignore the mapping we got from env, use new one */
 				tl[x].mptr = id3.mptr;
 				tl[x].mcnt = id3.mcnt;
+				if (tl[x].menc)
+					free(tl[x].menc);
+				tl[x].menc = id3.menc;
+				tl[x].muse = id3.muse;
 				/* if no active ref, see if we can replace in env */
 				if (!tl[x].mref) {
 					unsigned i;
@@ -6029,6 +6138,10 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pg0, int numpgs, MDB_page **ret)
 						munmap(el[i].mptr, el[i].mcnt * env->me_psize);
 						el[i].mptr = tl[x].mptr;
 						el[i].mcnt = tl[x].mcnt;
+						if (el[i].menc)
+							free(el[i].menc);
+						el[i].menc = tl[x].menc;
+						el[i].muse = tl[x].muse;
 					} else {
 						/* there are others, remove ourself */
 						el[i].mref--;
@@ -6039,7 +6152,13 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pg0, int numpgs, MDB_page **ret)
 		}
 		id3.mptr = tl[x].mptr;
 		id3.mcnt = tl[x].mcnt;
+		id3.menc = tl[x].menc;
+		id3.muse = tl[x].muse;
 		tl[x].mref++;
+		if (env->me_encfunc) {
+			mdb_rpage_decrypt(env, &id3, rem, numpgs);
+			tl[x].muse = id3.muse;
+		}
 		goto ok;
 	}
 
@@ -6056,6 +6175,8 @@ retry:
 				/* tmp overflow pages don't go to env */
 				if (tl[i].mid & (MDB_RPAGE_CHUNK-1)) {
 					munmap(tl[i].mptr, tl[i].mcnt * env->me_psize);
+					if (tl[i].menc)
+						free(tl[i].menc);
 					continue;
 				}
 				x = mdb_mid3l_search(el, tl[i].mid);
@@ -6103,23 +6224,45 @@ retry:
 		x = mdb_mid3l_search(el, pgno);
 		if (x <= el[0].mid && el[x].mid == pgno) {
 			id3.mptr = el[x].mptr;
+			id3.menc = el[x].menc;
+			id3.muse = el[x].muse;
 			/* check for overflow size */
 			if (id3.mcnt > el[x].mcnt) {
 				SET_OFF(off, pgno * env->me_psize);
 				MAP(rc, env, id3.mptr, len, off);
 				if (rc)
 					goto fail;
+				if (env->me_encfunc) {
+					id3.menc = malloc(len);
+					if (!id3.menc) {
+						rc = ENOMEM;
+						goto fail;
+					}
+					id3.muse = 0;
+				}
 				if (!el[x].mref) {
 					munmap(el[x].mptr, env->me_psize * el[x].mcnt);
 					el[x].mptr = id3.mptr;
 					el[x].mcnt = id3.mcnt;
+					if (el[x].menc)
+						free(el[x].menc);
+					el[x].menc = id3.menc;
+					el[x].muse = id3.muse;
 				} else {
 					id3.mid = pg0;
+					if (env->me_encfunc) {
+						mdb_rpage_decrypt(env, &id3, rem, numpgs);
+						el[x].muse = id3.muse;
+					}
 					pthread_mutex_unlock(&env->me_rpmutex);
 					goto found;
 				}
 			}
 			el[x].mref++;
+			if (env->me_encfunc) {
+				mdb_rpage_decrypt(env, &id3, rem, numpgs);
+				el[x].muse = id3.muse;
+			}
 			pthread_mutex_unlock(&env->me_rpmutex);
 			goto found;
 		}
@@ -6130,6 +6273,8 @@ retry:
 				if (!el[i].mref) {
 					if (!y) y = i;
 					munmap(el[i].mptr, env->me_psize * el[i].mcnt);
+					if (el[i].menc)
+						free(el[i].menc);
 				}
 			}
 			if (!y) {
@@ -6162,6 +6307,14 @@ fail:
 			pthread_mutex_unlock(&env->me_rpmutex);
 			return rc;
 		}
+		if (env->me_encfunc) {
+			id3.menc = malloc(len);
+			if (!id3.menc) {
+				rc = ENOMEM;
+				goto fail;
+			}
+			mdb_rpage_decrypt(env, &id3, rem, numpgs);
+		}
 		mdb_mid3l_insert(el, &id3);
 		pthread_mutex_unlock(&env->me_rpmutex);
 found:
@@ -6170,7 +6323,10 @@ found:
 		return MDB_TXN_FULL;
 	}
 ok:
-	p = (MDB_page *)((char *)id3.mptr + rem * env->me_psize);
+	base = (char *)(env->me_encfunc ? id3.menc : id3.mptr);
+	p = (MDB_page *)(base + rem * env->me_psize);
+	if (env->me_encfunc)
+		mdb_rpage_decrypt(env, &id3, rem, numpgs);
 #if MDB_DEBUG	/* we don't need this check any more */
 	if (IS_OVERFLOW(p)) {
 		mdb_tassert(txn, p->mp_pages + rem <= id3.mcnt);
@@ -6178,6 +6334,19 @@ ok:
 #endif
 	*ret = p;
 	return MDB_SUCCESS;
+}
+
+static void mdb_rpage_decrypt(MDB_env *env, MDB_ID3 *id3, int rem, int numpgs)
+{
+	if (!(id3->muse & (1 << rem))) {
+		MDB_val in, out;
+		id3->muse |= (1 << rem);
+		in.mv_size = numpgs * env->me_psize;
+		in.mv_data = (char *)id3->mptr + rem * env->me_psize;
+		out.mv_size = in.mv_size;
+		out.mv_data = (char *)id3->menc + rem * env->me_psize;
+		env->me_encfunc(&in, &out, env->me_enckey, 0);
+	}
 }
 #endif
 
@@ -6557,15 +6726,14 @@ mdb_node_read(MDB_cursor *mc, MDB_node *leaf, MDB_val *data)
 		MDB_PAGE_UNREF(mc->mc_txn, MC_OVPG(mc));
 		MC_SET_OVPG(mc, NULL);
 	}
+	data->mv_size = NODEDSZ(leaf);
 	if (!F_ISSET(leaf->mn_flags, F_BIGDATA)) {
-		data->mv_size = NODEDSZ(leaf);
 		data->mv_data = NODEDATA(leaf);
 		return MDB_SUCCESS;
 	}
 
 	/* Read overflow data.
 	 */
-	data->mv_size = NODEDSZ(leaf);
 	memcpy(&pgno, NODEDATA(leaf), sizeof(pgno));
 	{
 #if MDB_RPAGE_CACHE
@@ -7702,7 +7870,7 @@ current:
 				if (level > 1) {
 					/* It is writable only in a parent txn */
 					size_t sz = (size_t) env->me_psize * ovpages, off;
-					MDB_page *np = mdb_page_malloc(mc->mc_txn, ovpages);
+					MDB_page *np = mdb_page_malloc(mc->mc_txn, ovpages, 1);
 					MDB_ID2 id2;
 					if (!np)
 						return ENOMEM;
@@ -9556,7 +9724,7 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 			nsize = EVEN(nsize);
 
 			/* grab a page to hold a temporary copy */
-			copy = mdb_page_malloc(mc->mc_txn, 1);
+			copy = mdb_page_malloc(mc->mc_txn, 1, 1);
 			if (copy == NULL) {
 				rc = ENOMEM;
 				goto done;
@@ -10473,6 +10641,33 @@ mdb_env_set_assert(MDB_env *env, MDB_assert_func *func)
 #endif
 	return MDB_SUCCESS;
 }
+
+#if MDB_RPAGE_CACHE
+int ESECT
+mdb_env_set_encrypt(MDB_env *env, MDB_enc_func *func, const MDB_val *key)
+{
+	char *kdata, *ivdata;
+
+	if (!env || !func || !key)
+		return EINVAL;
+	if (env->me_flags & MDB_ENV_ACTIVE)
+		return EINVAL;
+	if (! (kdata = malloc(key[0].mv_size + key[1].mv_size)))
+		return ENOMEM;
+
+	ivdata = kdata + key[0].mv_size;
+	memcpy(kdata,  key[0].mv_data, key[0].mv_size);
+	memcpy(ivdata, key[1].mv_data, key[1].mv_size);
+	free(env->me_enckey[0].mv_data);
+	env->me_enckey[0].mv_data = kdata;
+	env->me_enckey[0].mv_size = key[0].mv_size;
+	env->me_enckey[1].mv_data = ivdata;
+	env->me_enckey[1].mv_size = key[1].mv_size;
+	env->me_encfunc = func;
+	env->me_flags |= MDB_REMAP_CHUNKS | MDB_ENCRYPT;
+	return MDB_SUCCESS;
+}
+#endif
 
 int ESECT
 mdb_env_get_path(MDB_env *env, const char **arg)
