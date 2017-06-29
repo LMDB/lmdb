@@ -42,7 +42,11 @@ ILIBS	= liblmdb.a liblmdb$(SOEXT)
 IPROGS	= mdb_stat mdb_copy mdb_dump mdb_load
 IDOCS	= mdb_stat.1 mdb_copy.1 mdb_dump.1 mdb_load.1
 PROGS	= $(IPROGS) mtest mtest2 mtest3 mtest4 mtest5
+RPROGS	= mtest_remap mtest_enc
+
 all:	$(ILIBS) $(PROGS)
+# Requires CPPFLAGS=-DMDB_VL32 and/or -DMDB_RPAGE_CACHE
+rall:	all $(RPROGS)
 
 install: $(ILIBS) $(IPROGS) $(IHDRS)
 	mkdir -p $(DESTDIR)$(bindir)
@@ -55,7 +59,7 @@ install: $(ILIBS) $(IPROGS) $(IHDRS)
 	for f in $(IDOCS); do cp $$f $(DESTDIR)$(mandir)/man1; done
 
 clean:
-	rm -rf $(PROGS) *.[ao] *.[ls]o *~ testdb
+	rm -rf $(PROGS) $(RPROGS) *.[ao] *.[ls]o *~ testdb
 
 test:	all
 	rm -rf testdb && mkdir testdb
@@ -78,6 +82,8 @@ mtest3:	mtest3.o liblmdb.a
 mtest4:	mtest4.o liblmdb.a
 mtest5:	mtest5.o liblmdb.a
 mtest6:	mtest6.o liblmdb.a
+mtest_remap:  mtest_remap.o liblmdb.a
+mtest_enc:    mtest_enc.o chacha8.o liblmdb.a
 
 mdb.o: mdb.c lmdb.h midl.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c mdb.c

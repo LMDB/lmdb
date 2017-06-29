@@ -5464,9 +5464,14 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 	if (MDB_REMAPPING(flags)) {
 		/* silently ignore WRITEMAP with REMAP_CHUNKS */
 		flags &= ~MDB_WRITEMAP;
+#if (MDB_RPAGE_CACHE) & 2
+		/* TEST: silently ignore FIXEDMAP, so mtest*.c will work */
+		flags &= ~MDB_FIXEDMAP;
+#else
 		/* cannot support FIXEDMAP */
 		if (flags & MDB_FIXEDMAP)
 			return EINVAL;
+#endif
 	}
 
 	rc = mdb_fname_init(path, flags, &fname);
