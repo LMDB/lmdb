@@ -1572,6 +1572,7 @@ static void mdb_txn_end(MDB_txn *txn, unsigned mode);
 #if MDB_RPAGE_CACHE
 static int  mdb_page_get(MDB_cursor *mc, pgno_t pgno, int numpgs, MDB_page **mp, int *lvl);
 #define MDB_PAGE_GET(mc, pg, numpgs, mp, lvl)	mdb_page_get(mc, pg, numpgs, mp, lvl)
+static void mdb_rpage_dispose(MDB_env *env, MDB_ID3 *id3);
 #else
 static int  mdb_page_get(MDB_cursor *mc, pgno_t pgno, MDB_page **mp, int *lvl);
 #define MDB_PAGE_GET(mc, pg, numpgs, mp, lvl)	mdb_page_get(mc, pg, mp, lvl)
@@ -1998,19 +1999,20 @@ mdb_page_malloc(MDB_txn *txn, unsigned num, int init)
 	 * many pages they will be filling in at least up to the last page.
 	 */
 	if (num == 1) {
+		psize -= off = PAGEHDRSZ;
 		if (ret) {
 			VGMEMP_ALLOC(env, ret, sz);
 			VGMEMP_DEFINED(ret, sizeof(ret->mp_next));
 			env->me_dpages = ret->mp_next;
-			return ret;
+			goto init;
 		}
-		psize -= off = PAGEHDRSZ;
 	} else {
 		sz *= num;
 		off = sz - psize;
 	}
 	if ((ret = malloc(sz)) != NULL) {
 		VGMEMP_ALLOC(env, ret, sz);
+init:
 		if (init && !(env->me_flags & MDB_NOMEMINIT)) {
 			memset((char *)ret + off, 0, psize);
 			ret->mp_pad = 0;
@@ -3393,7 +3395,7 @@ mdb_txn_end(MDB_txn *txn, unsigned mode)
 				/* tmp overflow pages that we didn't share in env */
 				munmap(tl[i].mptr, tl[i].mcnt * env->me_psize);
 				if (tl[i].menc) {
-					free(tl[i].menc);
+					mdb_rpage_dispose(env, &tl[i]);
 					tl[i].menc = NULL;
 				}
 			} else {
@@ -3406,7 +3408,7 @@ mdb_txn_end(MDB_txn *txn, unsigned mode)
 					/* another tmp overflow page */
 					munmap(tl[i].mptr, tl[i].mcnt * env->me_psize);
 					if (tl[i].menc) {
-						free(tl[i].menc);
+						mdb_rpage_dispose(env, &tl[i]);
 						tl[i].menc = NULL;
 					}
 				}
@@ -6130,7 +6132,7 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pg0, int numpgs, MDB_page **ret)
 				tl[x].mptr = id3.mptr;
 				tl[x].mcnt = id3.mcnt;
 				if (tl[x].menc)
-					free(tl[x].menc);
+					mdb_rpage_dispose(env, &tl[x]);
 				tl[x].menc = id3.menc;
 				tl[x].muse = id3.muse;
 				/* if no active ref, see if we can replace in env */
@@ -6144,7 +6146,7 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pg0, int numpgs, MDB_page **ret)
 						el[i].mptr = tl[x].mptr;
 						el[i].mcnt = tl[x].mcnt;
 						if (el[i].menc)
-							free(el[i].menc);
+							mdb_rpage_dispose(env, &el[i]);
 						el[i].menc = tl[x].menc;
 						el[i].muse = tl[x].muse;
 					} else {
@@ -6181,7 +6183,7 @@ retry:
 				if (tl[i].mid & (MDB_RPAGE_CHUNK-1)) {
 					munmap(tl[i].mptr, tl[i].mcnt * env->me_psize);
 					if (tl[i].menc)
-						free(tl[i].menc);
+						mdb_rpage_dispose(env, &tl[i]);
 					continue;
 				}
 				x = mdb_mid3l_search(el, tl[i].mid);
@@ -6250,7 +6252,7 @@ retry:
 					el[x].mptr = id3.mptr;
 					el[x].mcnt = id3.mcnt;
 					if (el[x].menc)
-						free(el[x].menc);
+						mdb_rpage_dispose(env, &el[x]);
 					el[x].menc = id3.menc;
 					el[x].muse = id3.muse;
 				} else {
@@ -6279,7 +6281,7 @@ retry:
 					if (!y) y = i;
 					munmap(el[i].mptr, env->me_psize * el[i].mcnt);
 					if (el[i].menc)
-						free(el[i].menc);
+						mdb_rpage_dispose(env, &el[i]);
 				}
 			}
 			if (!y) {
@@ -6345,13 +6347,39 @@ static void mdb_rpage_decrypt(MDB_env *env, MDB_ID3 *id3, int rem, int numpgs)
 {
 	if (!(id3->muse & (1 << rem))) {
 		MDB_val in, out;
-		id3->muse |= (1 << rem);
+		int bit;
+
+		/* If this is an overflow page, set all use bits to the end */
+		if (rem + numpgs > MDB_RPAGE_CHUNK)
+			bit = 0xffff;
+		else
+			bit = 1;
+
+		id3->muse |= (bit << rem);
 		in.mv_size = numpgs * env->me_psize;
 		in.mv_data = (char *)id3->mptr + rem * env->me_psize;
 		out.mv_size = in.mv_size;
 		out.mv_data = (char *)id3->menc + rem * env->me_psize;
 		env->me_encfunc(&in, &out, env->me_enckey, 0);
 	}
+}
+
+/** zero out decrypted pages before freeing them */
+static void mdb_rpage_dispose(MDB_env *env, MDB_ID3 *id3)
+{
+	char *base = id3->menc;
+	int i, j;
+	for (i=0, j=1; i<15; i++) {
+		if (id3->muse & j)
+			memset(base, 0, env->me_psize);
+		j <<= 1;
+		base += env->me_psize;
+	}
+	if (id3->muse & j) {
+		i = id3->mcnt - (MDB_RPAGE_CHUNK - 1);
+		memset(base, 0, i * env->me_psize);
+	}
+	free(id3->menc);
 }
 #endif
 
