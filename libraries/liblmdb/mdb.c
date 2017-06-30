@@ -4213,6 +4213,15 @@ mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 	q->mp_flags = P_META;
 	*(MDB_meta *)METADATA(q) = *meta;
 
+#if MDB_RPAGE_CACHE
+	if ((env->me_flags & MDB_ENCRYPT) && env->me_enckey[1].mv_size) {
+		/* save the IV in tail of page 0 */
+		char *ptr = (char *)q;
+		unsigned short *u = (unsigned short *)(ptr-2);
+		*u = env->me_enckey[1].mv_size;
+		memcpy(ptr - 2 - env->me_enckey[1].mv_size, env->me_enckey[1].mv_data, env->me_enckey[1].mv_size);
+	}
+#endif
 	DO_PWRITE(rc, env->me_fd, p, psize * NUM_METAS, len, 0);
 	if (!rc)
 		rc = ErrCode();
@@ -4913,6 +4922,21 @@ mdb_env_open2(MDB_env *env)
 	}
 	if ((env->me_flags ^ env->me_metas[0]->mm_flags) & MDB_ENCRYPT)
 		return MDB_INCOMPATIBLE;
+
+#if MDB_RPAGE_CACHE
+	if (!newenv && env->me_flags & MDB_ENCRYPT) {
+		/* for encrypted env, read IV from tail of page 0 */
+		char *ptr = env->me_map + env->me_psize, *ekey;
+		unsigned short *u = (unsigned short *)(ptr - 2);
+		env->me_enckey[1].mv_size = *u;
+		ekey = realloc(env->me_enckey[0].mv_data, env->me_enckey[0].mv_size + env->me_enckey[1].mv_size);
+		if (!ekey)
+			return ENOMEM;
+		env->me_enckey[0].mv_data = ekey;
+		env->me_enckey[1].mv_data = ekey + env->me_enckey[0].mv_size;
+		memcpy(env->me_enckey[1].mv_data, ptr - 2 - env->me_enckey[1].mv_size, env->me_enckey[1].mv_size);
+	}
+#endif
 
 	env->me_maxfree_1pg = (env->me_psize - PAGEHDRSZ) / sizeof(pgno_t) - 1;
 	env->me_nodemax = (((env->me_psize - PAGEHDRSZ) / MDB_MINKEYS) & -2)
