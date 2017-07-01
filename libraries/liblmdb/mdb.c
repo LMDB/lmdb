@@ -5464,16 +5464,33 @@ fail:
 }
 
 #ifdef MDB_TEST
+#if MDB_RPAGE_CACHE
+/** Trivial encryption for testing */
+static void ESECT
+mdb_enctest(const MDB_val *src, MDB_val *dst, const MDB_val *key, int encdec)
+{
+	mdb_size_t *sptr = src->mv_data, *dptr = dst->mv_data;
+	mdb_size_t x=*(mdb_size_t*)key[0].mv_data, v=*(mdb_size_t*)key[1].mv_data;
+	int i = dst->mv_size / sizeof(mdb_size_t);
+
+	while (--i >= 0)
+		x += v += i + sptr[i] + (dptr[i] = sptr[i] ^ x);
+}
+#endif	/* MDB_RPAGE_CACHE */
+
 /** Add #mdb_env_open() flags from environment variable $LMDB_FLAGS.
+ *
+ *	Supports the normal flags plus 'e' = trivial encryption for testing.
  */
 static int ESECT
 mdb_env_getflags(MDB_env *env)
 {
-	static const char names[] = "acfhilmnrstw";
+	static const char names[] = "acfhilmnrstwe";
 	static const unsigned f[] = {
 		MDB_MAPASYNC, MDB_REMAP_CHUNKS, MDB_FIXEDMAP, MDB_NORDAHEAD,
 		MDB_NOMEMINIT, MDB_NOLOCK, MDB_NOMETASYNC, MDB_NOSUBDIR,
 		MDB_RDONLY, MDB_NOSYNC, MDB_NOTLS, MDB_WRITEMAP,
+		MDB_ENCRYPT,
 	};
 	unsigned flags = 0;
 	const char *s, *opts = getenv("LMDB_FLAGS");
@@ -5482,6 +5499,22 @@ mdb_env_getflags(MDB_env *env)
 			if ((s = strchr(names, *opts)) == NULL)
 				return EINVAL;
 			flags |= f[s - names];
+		}
+		if (flags & MDB_ENCRYPT) {
+#if MDB_RPAGE_CACHE
+			if (!env->me_encfunc) {
+				static mdb_size_t k = MDB_SIZE_MAX/9*37;
+				mdb_size_t iv = ((mdb_size_t)env ^ env->me_pid);
+				MDB_val keys[2] = { {sizeof(k), &k}, {sizeof(iv), NULL} };
+				int rc;
+				keys[1].mv_data = &iv;
+				rc = mdb_env_set_encrypt(env, mdb_enctest, keys);
+				if (rc)
+					return rc;
+			}
+#else
+			return EINVAL;
+#endif
 		}
 		env->me_flags |= flags;
 	}
