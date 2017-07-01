@@ -1593,9 +1593,9 @@ static int  mdb_env_read_header(MDB_env *env, MDB_meta *meta);
 static MDB_meta *mdb_env_pick_meta(const MDB_env *env);
 static int  mdb_env_write_meta(MDB_txn *txn);
 #ifdef MDB_USE_POSIX_MUTEX /* Drop unused excl arg */
-# define mdb_env_close0(env, excl) mdb_env_close1(env)
+# define mdb_env_close_active(env, excl) mdb_env_close1(env)
 #endif
-static void mdb_env_close0(MDB_env *env, int excl);
+static void mdb_env_close_active(MDB_env *env, int excl);
 
 static MDB_node *mdb_node_search(MDB_cursor *mc, MDB_val *key, int *exactp);
 static int  mdb_node_add(MDB_cursor *mc, indx_t indx,
@@ -5397,7 +5397,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 #endif
 	}
 #endif
-	flags |= MDB_ENV_ACTIVE;	/* tell mdb_env_close0() to clean up */
+	flags |= MDB_ENV_ACTIVE; /* tell mdb_env_close_active() to clean up */
 
 	if (flags & MDB_RDONLY) {
 		/* silently ignore WRITEMAP when we're only getting read access */
@@ -5504,15 +5504,15 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 
 leave:
 	if (rc) {
-		mdb_env_close0(env, excl);
+		mdb_env_close_active(env, excl);
 	}
 	mdb_fname_destroy(fname);
 	return rc;
 }
 
-/** Destroy resources from mdb_env_open(), clear our readers & DBIs */
+/** When #MDB_ENV_ACTIVE: Clear #mdb_env_open()ed resources, release readers */
 static void ESECT
-mdb_env_close0(MDB_env *env, int excl)
+mdb_env_close_active(MDB_env *env, int excl)
 {
 	int i;
 
@@ -5659,7 +5659,7 @@ mdb_env_close(MDB_env *env)
 		free(dp);
 	}
 
-	mdb_env_close0(env, 0);
+	mdb_env_close_active(env, 0);
 	free(env);
 }
 
