@@ -5463,6 +5463,34 @@ fail:
 	return rc;
 }
 
+#ifdef MDB_TEST
+/** Add #mdb_env_open() flags from environment variable $LMDB_FLAGS.
+ */
+static int ESECT
+mdb_env_getflags(MDB_env *env)
+{
+	static const char names[] = "acfhilmnrstw";
+	static const unsigned f[] = {
+		MDB_MAPASYNC, MDB_REMAP_CHUNKS, MDB_FIXEDMAP, MDB_NORDAHEAD,
+		MDB_NOMEMINIT, MDB_NOLOCK, MDB_NOMETASYNC, MDB_NOSUBDIR,
+		MDB_RDONLY, MDB_NOSYNC, MDB_NOTLS, MDB_WRITEMAP,
+	};
+	unsigned flags = 0;
+	const char *s, *opts = getenv("LMDB_FLAGS");
+	if (opts) {
+		for (; *opts; opts++) {
+			if ((s = strchr(names, *opts)) == NULL)
+				return EINVAL;
+			flags |= f[s - names];
+		}
+		env->me_flags |= flags;
+	}
+	return MDB_SUCCESS;
+}
+#else
+#define mdb_env_getflags(env) MDB_SUCCESS
+#endif	/* MDB_TEST */
+
 	/** Only a subset of the @ref mdb_env flags can be changed
 	 *	at runtime. Changing other flags requires closing the
 	 *	environment and re-opening it with the new flags.
@@ -5484,7 +5512,10 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 	if (env->me_fd!=INVALID_HANDLE_VALUE || (flags & ~(CHANGEABLE|CHANGELESS)))
 		return EINVAL;
 
+	if ((rc = mdb_env_getflags(env)) != MDB_SUCCESS)
+		return rc;
 	flags |= env->me_flags;
+
 	if (MDB_REMAPPING(0))			/* if we always remap chunks */
 		flags |= MDB_REMAP_CHUNKS;
 	if (MDB_REMAPPING(flags)) {
