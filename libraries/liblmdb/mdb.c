@@ -619,7 +619,7 @@ static txnid_t mdb_debug_start;
 #define MDB_MAGIC	 0xBEEFC0DE
 
 	/**	The version number for a database's datafile format. */
-#define MDB_DATA_VERSION	 ((MDB_DEVEL) ? 999 : 1)
+#define MDB_DATA_VERSION	 ((MDB_DEVEL) ? 999 : 2)
 	/**	The version number for a database's lockfile format. */
 #define MDB_LOCK_VERSION	 ((MDB_DEVEL) ? 999 : 2)
 	/** Number of bits representing #MDB_LOCK_VERSION in #MDB_LOCK_FORMAT.
@@ -961,6 +961,7 @@ typedef struct MDB_page {
 		pgno_t		p_pgno;	/**< page number */
 		struct MDB_page *p_next; /**< for in-memory list of freed pages */
 	} mp_p;
+	txnid_t		mp_txnid;		/**< txnid that committed this page, unused in meta pages */
 	uint16_t	mp_pad;			/**< key size if this is a LEAF2 page */
 /**	@defgroup mdb_page	Page Flags
  *	@ingroup internal
@@ -2625,6 +2626,7 @@ search_done:
 		txn->mt_next_pgno = pgno + num;
 	}
 	np->mp_pgno = pgno;
+	np->mp_txnid = txn->mt_txnid;
 	mdb_page_dirty(txn, np);
 	*mp = np;
 
@@ -2795,6 +2797,7 @@ mdb_page_touch(MDB_cursor *mc)
 	np->mp_flags |= P_DIRTY;
 
 done:
+	np->mp_txnid = txn->mt_txnid;
 	/* Adjust cursors pointing to mp */
 	mc->mc_pg[mc->mc_top] = np;
 	m2 = txn->mt_cursors[mc->mc_dbi];
@@ -7840,6 +7843,7 @@ more:
 			unsigned	i, offset = 0;
 			mp = fp = xdata.mv_data = env->me_pbuf;
 			mp->mp_pgno = mc->mc_pg[mc->mc_top]->mp_pgno;
+			mp->mp_txnid = mc->mc_txn->mt_txnid;
 
 			/* Was a single item before, must convert now */
 			if (!F_ISSET(leaf->mn_flags, F_DUPDATA)) {
@@ -10362,6 +10366,7 @@ mdb_env_cwalk(mdb_copy *my, pgno_t *pg, int flags)
 						mo = (MDB_page *)(my->mc_wbuf[toggle] + my->mc_wlen[toggle]);
 						memcpy(mo, omp, my->mc_env->me_psize);
 						mo->mp_pgno = my->mc_next_pgno;
+						mo->mp_txnid = 1;
 						my->mc_next_pgno += omp->mp_pages;
 						my->mc_wlen[toggle] += my->mc_env->me_psize;
 						if (dpages > 1) {
@@ -10426,6 +10431,7 @@ again:
 		mo = (MDB_page *)(my->mc_wbuf[toggle] + my->mc_wlen[toggle]);
 		mdb_page_copy(mo, mp, my->mc_env->me_psize);
 		mo->mp_pgno = my->mc_next_pgno++;
+		mo->mp_txnid = 1;
 		my->mc_wlen[toggle] += my->mc_env->me_psize;
 		if (mc.mc_top) {
 			/* Update parent if there is one */
