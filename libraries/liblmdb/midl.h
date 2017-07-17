@@ -178,6 +178,12 @@ int mdb_mid2l_insert( MDB_ID2L ids, MDB_ID2 *id );
 	 */
 int mdb_mid2l_append( MDB_ID2L ids, MDB_ID2 *id );
 
+MDB_ID2L mdb_mid2l_alloc(int num);
+
+void mdb_mid2l_free(MDB_ID2L ids);
+
+int mdb_mid2l_need( MDB_ID2L *idp, unsigned num );
+
 #if MDB_RPAGE_CACHE
 typedef struct MDB_ID3 {
 	MDB_ID mid;		/**< The ID */

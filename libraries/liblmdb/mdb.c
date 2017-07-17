@@ -942,8 +942,9 @@ enum {
  * sorted #mp_ptrs[] entries referring to them. Exception: #P_LEAF2 pages
  * omit mp_ptrs and pack sorted #MDB_DUPFIXED values after the page header.
  *
- * #P_OVERFLOW records occupy one or more contiguous pages where only the
- * first has a page header. They hold the real data of #F_BIGDATA nodes.
+ * #P_OVERFLOW records occupy one or more contiguous pages that contain
+ * pure data with no page header. They hold the real data of #F_BIGDATA nodes,
+ * and the node stores what would have gone in a page header.
  *
  * #P_SUBP sub-pages are small leaf "pages" with duplicate data.
  * A node with flag #F_DUPDATA but not #F_SUBDATA contains a sub-page.
@@ -954,15 +955,15 @@ enum {
  * Each non-metapage up to #MDB_meta.%mm_last_pg is reachable exactly once
  * in the snapshot: Either used by a database or listed in a freeDB record.
  */
-typedef struct MDB_page {
+typedef struct MDB_page_header {
 #define	mp_pgno	mp_p.p_pgno
 #define	mp_next	mp_p.p_next
 	union {
 		pgno_t		p_pgno;	/**< page number */
 		struct MDB_page *p_next; /**< for in-memory list of freed pages */
-	} mp_p;
-	txnid_t		mp_txnid;		/**< txnid that committed this page, unused in meta pages */
-	uint16_t	mp_pad;			/**< key size if this is a LEAF2 page */
+	} mh_p;
+	txnid_t		mh_txnid;		/**< txnid that committed this page, unused in meta pages */
+	uint16_t	mh_pad;			/**< key size if this is a LEAF2 page */
 /**	@defgroup mdb_page	Page Flags
  *	@ingroup internal
  *	Flags for the page headers.
@@ -975,10 +976,11 @@ typedef struct MDB_page {
 #define	P_DIRTY		 0x10		/**< dirty page, also set for #P_SUBP pages */
 #define	P_LEAF2		 0x20		/**< for #MDB_DUPFIXED records */
 #define	P_SUBP		 0x40		/**< for #MDB_DUPSORT sub-pages */
+#define	P_DIRTY_OVF	 0x2000		/**< page has dirty overflow nodes */
 #define	P_LOOSE		 0x4000		/**< page was dirtied then freed, can be reused */
 #define	P_KEEP		 0x8000		/**< leave this page alone during spill */
 /** @} */
-	uint16_t	mp_flags;		/**< @ref mdb_page */
+	uint16_t	mh_flags;		/**< @ref mdb_page */
 #define mp_lower	mp_pb.pb.pb_lower
 #define mp_upper	mp_pb.pb.pb_upper
 #define mp_pages	mp_pb.pb_pages
@@ -988,12 +990,21 @@ typedef struct MDB_page {
 			indx_t		pb_upper;		/**< upper bound of free space */
 		} pb;
 		uint32_t	pb_pages;	/**< number of overflow pages */
-	} mp_pb;
+	} mh_pb;
+} MDB_page_header;
+
+typedef struct MDB_page {
+	MDB_page_header	mp_hdr;
+#define mp_p	mp_hdr.mh_p
+#define mp_txnid	mp_hdr.mh_txnid
+#define mp_pad		mp_hdr.mh_pad
+#define mp_flags	mp_hdr.mh_flags
+#define mp_pb		mp_hdr.mh_pb
 	indx_t		mp_ptrs[1];		/**< dynamic size */
 } MDB_page;
 
 	/** Size of the page header, excluding dynamic data at the end */
-#define PAGEHDRSZ	 ((unsigned) offsetof(MDB_page, mp_ptrs))
+#define PAGEHDRSZ	 sizeof(MDB_page_header)
 
 	/** Address of first usable data byte in a page, after the header */
 #define METADATA(p)	 ((void *)((char *)(p) + PAGEHDRSZ))
@@ -1026,6 +1037,19 @@ typedef struct MDB_page {
 	/** Test if a page is a sub page */
 #define IS_SUBP(p)	 F_ISSET((p)->mp_flags, P_SUBP)
 
+	/** Header for overflow pages, stored in an F_BIGDATA node */
+typedef struct MDB_ovpage {
+	pgno_t	op_pgno;
+	txnid_t	op_txnid;
+	mdb_size_t	op_pages;
+} MDB_ovpage;
+
+	/** Header for a dirty overflow page in memory */
+typedef struct MDB_dovpage {
+	MDB_page_header mp_hdr;
+	void	*mp_ptr;
+} MDB_dovpage;
+
 	/** The number of overflow pages needed to store the given size. */
 #define OVPAGES(size, psize)	((PAGEHDRSZ-1 + (size)) / (psize) + 1)
 
@@ -1044,7 +1068,7 @@ typedef struct MDB_page {
 	 * order in case some accesses can be optimized to 32-bit word access.
 	 *
 	 * Leaf node flags describe node contents.  #F_BIGDATA says the node's
-	 * data part is the page number of an overflow page with actual data.
+	 * data part is an MDB_ovpage struct pointing to a page with actual data.
 	 * #F_DUPDATA and #F_SUBDATA can be combined giving duplicate data in
 	 * a sub-page/sub-database, and named databases (just #F_SUBDATA).
 	 */
@@ -1276,6 +1300,8 @@ struct MDB_txn {
 		/** For read txns: This thread/txn's reader table slot, or NULL. */
 		MDB_reader	*reader;
 	} mt_u;
+	/** The sorted list of dirty overflow pages. */
+	MDB_ID2L	mt_dirty_ovs;
 	/** Array of records for each DB known in the environment. */
 	MDB_dbx		*mt_dbxs;
 	/** Array of MDB_db records for each known DB */
@@ -1553,7 +1579,7 @@ typedef struct MDB_ntxn {
 #define TXN_DBI_CHANGED(txn, dbi) \
 	((txn)->mt_dbiseqs[dbi] != (txn)->mt_env->me_dbiseqs[dbi])
 
-static int  mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp);
+static int  mdb_page_alloc(MDB_cursor *mc, int num, int ov, MDB_page **mp);
 static int  mdb_page_new(MDB_cursor *mc, uint32_t flags, int num, MDB_page **mp);
 static int  mdb_page_touch(MDB_cursor *mc);
 
@@ -1871,7 +1897,7 @@ mdb_page_list(MDB_page *mp)
 			total += nsize;
 		} else {
 			if (F_ISSET(node->mn_flags, F_BIGDATA))
-				nsize += sizeof(pgno_t);
+				nsize += sizeof(MDB_ovpage);
 			else
 				nsize += NODEDSZ(node);
 			total += nsize;
@@ -2409,7 +2435,7 @@ mdb_find_oldest(MDB_txn *txn)
 
 /** Add a page to the txn's dirty list */
 static void
-mdb_page_dirty(MDB_txn *txn, MDB_page *mp)
+mdb_page_dirty(MDB_txn *txn, MDB_page *mp, int ov)
 {
 	MDB_ID2 mid;
 	int rc, (*insert)(MDB_ID2L, MDB_ID2 *);
@@ -2421,9 +2447,13 @@ mdb_page_dirty(MDB_txn *txn, MDB_page *mp)
 	}
 	mid.mid = mp->mp_pgno;
 	mid.mptr = mp;
-	rc = insert(txn->mt_u.dirty_list, &mid);
+	if (ov) {
+		rc = mdb_mid2l_insert(txn->mt_dirty_ovs, &mid);
+	} else {
+		rc = insert(txn->mt_u.dirty_list, &mid);
+		txn->mt_dirty_room--;
+	}
 	mdb_tassert(txn, rc == 0);
-	txn->mt_dirty_room--;
 }
 
 /** Allocate page numbers and memory for writing.  Maintain me_pglast,
@@ -2444,7 +2474,7 @@ mdb_page_dirty(MDB_txn *txn, MDB_page *mp)
  * @return 0 on success, non-zero on failure.
  */
 static int
-mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
+mdb_page_alloc(MDB_cursor *mc, int num, int ov, MDB_page **mp)
 {
 #ifdef MDB_PARANOID	/* Seems like we can ignore this now */
 	/* Get at most <Max_retries> more freeDB records once me_pghead
@@ -2467,6 +2497,17 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 	MDB_cursor_op op;
 	MDB_cursor m2;
 	int found_old = 0;
+	MDB_dovpage *dph = NULL;
+
+	if (ov) {
+		if (!txn->mt_dirty_ovs) {
+			txn->mt_dirty_ovs = mdb_mid2l_alloc(16);
+			if (!txn->mt_dirty_ovs)
+				return ENOMEM;
+		} else if (mdb_mid2l_need(&txn->mt_dirty_ovs, txn->mt_dirty_ovs[0].mid + 1))
+			return ENOMEM;
+		dph = malloc(sizeof(MDB_dovpage));
+	}
 
 	/* If there are any loose pages, just use them */
 	if (num == 1 && txn->mt_loose_pgs) {
@@ -2474,6 +2515,11 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 		txn->mt_loose_pgs = NEXT_LOOSE_PAGE(np);
 		txn->mt_loose_count--;
 		DPRINTF(("db %d use loose page %"Yu, DDBI(mc), np->mp_pgno));
+		if (ov) {
+			dph->mp_hdr = np->mp_hdr;
+			dph->mp_ptr = np;
+			np = (MDB_page *)dph;
+		}
 		*mp = np;
 		return MDB_SUCCESS;
 	}
@@ -2627,12 +2673,19 @@ search_done:
 	}
 	np->mp_pgno = pgno;
 	np->mp_txnid = txn->mt_txnid;
-	mdb_page_dirty(txn, np);
+	if (ov) {
+		dph->mp_hdr = np->mp_hdr;
+		dph->mp_ptr = np;
+		np = (MDB_page *)dph;
+	}
+	mdb_page_dirty(txn, np, ov);
 	*mp = np;
 
 	return MDB_SUCCESS;
 
 fail:
+	if (dph)
+		free(dph);
 	txn->mt_flags |= MDB_TXN_ERROR;
 	return rc;
 }
@@ -2670,7 +2723,7 @@ mdb_page_copy(MDB_page *dst, MDB_page *src, unsigned int psize)
  * mp wasn't spilled.
  */
 static int
-mdb_page_unspill(MDB_txn *txn, MDB_page *mp, MDB_page **ret)
+mdb_page_unspill(MDB_txn *txn, MDB_page *mp, int num, int ov, MDB_page **ret)
 {
 	MDB_env *env = txn->mt_env;
 	const MDB_txn *tx2;
@@ -2683,20 +2736,15 @@ mdb_page_unspill(MDB_txn *txn, MDB_page *mp, MDB_page **ret)
 		x = mdb_midl_search(tx2->mt_spill_pgs, pn);
 		if (x <= tx2->mt_spill_pgs[0] && tx2->mt_spill_pgs[x] == pn) {
 			MDB_page *np;
-			int num;
 			if (txn->mt_dirty_room == 0)
 				return MDB_TXN_FULL;
-			if (IS_OVERFLOW(mp))
-				num = mp->mp_pages;
-			else
-				num = 1;
 			if (env->me_flags & MDB_WRITEMAP) {
 				np = mp;
 			} else {
 				np = mdb_page_malloc(txn, num, 1);
 				if (!np)
 					return ENOMEM;
-				if (num > 1)
+				if (ov)
 					memcpy(np, mp, num * env->me_psize);
 				else
 					mdb_page_copy(np, mp, env->me_psize);
@@ -2714,8 +2762,9 @@ mdb_page_unspill(MDB_txn *txn, MDB_page *mp, MDB_page **ret)
 				 * page remains spilled until child commits
 				 */
 
-			mdb_page_dirty(txn, np);
-			np->mp_flags |= P_DIRTY;
+			mdb_page_dirty(txn, np, ov);
+			if (!ov)
+				np->mp_flags |= P_DIRTY;
 			*ret = np;
 			break;
 		}
@@ -2740,14 +2789,14 @@ mdb_page_touch(MDB_cursor *mc)
 	if (!F_ISSET(mp->mp_flags, P_DIRTY)) {
 		if (txn->mt_flags & MDB_TXN_SPILLS) {
 			np = NULL;
-			rc = mdb_page_unspill(txn, mp, &np);
+			rc = mdb_page_unspill(txn, mp, 1, 0, &np);
 			if (rc)
 				goto fail;
 			if (np)
 				goto done;
 		}
 		if ((rc = mdb_midl_need(&txn->mt_free_pgs, 1)) ||
-			(rc = mdb_page_alloc(mc, 1, &np)))
+			(rc = mdb_page_alloc(mc, 1, 0, &np)))
 			goto fail;
 		pgno = np->mp_pgno;
 		DPRINTF(("touched db %d page %"Yu" -> %"Yu, DDBI(mc),
@@ -3099,6 +3148,7 @@ mdb_txn_renew0(MDB_txn *txn)
 		txn->mt_free_pgs = env->me_free_pgs;
 		txn->mt_free_pgs[0] = 0;
 		txn->mt_spill_pgs = NULL;
+		txn->mt_dirty_ovs = NULL;
 		env->me_txn = txn;
 		memcpy(txn->mt_dbiseqs, env->me_dbiseqs, env->me_maxdbs * sizeof(unsigned int));
 	}
@@ -3223,6 +3273,7 @@ mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **ret)
 		txn->mt_dirty_room = parent->mt_dirty_room;
 		txn->mt_u.dirty_list[0].mid = 0;
 		txn->mt_spill_pgs = NULL;
+		txn->mt_dirty_ovs = NULL;
 		txn->mt_next_pgno = parent->mt_next_pgno;
 		parent->mt_flags |= MDB_TXN_HAS_CHILD;
 		parent->mt_child = txn;
@@ -3383,6 +3434,7 @@ mdb_txn_end(MDB_txn *txn, unsigned mode)
 			env->me_pgstate = ((MDB_ntxn *)txn)->mnt_pgstate;
 			mdb_midl_free(txn->mt_free_pgs);
 			mdb_midl_free(txn->mt_spill_pgs);
+			mdb_mid2l_free(txn->mt_dirty_ovs);
 			free(txn->mt_u.dirty_list);
 		}
 
@@ -6843,7 +6895,7 @@ static int
 mdb_node_read(MDB_cursor *mc, MDB_node *leaf, MDB_val *data)
 {
 	MDB_page	*omp;		/* overflow page */
-	pgno_t		 pgno;
+	MDB_ovpage	ovp;
 	int rc;
 
 	if (MC_OVPG(mc)) {
@@ -6858,13 +6910,10 @@ mdb_node_read(MDB_cursor *mc, MDB_node *leaf, MDB_val *data)
 
 	/* Read overflow data.
 	 */
-	memcpy(&pgno, NODEDATA(leaf), sizeof(pgno));
+	memcpy(&ovp, NODEDATA(leaf), sizeof(ovp));
 	{
-#if MDB_RPAGE_CACHE
-	int dpages = OVPAGES(data->mv_size, mc->mc_txn->mt_env->me_psize);
-#endif
-	if ((rc = MDB_PAGE_GET(mc, pgno, dpages, &omp, NULL)) != 0) {
-		DPRINTF(("read overflow page %"Yu" failed", pgno));
+	if ((rc = MDB_PAGE_GET(mc, ovp.op_pgno, ovp.op_pages, &omp, NULL)) != 0) {
+		DPRINTF(("read overflow page %"Yu" failed", ovp.op_pgno));
 		return rc;
 	}
 	}
@@ -7932,7 +7981,7 @@ prep_subDB:
 					dummy.md_entries = NUMKEYS(fp);
 					xdata.mv_size = sizeof(MDB_db);
 					xdata.mv_data = &dummy;
-					if ((rc = mdb_page_alloc(mc, 1, &mp)))
+					if ((rc = mdb_page_alloc(mc, 1, 0, &mp)))
 						return rc;
 					offset = env->me_psize - olddata.mv_size;
 					flags |= F_DUPDATA|F_SUBDATA;
@@ -7968,26 +8017,27 @@ current:
 		/* overflow page overwrites need special handling */
 		if (F_ISSET(leaf->mn_flags, F_BIGDATA)) {
 			MDB_page *omp;
-			pgno_t pg;
+			MDB_ovpage ovp;
 			int level, ovpages, dpages = OVPAGES(data->mv_size, env->me_psize);
 
-			memcpy(&pg, olddata.mv_data, sizeof(pg));
-			if ((rc2 = MDB_PAGE_GET(mc, pg, dpages, &omp, &level)) != 0)
+			memcpy(&ovp, olddata.mv_data, sizeof(ovp));
+			if ((rc2 = MDB_PAGE_GET(mc, ovp.op_pgno, ovp.op_pages, &omp, &level)) != 0)
 				return rc2;
-			ovpages = omp->mp_pages;
+			ovpages = ovp.op_pages;
 
 			/* Is the ov page large enough? */
 			if (ovpages >= dpages) {
+			  /* Did we dirty it in this txn? */
 			  if (!(omp->mp_flags & P_DIRTY) &&
 				  (level || (env->me_flags & MDB_WRITEMAP)))
 			  {
-				rc = mdb_page_unspill(mc->mc_txn, omp, &omp);
+				rc = mdb_page_unspill(mc->mc_txn, omp, ovpages, 1, &omp);
 				if (rc)
 					return rc;
 				level = 0;		/* dirty in this txn or clean */
 			  }
 			  /* Is it dirty? */
-			  if (omp->mp_flags & P_DIRTY) {
+			  if (ovp.op_txnid == mc->mc_txn->mt_txnid) {
 				/* yes, overwrite it. Note in this case we don't
 				 * bother to try shrinking the page if the new data
 				 * is smaller than the overflow threshold.
@@ -7999,7 +8049,7 @@ current:
 					MDB_ID2 id2;
 					if (!np)
 						return ENOMEM;
-					id2.mid = pg;
+					id2.mid = ovp.op_pgno;
 					id2.mptr = np;
 					/* Note - this page is already counted in parent's dirty_room */
 					rc2 = mdb_mid2l_insert(mc->mc_txn->mt_u.dirty_list, &id2);
@@ -8013,12 +8063,10 @@ current:
 						 * Copy end of page, adjusting alignment so
 						 * compiler may copy words instead of bytes.
 						 */
-						off = (PAGEHDRSZ + data->mv_size) & -sizeof(size_t);
+						off = data->mv_size & -sizeof(size_t);
 						memcpy((size_t *)((char *)np + off),
 							(size_t *)((char *)omp + off), sz - off);
-						sz = PAGEHDRSZ;
 					}
-					memcpy(np, omp, sz); /* Copy beginning of page */
 					omp = np;
 				}
 				SETDSZ(leaf, data->mv_size);
@@ -8269,13 +8317,13 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 	/* add overflow pages to free list */
 	if (F_ISSET(leaf->mn_flags, F_BIGDATA)) {
 		MDB_page *omp;
-		pgno_t pg;
+		MDB_ovpage ovp;
 
-		memcpy(&pg, NODEDATA(leaf), sizeof(pg));
+		memcpy(&ovp, NODEDATA(leaf), sizeof(ovp));
 		/* note we don't care about page count here since
 		 * we're just adding pgno to the freelist anyway
 		 */
-		if ((rc = MDB_PAGE_GET(mc, pg, 1, &omp, NULL)) ||
+		if ((rc = MDB_PAGE_GET(mc, ovp.op_pgno, 1, &omp, NULL)) ||
 			(rc = mdb_ovpage_free(mc, omp)))
 			goto fail;
 	}
@@ -8303,7 +8351,7 @@ mdb_page_new(MDB_cursor *mc, uint32_t flags, int num, MDB_page **mp)
 	MDB_page	*np;
 	int rc;
 
-	if ((rc = mdb_page_alloc(mc, num, &np)))
+	if ((rc = mdb_page_alloc(mc, num, flags & P_OVERFLOW, &np)))
 		return rc;
 	DPRINTF(("allocated new mpage %"Yu", page size %u",
 	    np->mp_pgno, mc->mc_txn->mt_env->me_psize));
@@ -8435,7 +8483,7 @@ mdb_node_add(MDB_cursor *mc, indx_t indx,
 		mdb_cassert(mc, key && data);
 		if (F_ISSET(flags, F_BIGDATA)) {
 			/* Data already on overflow page. */
-			node_size += sizeof(pgno_t);
+			node_size += sizeof(MDB_ovpage);
 		} else if (node_size + data->mv_size > mc->mc_txn->mt_env->me_nodemax) {
 			int ovpages = OVPAGES(data->mv_size, mc->mc_txn->mt_env->me_psize);
 			int rc;
@@ -8486,14 +8534,13 @@ update:
 		ndata = NODEDATA(node);
 		if (ofp == NULL) {
 			if (F_ISSET(flags, F_BIGDATA))
-				memcpy(ndata, data->mv_data, sizeof(pgno_t));
+				memcpy(ndata, data->mv_data, sizeof(MDB_ovpage));
 			else if (F_ISSET(flags, MDB_RESERVE))
 				data->mv_data = ndata;
 			else
 				memcpy(ndata, data->mv_data, data->mv_size);
 		} else {
-			memcpy(ndata, &ofp->mp_pgno, sizeof(pgno_t));
-			ndata = METADATA(ofp);
+			ndata = ((MDB_dovpage *)ofp)->mp_ptr;
 			if (F_ISSET(flags, MDB_RESERVE))
 				data->mv_data = ndata;
 			else
@@ -8546,7 +8593,7 @@ mdb_node_del(MDB_cursor *mc, int ksize)
 	sz = NODESIZE + node->mn_ksize;
 	if (IS_LEAF(mp)) {
 		if (F_ISSET(node->mn_flags, F_BIGDATA))
-			sz += sizeof(pgno_t);
+			sz += sizeof(MDB_ovpage);
 		else
 			sz += NODEDSZ(node);
 	}
@@ -9901,7 +9948,7 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 						psize += NODESIZE + NODEKSZ(node) + sizeof(indx_t);
 						if (IS_LEAF(mp)) {
 							if (F_ISSET(node->mn_flags, F_BIGDATA))
-								psize += sizeof(pgno_t);
+								psize += sizeof(MDB_ovpage);
 							else
 								psize += NODEDSZ(node);
 						}
@@ -10338,9 +10385,7 @@ mdb_env_cwalk(mdb_copy *my, pgno_t *pg, int flags)
 					ni = NODEPTR(mp, i);
 					if (ni->mn_flags & F_BIGDATA) {
 						MDB_page *omp;
-						pgno_t pg;
-						size_t dsize;
-						int dpages;
+						MDB_ovpage ovp;
 
 						/* Need writable leaf */
 						if (mp != leaf) {
@@ -10349,12 +10394,9 @@ mdb_env_cwalk(mdb_copy *my, pgno_t *pg, int flags)
 							mp = leaf;
 							ni = NODEPTR(mp, i);
 						}
-						dsize = NODEDSZ(ni);
-						dpages = OVPAGES(dsize, my->mc_env->me_psize);
 
-						memcpy(&pg, NODEDATA(ni), sizeof(pg));
-						memcpy(NODEDATA(ni), &my->mc_next_pgno, sizeof(pgno_t));
-						rc = MDB_PAGE_GET(&mc, pg, dpages, &omp, NULL);
+						memcpy(&ovp, NODEDATA(ni), sizeof(ovp));
+						rc = MDB_PAGE_GET(&mc, ovp.op_pgno, ovp.op_pages, &omp, NULL);
 						if (rc)
 							goto done;
 						if (my->mc_wlen[toggle] >= MDB_WBUF) {
@@ -10365,12 +10407,13 @@ mdb_env_cwalk(mdb_copy *my, pgno_t *pg, int flags)
 						}
 						mo = (MDB_page *)(my->mc_wbuf[toggle] + my->mc_wlen[toggle]);
 						memcpy(mo, omp, my->mc_env->me_psize);
-						mo->mp_pgno = my->mc_next_pgno;
-						mo->mp_txnid = 1;
-						my->mc_next_pgno += omp->mp_pages;
+						ovp.op_pgno = my->mc_next_pgno;
+						ovp.op_txnid = 1;
+						memcpy(NODEDATA(ni), &ovp, sizeof(ovp));
+						my->mc_next_pgno += ovp.op_pages;
 						my->mc_wlen[toggle] += my->mc_env->me_psize;
-						if (dpages > 1) {
-							my->mc_olen[toggle] = my->mc_env->me_psize * (dpages - 1);
+						if (ovp.op_pages > 1) {
+							my->mc_olen[toggle] = my->mc_env->me_psize * (ovp.op_pages - 1);
 							my->mc_over[toggle] = (char *)omp + my->mc_env->me_psize;
 							rc = mdb_env_cthr_toggle(my, 1);
 							if (rc)
@@ -11089,19 +11132,13 @@ mdb_drop0(MDB_cursor *mc, int subs)
 				for (i=0; i<n; i++) {
 					ni = NODEPTR(mp, i);
 					if (ni->mn_flags & F_BIGDATA) {
-						MDB_page *omp;
-						pgno_t pg;
-						memcpy(&pg, NODEDATA(ni), sizeof(pg));
-						/* page count is irrelevant here */
-						rc = MDB_PAGE_GET(mc, pg, 1, &omp, NULL);
-						if (rc != 0)
-							goto done;
-						mdb_cassert(mc, IS_OVERFLOW(omp));
+						MDB_ovpage ovp;
+						memcpy(&ovp, NODEDATA(ni), sizeof(ovp));
 						rc = mdb_midl_append_range(&txn->mt_free_pgs,
-							pg, omp->mp_pages);
+							ovp.op_pgno, ovp.op_pages);
 						if (rc)
 							goto done;
-						mc->mc_db->md_overflow_pages -= omp->mp_pages;
+						mc->mc_db->md_overflow_pages -= ovp.op_pages;
 						if (!mc->mc_db->md_overflow_pages && !subs)
 							break;
 					} else if (subs && (ni->mn_flags & F_SUBDATA)) {
