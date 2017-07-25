@@ -8341,10 +8341,7 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 		MDB_ovpage ovp;
 
 		memcpy(&ovp, NODEDATA(leaf), sizeof(ovp));
-		/* note we don't care about page count here since
-		 * we're just adding pgno to the freelist anyway
-		 */
-		if ((rc = MDB_PAGE_GET(mc, ovp.op_pgno, 1, &omp, NULL)) ||
+		if ((rc = MDB_PAGE_GET(mc, ovp.op_pgno, ovp.op_pages, &omp, NULL)) ||
 			(rc = mdb_ovpage_free(mc, omp)))
 			goto fail;
 	}
