@@ -1044,11 +1044,13 @@ typedef struct MDB_ovpage {
 	mdb_size_t	op_pages;
 } MDB_ovpage;
 
+#if OVERFLOW_NOTYET
 	/** Header for a dirty overflow page in memory */
 typedef struct MDB_dovpage {
 	MDB_page_header mp_hdr;
 	void	*mp_ptr;
 } MDB_dovpage;
+#endif
 
 	/** The number of overflow pages needed to store the given size. */
 #define OVPAGES(size, psize)	((PAGEHDRSZ-1 + (size)) / (psize) + 1)
@@ -2674,14 +2676,16 @@ search_done:
 	} else {
 		txn->mt_next_pgno = pgno + num;
 	}
-	np->mp_pgno = pgno;
-	np->mp_txnid = txn->mt_txnid;
 #if OVERFLOW_NOTYET
 	if (ov) {
 		dph->mp_hdr = np->mp_hdr;
 		dph->mp_ptr = np;
 		np = (MDB_page *)dph;
 	}
+#endif
+	np->mp_pgno = pgno;
+	np->mp_txnid = txn->mt_txnid;
+#if OVERFLOW_NOTYET
 	mdb_page_dirty(txn, np, ov);
 #else
 	mdb_page_dirty(txn, np);
