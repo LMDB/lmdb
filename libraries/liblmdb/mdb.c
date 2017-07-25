@@ -1037,7 +1037,7 @@ typedef struct MDB_page {
 	/** Test if a page is a sub page */
 #define IS_SUBP(p)	 F_ISSET((p)->mp_flags, P_SUBP)
 
-	/** Header for overflow pages, stored in an F_BIGDATA node */
+	/** Info about overflow page, stored in an F_BIGDATA node */
 typedef struct MDB_ovpage {
 	pgno_t	op_pgno;
 	txnid_t	op_txnid;
@@ -8412,7 +8412,7 @@ mdb_leaf_size(MDB_env *env, MDB_val *key, MDB_val *data)
 	sz = LEAFSIZE(key, data);
 	if (sz > env->me_nodemax) {
 		/* put on overflow page */
-		sz -= data->mv_size - sizeof(pgno_t);
+		sz -= data->mv_size - sizeof(MDB_ovpage);
 	}
 
 	return EVEN(sz + sizeof(indx_t));
@@ -8437,7 +8437,7 @@ mdb_branch_size(MDB_env *env, MDB_val *key)
 	if (sz > env->me_nodemax) {
 		/* put on overflow page */
 		/* not implemented */
-		/* sz -= key->size - sizeof(pgno_t); */
+		/* sz -= key->size - sizeof(MDB_ovpage); */
 	}
 
 	return sz + sizeof(indx_t);
@@ -8511,7 +8511,7 @@ mdb_node_add(MDB_cursor *mc, indx_t indx,
 			/* Put data on overflow page. */
 			DPRINTF(("data size is %"Z"u, node would be %"Z"u, put data on overflow page",
 			    data->mv_size, node_size+data->mv_size));
-			node_size = EVEN(node_size + sizeof(pgno_t));
+			node_size = EVEN(node_size + sizeof(MDB_ovpage));
 			if ((ssize_t)node_size > room)
 				goto full;
 			if ((rc = mdb_page_new(mc, P_OVERFLOW, ovpages, &ofp)))
@@ -8561,7 +8561,10 @@ update:
 			else
 				memcpy(ndata, data->mv_data, data->mv_size);
 		} else {
-			MDB_ovpage ovp = {ofp->mp_pgno, mc->mc_txn->mt_txnid, ofp->mp_pages};
+			MDB_ovpage ovp;
+			ovp.op_pgno = ofp->mp_pgno;
+			ovp.op_txnid = mc->mc_txn->mt_txnid;
+			ovp.op_pages = ofp->mp_pages;
 			memcpy(ndata, &ovp, sizeof(MDB_ovpage));
 			ndata = METADATA(ofp);
 			if (F_ISSET(flags, MDB_RESERVE))
