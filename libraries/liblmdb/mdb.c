@@ -979,6 +979,8 @@ typedef struct MDB_page_header {
 #define	P_DIRTY_OVF	 0x2000		/**< page has dirty overflow nodes */
 #define	P_LOOSE		 0x4000		/**< page was dirtied then freed, can be reused */
 #define	P_KEEP		 0x8000		/**< leave this page alone during spill */
+/** Persistent flags for page administration rather than page contents */
+#define	P_ADM_FLAGS	 0 /* later... */
 /** @} */
 	uint16_t	mh_flags;		/**< @ref mdb_page */
 #define mp_lower	mp_pb.pb.pb_lower
@@ -2054,6 +2056,7 @@ init:
 	} else {
 		txn->mt_flags |= MDB_TXN_ERROR;
 	}
+	ret->mp_flags = 0;
 	return ret;
 }
 /** Free a single page.
@@ -2532,6 +2535,7 @@ mdb_page_alloc(MDB_cursor *mc, int num, MDB_page **mp)
 		}
 #endif
 		*mp = np;
+		np->mp_flags &= P_ADM_FLAGS;
 		return MDB_SUCCESS;
 	}
 
@@ -2691,6 +2695,7 @@ search_done:
 #endif
 	np->mp_pgno = pgno;
 	np->mp_txnid = txn->mt_txnid;
+	np->mp_flags = 0;
 #if OVERFLOW_NOTYET
 	mdb_page_dirty(txn, np, ov);
 #else
@@ -2807,6 +2812,7 @@ mdb_page_touch(MDB_cursor *mc)
 	MDB_page *mp = mc->mc_pg[mc->mc_top], *np;
 	MDB_txn *txn = mc->mc_txn;
 	MDB_cursor *m2, *m3;
+	unsigned np_flags;
 	pgno_t	pgno;
 	int rc;
 
@@ -2865,9 +2871,10 @@ mdb_page_touch(MDB_cursor *mc)
 		return 0;
 	}
 
+	np_flags = np->mp_flags;	/* P_ADM_FLAGS */
 	mdb_page_copy(np, mp, txn->mt_env->me_psize);
+	np->mp_flags |= np_flags | P_DIRTY;
 	np->mp_pgno = pgno;
-	np->mp_flags |= P_DIRTY;
 
 done:
 	np->mp_txnid = txn->mt_txnid;
@@ -8033,6 +8040,7 @@ prep_subDB:
 					xdata.mv_data = &dummy;
 					if ((rc = mdb_page_alloc(mc, 1, &mp)))
 						return rc;
+					fp_flags |= mp->mp_flags; /* P_ADM_FLAGS */
 					offset = env->me_psize - olddata.mv_size;
 					flags |= F_DUPDATA|F_SUBDATA;
 					dummy.md_root = mp->mp_pgno;
@@ -8398,7 +8406,7 @@ mdb_page_new(MDB_cursor *mc, uint32_t flags, int num, MDB_page **mp)
 		return rc;
 	DPRINTF(("allocated new mpage %"Yu", page size %u",
 	    np->mp_pgno, mc->mc_txn->mt_env->me_psize));
-	np->mp_flags = flags | P_DIRTY;
+	np->mp_flags |= flags | P_DIRTY;
 	np->mp_lower = (PAGEHDRSZ-PAGEBASE);
 	np->mp_upper = mc->mc_txn->mt_env->me_psize - PAGEBASE;
 
@@ -9840,7 +9848,8 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 	    DKEY(newkey), mc->mc_ki[mc->mc_top], nkeys));
 
 	/* Create a right sibling. */
-	if ((rc = mdb_page_new(mc, mp->mp_flags, 1, &rp)))
+	rc = mdb_page_new(mc, mp->mp_flags & (P_BRANCH|P_LEAF|P_LEAF2), 1, &rp);
+	if (rc)
 		return rc;
 	rp->mp_pad = mp->mp_pad;
 	DPRINTF(("new right sibling: page %"Yu, rp->mp_pgno));
