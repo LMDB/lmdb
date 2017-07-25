@@ -5549,9 +5549,9 @@ mdb_enctest(const MDB_val *src, MDB_val *dst, const MDB_val *key, int encdec)
 {
 	mdb_size_t *sptr = src->mv_data, *dptr = dst->mv_data;
 	mdb_size_t x=*(mdb_size_t*)key[0].mv_data, v=*(mdb_size_t*)key[1].mv_data;
-	int i = dst->mv_size / sizeof(mdb_size_t);
+	int i, len = dst->mv_size / sizeof(mdb_size_t);
 
-	while (--i >= 0)
+	for (i = 0; i < len; i++)
 		x += v += i + sptr[i] + (dptr[i] = sptr[i] ^ x);
 }
 #endif	/* MDB_RPAGE_CACHE */
@@ -5581,8 +5581,8 @@ mdb_env_getflags(MDB_env *env)
 		if (flags & MDB_ENCRYPT) {
 #if MDB_RPAGE_CACHE
 			if (!env->me_encfunc) {
-				static mdb_size_t k = MDB_SIZE_MAX/9*37;
-				mdb_size_t iv = ((mdb_size_t)env ^ env->me_pid);
+				static mdb_size_t k = (MDB_SIZE_MAX/67*73) | 1;
+				mdb_size_t iv = ((mdb_size_t)env ^ env->me_pid) * k;
 				MDB_val keys[2] = { {sizeof(k), &k}, {sizeof(iv), NULL} };
 				int rc;
 				keys[1].mv_data = &iv;
