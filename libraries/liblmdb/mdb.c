@@ -3544,7 +3544,7 @@ mdb_freelist_save(MDB_txn *txn)
 	 */
 	MDB_cursor mc;
 	MDB_env	*env = txn->mt_env;
-	int rc, maxfree_1pg = env->me_maxfree_1pg, more = 1;
+	int rc, maxfree_1pg = env->me_maxfree_1pg, more = 1, lost_loose = 0;
 	txnid_t	pglast = 0, head_id = 0;
 	pgno_t	freecnt = 0, *free_pgs, *mop;
 	ssize_t	head_room = 0, total_room = 0, mop_len, clean_limit;
@@ -3565,6 +3565,7 @@ mdb_freelist_save(MDB_txn *txn)
 		MDB_page *mp = txn->mt_loose_pgs;
 		if ((rc = mdb_midl_need(&txn->mt_free_pgs, txn->mt_loose_count)) != 0)
 			return rc;
+		lost_loose = txn->mt_loose_count;
 		for (; mp; mp = NEXT_LOOSE_PAGE(mp))
 			mdb_midl_xappend(txn->mt_free_pgs, mp->mp_pgno);
 		txn->mt_loose_pgs = NULL;
@@ -3682,6 +3683,7 @@ mdb_freelist_save(MDB_txn *txn)
 		/* Room for loose pages + temp IDL with same */
 		if ((rc = mdb_midl_need(&env->me_pghead, 2*count+1)) != 0)
 			return rc;
+		lost_loose += count;
 		mop = env->me_pghead;
 		loose = mop + MDB_IDL_ALLOCLEN(mop) - count;
 		for (count = 0; mp; mp = NEXT_LOOSE_PAGE(mp))
@@ -3721,6 +3723,11 @@ mdb_freelist_save(MDB_txn *txn)
 				break;
 		}
 	}
+
+	/* Restore this so we can check vs. dirty_list after mdb_page_flush() */
+	if (! (txn->mt_flags & MDB_TXN_WRITEMAP))
+		txn->mt_loose_count += lost_loose;
+
 	return rc;
 }
 
@@ -4156,6 +4163,10 @@ mdb_txn_commit(MDB_txn *txn)
 
 	if ((rc = mdb_page_flush(txn, 0)))
 		goto fail;
+	if ((unsigned)txn->mt_loose_count != txn->mt_u.dirty_list[0].mid) {
+		rc = MDB_PROBLEM; /* mt_loose_pgs does not match dirty_list */
+		goto fail;
+	}
 	if (!F_ISSET(txn->mt_flags, MDB_TXN_NOSYNC) &&
 		(rc = mdb_env_sync0(env, 0, txn->mt_next_pgno)))
 		goto fail;
