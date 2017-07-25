@@ -3696,10 +3696,16 @@ mdb_freelist_save(MDB_txn *txn)
 		mop_len = mop[0];
 	}
 
-	/* Fill in the reserved me_pghead records */
+	/* Fill in the reserved me_pghead records.  Everything is finally
+	 * in place, so this will not allocate or free any DB pages.
+	 */
 	rc = MDB_SUCCESS;
 	if (mop_len) {
 		MDB_val key, data;
+
+		/* Protect DB env from any (buggy) freelist use when saving mop */
+		env->me_pghead = NULL;
+		txn->mt_dirty_room = 0;
 
 		mop += mop_len;
 		rc = mdb_cursor_first(&mc, &key, &data);
@@ -3714,14 +3720,17 @@ mdb_freelist_save(MDB_txn *txn)
 				len = mop_len;
 				data.mv_size = (len + 1) * sizeof(MDB_ID);
 			}
+			mop_len -= len;
 			data.mv_data = mop -= len;
 			save = mop[0];
 			mop[0] = len;
 			rc = mdb_cursor_put(&mc, &key, &data, MDB_CURRENT);
 			mop[0] = save;
-			if (rc || !(mop_len -= len))
+			if (rc || !mop_len)
 				break;
 		}
+
+		env->me_pghead = mop - mop_len;
 	}
 
 	/* Restore this so we can check vs. dirty_list after mdb_page_flush() */
