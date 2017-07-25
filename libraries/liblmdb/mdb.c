@@ -980,7 +980,7 @@ typedef struct MDB_page_header {
 #define	P_LOOSE		 0x4000		/**< page was dirtied then freed, can be reused */
 #define	P_KEEP		 0x8000		/**< leave this page alone during spill */
 /** Persistent flags for page administration rather than page contents */
-#define	P_ADM_FLAGS	 0 /* later... */
+#define	P_ADM_FLAGS	 (P_DIRTY)
 /** @} */
 	uint16_t	mh_flags;		/**< @ref mdb_page */
 #define mp_lower	mp_pb.pb.pb_lower
@@ -2446,12 +2446,14 @@ mdb_find_oldest(MDB_txn *txn)
 	return oldest;
 }
 
-/** Add a page to the txn's dirty list */
+/** Mark a page as dirty and add it to the txn's dirty list */
 static void
 mdb_page_dirty(MDB_txn *txn, MDB_page *mp)
 {
 	MDB_ID2 mid;
 	int rc, (*insert)(MDB_ID2L, MDB_ID2 *);
+
+	mp->mp_flags |= P_DIRTY;
 
 	if (txn->mt_flags & MDB_TXN_WRITEMAP) {
 		insert = mdb_mid2l_append;
@@ -2795,7 +2797,6 @@ mdb_page_unspill(MDB_txn *txn, MDB_page *mp, MDB_page **ret)
 				 */
 
 			mdb_page_dirty(txn, np);
-			np->mp_flags |= P_DIRTY;
 			*ret = np;
 			return MDB_SUCCESS;
 	}
@@ -2867,13 +2868,14 @@ mdb_page_touch(MDB_cursor *mc)
 		mid.mptr = np;
 		rc = mdb_mid2l_insert(dl, &mid);
 		mdb_cassert(mc, rc == 0);
+		np->mp_flags |= P_DIRTY;
 	} else {
 		return 0;
 	}
 
 	np_flags = np->mp_flags;	/* P_ADM_FLAGS */
 	mdb_page_copy(np, mp, txn->mt_env->me_psize);
-	np->mp_flags |= np_flags | P_DIRTY;
+	np->mp_flags |= np_flags;
 	np->mp_pgno = pgno;
 
 done:
@@ -7895,7 +7897,7 @@ mdb_cursor_put(MDB_cursor *mc, MDB_val *key, MDB_val *data,
 			/* Too big for a node, insert in sub-DB.  Set up an empty
 			 * "old sub-page" for prep_subDB to expand to a full page.
 			 */
-			fp_flags = P_LEAF|P_DIRTY;
+			fp_flags = P_LEAF;
 			fp = env->me_pbuf;
 			fp->mp_pad = data->mv_size; /* used if MDB_DUPFIXED */
 			fp->mp_lower = fp->mp_upper = (PAGEHDRSZ-PAGEBASE);
@@ -8007,7 +8009,6 @@ more:
 					}
 					/* FALLTHRU: Big enough MDB_DUPFIXED sub-page */
 				case MDB_CURRENT:
-					fp->mp_flags |= P_DIRTY;
 					COPY_PGNO(fp->mp_pgno, mp->mp_pgno);
 					mc->mc_xcursor->mx_cursor.mc_pg[0] = fp;
 					flags |= F_DUPDATA;
@@ -8047,7 +8048,7 @@ prep_subDB:
 					sub_root = mp;
 			}
 			if (mp != fp) {
-				mp->mp_flags = fp_flags | P_DIRTY;
+				mp->mp_flags = fp_flags;
 				mp->mp_pad   = fp->mp_pad;
 				mp->mp_lower = fp->mp_lower;
 				mp->mp_upper = fp->mp_upper + offset;
@@ -8406,7 +8407,7 @@ mdb_page_new(MDB_cursor *mc, uint32_t flags, int num, MDB_page **mp)
 		return rc;
 	DPRINTF(("allocated new mpage %"Yu", page size %u",
 	    np->mp_pgno, mc->mc_txn->mt_env->me_psize));
-	np->mp_flags |= flags | P_DIRTY;
+	np->mp_flags |= flags;
 	np->mp_lower = (PAGEHDRSZ-PAGEBASE);
 	np->mp_upper = mc->mc_txn->mt_env->me_psize - PAGEBASE;
 
