@@ -2237,8 +2237,8 @@ mdb_pages_xkeep(MDB_cursor *mc, unsigned pflags, int all)
 	MDB_xcursor *mx;
 	MDB_page *dp, *mp;
 	MDB_node *leaf;
-	unsigned i, j;
-	int rc = MDB_SUCCESS, level;
+	unsigned i, j, x;
+	int rc = MDB_SUCCESS;
 
 	/* Mark pages seen by cursors: First m0, then tracked cursors */
 	for (i = txn->mt_numdbs;; ) {
@@ -2270,14 +2270,17 @@ mdb_pages_xkeep(MDB_cursor *mc, unsigned pflags, int all)
 mark_done:
 	if (all) {
 		/* Mark dirty root pages */
+		MDB_ID2L dl = txn->mt_u.dirty_list;
 		for (i=0; i<txn->mt_numdbs; i++) {
 			if (txn->mt_dbflags[i] & DB_DIRTY) {
 				pgno_t pgno = txn->mt_dbs[i].md_root;
 				if (pgno == P_INVALID)
 					continue;
-				if ((rc = MDB_PAGE_GET(m0, pgno, 1, &dp, &level)) != MDB_SUCCESS)
-					break;
-				if ((dp->mp_flags & Mask) == pflags && level <= 1)
+				x = mdb_mid2l_search(dl, pgno);
+				if (! (x <= dl[0].mid && dl[x].mid == pgno))
+					continue;
+				dp = dl[x].mptr;
+				if ((dp->mp_flags & Mask) == pflags)
 					dp->mp_flags ^= P_KEEP;
 			}
 		}
