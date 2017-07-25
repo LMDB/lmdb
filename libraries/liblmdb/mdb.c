@@ -2848,8 +2848,10 @@ mdb_page_touch(MDB_cursor *mc)
 		mdb_cassert(mc, dl[0].mid < MDB_IDL_UM_MAX);
 		/* No - copy it */
 		np = mdb_page_malloc(txn, 1, 1);
-		if (!np)
-			return ENOMEM;
+		if (!np) {
+			rc = ENOMEM;
+			goto fail;
+		}
 		mid.mid = pgno;
 		mid.mptr = np;
 		rc = mdb_mid2l_insert(dl, &mid);
