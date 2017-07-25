@@ -1037,6 +1037,9 @@ typedef struct MDB_page {
 	/** Test if a page is a sub page */
 #define IS_SUBP(p)	 F_ISSET((p)->mp_flags, P_SUBP)
 
+	/** Test if this non-sub page belongs to the current snapshot */
+#define IS_MUTABLE(txn, p)	((p)->mp_txnid == (txn)->mt_txnid)
+
 	/** Info about overflow page, stored in an F_BIGDATA node */
 typedef struct MDB_ovpage {
 	pgno_t	op_pgno;
@@ -2730,31 +2733,34 @@ mdb_page_copy(MDB_page *dst, MDB_page *src, unsigned int psize)
 	}
 }
 
-/** Pull a page off the txn's spill list, if present.
- * If a page being referenced was spilled to disk in this txn, bring
- * it back and make it dirty/writable again.
+/** Bring back a page which this txn spilled to disk; make it writable again.
  * @param[in] txn the transaction handle.
- * @param[in] mp the page being referenced. It must not be dirty.
- * @param[out] ret the writable page, if any. ret is unchanged if
- * mp wasn't spilled.
+ * @param[in] mp the spilled page.
+ * @param[out] ret the writable page.
  */
 static int
 mdb_page_unspill(MDB_txn *txn, MDB_page *mp, MDB_page **ret)
 {
 	MDB_env *env = txn->mt_env;
-	const MDB_txn *tx2;
 	unsigned x;
 	pgno_t pgno = mp->mp_pgno, pn = pgno << 1;
 
-	for (tx2 = txn; tx2; tx2=tx2->mt_parent) {
-		if (!tx2->mt_spill_pgs)
-			continue;
-		x = mdb_midl_search(tx2->mt_spill_pgs, pn);
-		if (x <= tx2->mt_spill_pgs[0] && tx2->mt_spill_pgs[x] == pn) {
+	if (txn->mt_dirty_room == 0)
+		return MDB_TXN_FULL;
+
+	/* x = position in current spill list, or 0 */
+	x = 0;
+	if (txn->mt_spill_pgs) {
+		x = mdb_midl_search(txn->mt_spill_pgs, pn);
+		if (! (x <= txn->mt_spill_pgs[0] && txn->mt_spill_pgs[x] == pn))
+			x = 0;
+	}
+	if (x == 0 && !txn->mt_parent)
+		return MDB_PROBLEM;		/* should be a spilled page */
+
+	{
 			MDB_page *np;
 			int num;
-			if (txn->mt_dirty_room == 0)
-				return MDB_TXN_FULL;
 			if (IS_OVERFLOW(mp))
 				num = mp->mp_pages;
 			else
@@ -2770,7 +2776,7 @@ mdb_page_unspill(MDB_txn *txn, MDB_page *mp, MDB_page **ret)
 				else
 					mdb_page_copy(np, mp, env->me_psize);
 			}
-			if (tx2 == txn) {
+			if (x) {
 				/* If in current txn, this page is no longer spilled.
 				 * If it happens to be the last page, truncate the spill list.
 				 * Otherwise mark it as deleted by setting the LSB.
@@ -2786,10 +2792,8 @@ mdb_page_unspill(MDB_txn *txn, MDB_page *mp, MDB_page **ret)
 			mdb_page_dirty(txn, np);
 			np->mp_flags |= P_DIRTY;
 			*ret = np;
-			break;
-		}
+			return MDB_SUCCESS;
 	}
-	return MDB_SUCCESS;
 }
 
 /** Touch a page: make it dirty and re-insert into tree with updated pgno.
@@ -2807,13 +2811,11 @@ mdb_page_touch(MDB_cursor *mc)
 	int rc;
 
 	if (!F_ISSET(mp->mp_flags, P_DIRTY)) {
-		if (txn->mt_flags & MDB_TXN_SPILLS) {
-			np = NULL;
+		if (IS_MUTABLE(txn, mp)) {
 			rc = mdb_page_unspill(txn, mp, &np);
 			if (rc)
 				goto fail;
-			if (np)
-				goto done;
+			goto done;
 		}
 		if ((rc = mdb_midl_need(&txn->mt_free_pgs, 1)) ||
 			(rc = mdb_page_alloc(mc, 1, &np)))
@@ -6864,7 +6866,6 @@ mdb_ovpage_free(MDB_cursor *mc, MDB_page *mp)
 	pgno_t pg = mp->mp_pgno;
 	unsigned x = 0, ovpages = mp->mp_pages;
 	MDB_env *env = txn->mt_env;
-	MDB_IDL sl = txn->mt_spill_pgs;
 	MDB_ID pn = pg << 1;
 	int rc;
 
@@ -6877,11 +6878,7 @@ mdb_ovpage_free(MDB_cursor *mc, MDB_page *mp)
 	 * Unsupported in nested txns: They would need to hide the page
 	 * range in ancestor txns' dirty and spilled lists.
 	 */
-	if (env->me_pghead &&
-		!txn->mt_parent &&
-		((mp->mp_flags & P_DIRTY) ||
-		 (sl && (x = mdb_midl_search(sl, pn)) <= sl[0] && sl[x] == pn)))
-	{
+	if (IS_MUTABLE(txn, mp) && env->me_pghead && !txn->mt_parent) {
 		unsigned i, j;
 		pgno_t *mop;
 		MDB_ID2 *dl, ix, iy;
@@ -6889,6 +6886,11 @@ mdb_ovpage_free(MDB_cursor *mc, MDB_page *mp)
 		if (rc)
 			return rc;
 		if (!(mp->mp_flags & P_DIRTY)) {
+			MDB_IDL sl = txn->mt_spill_pgs;
+			if (sl)
+				x = mdb_midl_search(sl, pn);
+			if (! (sl && x <= sl[0] && sl[x] == pn))
+				return MDB_PROBLEM;
 			/* This page is no longer spilled */
 			if (x == sl[0])
 				sl[0]--;
@@ -8073,23 +8075,18 @@ current:
 				return rc2;
 			ovpages = ovp.op_pages;
 
-			/* Is the ov page large enough? */
-			if (ovpages >= dpages) {
-			  /* Did we dirty it in this txn? */
-			  if (!(omp->mp_flags & P_DIRTY) &&
-				  (level || (env->me_flags & MDB_WRITEMAP)))
-			  {
-				rc = mdb_page_unspill(mc->mc_txn, omp, &omp);
-				if (rc)
-					return rc;
-				level = 0;		/* dirty in this txn or clean */
-			  }
-			  /* Is it dirty? */
-			  if (omp->mp_flags & P_DIRTY) {
+			/* Is the ov page big enough and from this txn (or a parent)? */
+			if (ovpages >= dpages && IS_MUTABLE(mc->mc_txn, omp)) {
 				/* yes, overwrite it. Note in this case we don't
 				 * bother to try shrinking the page if the new data
 				 * is smaller than the overflow threshold.
 				 */
+				if (!(omp->mp_flags & P_DIRTY)) {
+					rc = mdb_page_unspill(mc->mc_txn, omp, &omp);
+					if (rc)
+						return rc;
+					level = 0;		/* dirty in this txn */
+				}
 				if (level > 1) {
 					/* It is writable only in a parent txn */
 					size_t sz = (size_t) env->me_psize * ovpages, off;
@@ -8125,7 +8122,6 @@ current:
 				else
 					memcpy(METADATA(omp), data->mv_data, data->mv_size);
 				return MDB_SUCCESS;
-			  }
 			}
 			if ((rc2 = mdb_ovpage_free(mc, omp)) != MDB_SUCCESS)
 				return rc2;
