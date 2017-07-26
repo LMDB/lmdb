@@ -9799,8 +9799,10 @@ mdb_cursor_del0(MDB_cursor *mc)
 							if (m3->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED) {
 								if (!(node->mn_flags & F_SUBDATA))
 									m3->mc_xcursor->mx_cursor.mc_pg[0] = NODEDATA(node);
-							} else
+							} else {
 								mdb_xcursor_init1(m3, node);
+								m3->mc_xcursor->mx_cursor.mc_flags |= C_DEL;
+							}
 						}
 					}
 				}
