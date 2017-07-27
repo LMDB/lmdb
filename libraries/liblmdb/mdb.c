@@ -2297,11 +2297,11 @@ mdb_pages_xkeep(MDB_cursor *mc, unsigned pflags, int all)
 				for (j=0; j<m3->mc_snum; j++) {
 					mp = m3->mc_pg[j];
 					if ((mp->mp_flags & Mask) == pflags)
-					  if (IS_DIRTY_NW(txn, mp))
+					  if (IS_WRITABLE(txn, mp))
 						mp->mp_flags ^= P_KEEP;
 				}
 				if (MC_OVPG(m3) && ((MC_OVPG(m3)->mp_flags & Mask) == pflags) &&
-					IS_DIRTY_NW(txn, MC_OVPG(m3)))
+					IS_WRITABLE(txn, MC_OVPG(m3)))
 					MC_OVPG(m3)->mp_flags ^= P_KEEP;
 				mx = m3->mc_xcursor;
 				/* Proceed to mx if it is at a sub-database */
