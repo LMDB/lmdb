@@ -1502,7 +1502,9 @@ struct MDB_cursor {
 #if MDB_RPAGE_CACHE
 	MDB_page	*mc_ovpg;		/**< a referenced overflow page */
 #	define MC_OVPG(mc)			((mc)->mc_ovpg)
-#	define MC_SET_OVPG(mc, pg)	((mc)->mc_ovpg = (pg))
+#	define MC_SET_OVPG(mc, pg)	\
+		((mc)->mc_ovpg = \
+		 (MDB_REMAPPING((mc)->mc_txn->mt_env->me_flags) ? (pg) : NULL))
 #else
 #	define MC_OVPG(mc)			((MDB_page *)0)
 #	define MC_SET_OVPG(mc, pg)	((void)0)
