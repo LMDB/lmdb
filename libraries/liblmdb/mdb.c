@@ -5658,14 +5658,15 @@ mdb_enctest(const MDB_val *src, MDB_val *dst, const MDB_val *key, int encdec)
  *	Supports the normal flags plus 'e' = trivial encryption for testing.
  */
 static int ESECT
-mdb_env_getflags(MDB_env *env)
+mdb_env_envflags(MDB_env *env)
 {
-	static const char names[] = "acfhilmnrstwe";
+	static const char names[] = "ace" "fhi" "lmn" "rst" "w";
 	static const unsigned f[] = {
-		MDB_MAPASYNC, MDB_REMAP_CHUNKS, MDB_FIXEDMAP, MDB_NORDAHEAD,
-		MDB_NOMEMINIT, MDB_NOLOCK, MDB_NOMETASYNC, MDB_NOSUBDIR,
-		MDB_RDONLY, MDB_NOSYNC, MDB_NOTLS, MDB_WRITEMAP,
-		MDB_ENCRYPT,
+		/*a*/ MDB_MAPASYNC, /*c*/ MDB_REMAP_CHUNKS, /*e*/ MDB_ENCRYPT,
+		/*f*/ MDB_FIXEDMAP, /*h*/ MDB_NORDAHEAD,    /*i*/ MDB_NOMEMINIT,
+		/*l*/ MDB_NOLOCK,   /*m*/ MDB_NOMETASYNC,   /*n*/ MDB_NOSUBDIR,
+		/*r*/ MDB_RDONLY,   /*s*/ MDB_NOSYNC,       /*t*/ MDB_NOTLS,
+		/*w*/ MDB_WRITEMAP,
 	};
 	unsigned flags = 0;
 	const char *s, *opts = getenv("LMDB_FLAGS");
@@ -5696,7 +5697,7 @@ mdb_env_getflags(MDB_env *env)
 	return MDB_SUCCESS;
 }
 #else
-#define mdb_env_getflags(env) MDB_SUCCESS
+#define mdb_env_envflags(env) MDB_SUCCESS
 #endif	/* MDB_TEST */
 
 	/** Only a subset of the @ref mdb_env flags can be changed
@@ -5720,7 +5721,7 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 	if (env->me_fd!=INVALID_HANDLE_VALUE || (flags & ~(CHANGEABLE|CHANGELESS)))
 		return EINVAL;
 
-	if ((rc = mdb_env_getflags(env)) != MDB_SUCCESS)
+	if ((rc = mdb_env_envflags(env)) != MDB_SUCCESS)
 		return rc;
 	flags |= env->me_flags;
 
