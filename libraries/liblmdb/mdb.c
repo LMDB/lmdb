@@ -471,7 +471,7 @@ typedef pthread_mutex_t *mdb_mutexref_t;
 #define MNAME_LEN	(sizeof(pthread_mutex_t))
 #endif
 
-/** Initial part of #MDB_env.me_mutexname[].
+/** Initial part of #MDB_env.%me_mutexname[].
  *	Changes to this code must be reflected in #MDB_LOCK_FORMAT.
  */
 #ifdef _WIN32
@@ -6322,7 +6322,8 @@ static void mdb_rpage_decrypt(MDB_env *env, MDB_ID3 *id3, int rem, int numpgs);
  * reference to one overflow page at a time.
  *
  * @param[in] txn the transaction for this access.
- * @param[in] pgno the page number for the page to retrieve.
+ * @param[in] pg0 the page number for the page to retrieve.
+ * @param[in] numpgs number of database pages (can be > 1 for overflow pages)
  * @param[out] ret address of a pointer where the page's address will be stored.
  * @return 0 on success, non-zero on failure.
  */
@@ -6652,6 +6653,7 @@ static void mdb_rpage_dispose(MDB_env *env, MDB_ID3 *id3)
  * Set #MDB_TXN_ERROR on failure.
  * @param[in] mc the cursor accessing the page.
  * @param[in] pgno the page number for the page to retrieve.
+ * @param[in] numpgs number of database pages (can be > 1 for overflow pages)
  * @param[out] ret address of a pointer where the page's address will be stored.
  * @param[out] lvl dirty_list inheritance level of found page. 1=current txn, 0=mapped page.
  * @return 0 on success, non-zero on failure.

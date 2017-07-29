@@ -995,8 +995,8 @@ int  mdb_env_set_assert(MDB_env *env, MDB_assert_func *func);
 #if MDB_RPAGE_CACHE
 	/** @brief Set encryption on an environment.
 	 *
-	 * This must be called before #mdb_env_open(). It implicitly sets #MDB_REMAP_CHUNK
-	 * on the env.
+	 * This must be called before #mdb_env_open().
+	 * It implicitly sets #MDB_REMAP_CHUNKS on the env.
 	 * @param[in] env An environment handle returned by #mdb_env_create().
 	 * @param[in] func An #MDB_enc_func function.
 	 * @param[in] key An array of two values: key[0] is the encryption key,
