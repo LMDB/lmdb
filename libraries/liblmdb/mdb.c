@@ -5707,8 +5707,9 @@ mdb_env_envflags(MDB_env *env)
 #define	CHANGEABLE	(MDB_NOSYNC|MDB_NOMETASYNC|MDB_MAPASYNC|MDB_NOMEMINIT)
 #define	CHANGELESS	(MDB_FIXEDMAP|MDB_NOSUBDIR|MDB_RDONLY| \
 	MDB_WRITEMAP|MDB_NOTLS|MDB_NOLOCK|MDB_NORDAHEAD|MDB_REMAP_CHUNKS)
+#define EXPOSED		(CHANGEABLE|CHANGELESS | MDB_ENCRYPT)
 
-#if VALID_FLAGS & PERSISTENT_FLAGS & (CHANGEABLE|CHANGELESS)
+#if VALID_FLAGS & PERSISTENT_FLAGS & EXPOSED
 # error "Persistent DB flags & env flags overlap, but both go in mm_flags"
 #endif
 
@@ -10909,7 +10910,7 @@ mdb_env_get_flags(MDB_env *env, unsigned int *arg)
 	if (!env || !arg)
 		return EINVAL;
 
-	*arg = env->me_flags & (CHANGEABLE|CHANGELESS);
+	*arg = env->me_flags & EXPOSED;
 	return MDB_SUCCESS;
 }
 
