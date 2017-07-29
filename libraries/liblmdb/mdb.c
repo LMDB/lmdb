@@ -1675,13 +1675,13 @@ enum {
 static void mdb_txn_end(MDB_txn *txn, unsigned mode);
 
 #if MDB_RPAGE_CACHE
-static int  mdb_page_get(MDB_cursor *mc, pgno_t pgno, int numpgs, MDB_page **mp, int *lvl);
-#define MDB_PAGE_GET(mc, pg, numpgs, mp, lvl)	mdb_page_get(mc, pg, numpgs, mp, lvl)
+#define MDB_PAGE_GET(mc, pg, numpgs, mp)	mdb_page_get(mc, pg, numpgs, mp)
 static void mdb_rpage_dispose(MDB_env *env, MDB_ID3 *id3);
 #else
-static int  mdb_page_get(MDB_cursor *mc, pgno_t pgno, MDB_page **mp, int *lvl);
-#define MDB_PAGE_GET(mc, pg, numpgs, mp, lvl)	mdb_page_get(mc, pg, mp, lvl)
+/* Drop unused numpgs argument when !MDB_RPAGE_CACHE */
+#define MDB_PAGE_GET(mc, pg, numpgs, mp)	mdb_page_get(mc, pg, mp)
 #endif
+static int  MDB_PAGE_GET(MDB_cursor *mc, pgno_t pgno, int numpgs, MDB_page **mp);
 
 static int  mdb_page_search_root(MDB_cursor *mc,
 			    MDB_val *key, int modify);
@@ -6655,7 +6655,6 @@ static void mdb_rpage_dispose(MDB_env *env, MDB_ID3 *id3)
  * @param[in] pgno the page number for the page to retrieve.
  * @param[in] numpgs number of database pages (can be > 1 for overflow pages)
  * @param[out] ret address of a pointer where the page's address will be stored.
- * @param[out] lvl dirty_list inheritance level of found page. 1=current txn, 0=mapped page.
  * @return 0 on success, non-zero on failure.
  */
 static int
@@ -6663,15 +6662,13 @@ mdb_page_get(MDB_cursor *mc, pgno_t pgno,
 #if MDB_RPAGE_CACHE
 	int numpgs,
 #endif
-	MDB_page **ret, int *lvl)
+	MDB_page **ret)
 {
 	MDB_txn *txn = mc->mc_txn;
 	MDB_page *p = NULL;
-	int level;
 
 	if (! (mc->mc_flags & (C_ORIG_RDONLY|C_WRITEMAP))) {
 		MDB_txn *tx2 = txn;
-		level = 1;
 		do {
 			MDB_ID2L dl = tx2->mt_u.dirty_list;
 			unsigned x;
@@ -6694,7 +6691,6 @@ mdb_page_get(MDB_cursor *mc, pgno_t pgno,
 					goto done;
 				}
 			}
-			level++;
 		} while ((tx2 = tx2->mt_parent) != NULL);
 	}
 
@@ -6703,8 +6699,6 @@ mdb_page_get(MDB_cursor *mc, pgno_t pgno,
 		txn->mt_flags |= MDB_TXN_ERROR;
 		return MDB_PAGE_NOTFOUND;
 	}
-
-	level = 0;
 
 mapped:
 #if MDB_RPAGE_CACHE
@@ -6723,8 +6717,6 @@ mapped:
 
 done:
 	*ret = p;
-	if (lvl)
-		*lvl = level;
 	return MDB_SUCCESS;
 }
 
@@ -6781,7 +6773,7 @@ mdb_page_search_root(MDB_cursor *mc, MDB_val *key, int flags)
 		mdb_cassert(mc, i < NUMKEYS(mp));
 		node = NODEPTR(mp, i);
 
-		if ((rc = MDB_PAGE_GET(mc, NODEPGNO(node), 1, &mp, NULL)) != 0)
+		if ((rc = MDB_PAGE_GET(mc, NODEPGNO(node), 1, &mp)) != 0)
 			return rc;
 
 		mc->mc_ki[mc->mc_top] = i;
@@ -6824,7 +6816,7 @@ mdb_page_search_lowest(MDB_cursor *mc)
 	MDB_node	*node = NODEPTR(mp, 0);
 	int rc;
 
-	if ((rc = MDB_PAGE_GET(mc, NODEPGNO(node), 1, &mp, NULL)) != 0)
+	if ((rc = MDB_PAGE_GET(mc, NODEPGNO(node), 1, &mp)) != 0)
 		return rc;
 
 	mc->mc_ki[mc->mc_top] = 0;
@@ -6904,7 +6896,7 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int flags)
 		if (mc->mc_pg[0])
 			MDB_PAGE_UNREF(mc->mc_txn, mc->mc_pg[0]);
 #endif
-		if ((rc = MDB_PAGE_GET(mc, root, 1, &mc->mc_pg[0], NULL)) != 0)
+		if ((rc = MDB_PAGE_GET(mc, root, 1, &mc->mc_pg[0])) != 0)
 			return rc;
 	}
 
@@ -7037,7 +7029,7 @@ mdb_node_read(MDB_cursor *mc, MDB_node *leaf, MDB_val *data)
 	 */
 	memcpy(&ovp, NODEDATA(leaf), sizeof(ovp));
 	{
-	if ((rc = MDB_PAGE_GET(mc, ovp.op_pgno, ovp.op_pages, &omp, NULL)) != 0) {
+	if ((rc = MDB_PAGE_GET(mc, ovp.op_pgno, ovp.op_pages, &omp)) != 0) {
 		DPRINTF(("read overflow page %"Yu" failed", ovp.op_pgno));
 		return rc;
 	}
@@ -7126,7 +7118,7 @@ mdb_cursor_sibling(MDB_cursor *mc, int move_right)
 	MDB_PAGE_UNREF(mc->mc_txn, op);
 
 	indx = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
-	if ((rc = MDB_PAGE_GET(mc, NODEPGNO(indx), 1, &mp, NULL)) != 0) {
+	if ((rc = MDB_PAGE_GET(mc, NODEPGNO(indx), 1, &mp)) != 0) {
 		/* mc will be inconsistent if caller does mc_snum++ as above */
 		mc->mc_flags &= ~(C_INITIALIZED|C_EOF);
 		return rc;
@@ -8146,7 +8138,7 @@ current:
 			int ovpages, dpages = OVPAGES(data->mv_size, env->me_psize);
 
 			memcpy(&ovp, olddata.mv_data, sizeof(ovp));
-			if ((rc2 = MDB_PAGE_GET(mc, ovp.op_pgno, ovp.op_pages, &omp, NULL)) != 0)
+			if ((rc2 = MDB_PAGE_GET(mc, ovp.op_pgno, ovp.op_pages, &omp)) != 0)
 				return rc2;
 			ovpages = ovp.op_pages;
 
@@ -8442,7 +8434,7 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 		MDB_ovpage ovp;
 
 		memcpy(&ovp, NODEDATA(leaf), sizeof(ovp));
-		if ((rc = MDB_PAGE_GET(mc, ovp.op_pgno, ovp.op_pages, &omp, NULL)) ||
+		if ((rc = MDB_PAGE_GET(mc, ovp.op_pgno, ovp.op_pages, &omp)) ||
 			(rc = mdb_ovpage_free(mc, omp)))
 			goto fail;
 	}
@@ -9609,7 +9601,7 @@ mdb_rebalance(MDB_cursor *mc)
 			if (rc)
 				return rc;
 			mc->mc_db->md_root = NODEPGNO(NODEPTR(mp, 0));
-			rc = MDB_PAGE_GET(mc, mc->mc_db->md_root, 1, &mc->mc_pg[0], NULL);
+			rc = MDB_PAGE_GET(mc, mc->mc_db->md_root, 1, &mc->mc_pg[0]);
 			if (rc)
 				return rc;
 			mc->mc_db->md_depth--;
@@ -9670,7 +9662,7 @@ mdb_rebalance(MDB_cursor *mc)
 		DPUTS("reading right neighbor");
 		mn.mc_ki[ptop]++;
 		node = NODEPTR(mc->mc_pg[ptop], mn.mc_ki[ptop]);
-		rc = MDB_PAGE_GET(mc, NODEPGNO(node), 1, &mn.mc_pg[mn.mc_top], NULL);
+		rc = MDB_PAGE_GET(mc, NODEPGNO(node), 1, &mn.mc_pg[mn.mc_top]);
 		if (rc)
 			return rc;
 		mn.mc_ki[mn.mc_top] = 0;
@@ -9682,7 +9674,7 @@ mdb_rebalance(MDB_cursor *mc)
 		DPUTS("reading left neighbor");
 		mn.mc_ki[ptop]--;
 		node = NODEPTR(mc->mc_pg[ptop], mn.mc_ki[ptop]);
-		rc = MDB_PAGE_GET(mc, NODEPGNO(node), 1, &mn.mc_pg[mn.mc_top], NULL);
+		rc = MDB_PAGE_GET(mc, NODEPGNO(node), 1, &mn.mc_pg[mn.mc_top]);
 		if (rc)
 			return rc;
 		mn.mc_ki[mn.mc_top] = NUMKEYS(mn.mc_pg[mn.mc_top]) - 1;
@@ -10479,7 +10471,7 @@ mdb_env_cwalk(mdb_copy *my, pgno_t *pg, int flags)
 	mc.mc_txn = my->mc_txn;
 	mc.mc_flags = my->mc_txn->mt_flags & (C_ORIG_RDONLY|C_WRITEMAP);
 
-	rc = MDB_PAGE_GET(&mc, *pg, 1, &mc.mc_pg[0], NULL);
+	rc = MDB_PAGE_GET(&mc, *pg, 1, &mc.mc_pg[0]);
 	if (rc)
 		return rc;
 	rc = mdb_page_search_root(&mc, NULL, MDB_PS_FIRST);
@@ -10523,7 +10515,7 @@ mdb_env_cwalk(mdb_copy *my, pgno_t *pg, int flags)
 						}
 
 						memcpy(&ovp, NODEDATA(ni), sizeof(ovp));
-						rc = MDB_PAGE_GET(&mc, ovp.op_pgno, ovp.op_pages, &omp, NULL);
+						rc = MDB_PAGE_GET(&mc, ovp.op_pgno, ovp.op_pages, &omp);
 						if (rc)
 							goto done;
 						if (my->mc_wlen[toggle] >= MDB_WBUF) {
@@ -10575,7 +10567,7 @@ mdb_env_cwalk(mdb_copy *my, pgno_t *pg, int flags)
 again:
 				ni = NODEPTR(mp, mc.mc_ki[mc.mc_top]);
 				pg = NODEPGNO(ni);
-				rc = MDB_PAGE_GET(&mc, pg, 1, &mp, NULL);
+				rc = MDB_PAGE_GET(&mc, pg, 1, &mp);
 				if (rc)
 					goto done;
 				mc.mc_top++;
@@ -11249,7 +11241,7 @@ mdb_drop0(MDB_cursor *mc, int subs)
 		if (MDB_REMAPPING(mc->mc_txn->mt_env->me_flags)) {
 		/* bump refcount for mx's pages */
 		for (i=0; i<mc->mc_snum; i++)
-			MDB_PAGE_GET(&mx, mc->mc_pg[i]->mp_pgno, 1, &mx.mc_pg[i], NULL);
+			MDB_PAGE_GET(&mx, mc->mc_pg[i]->mp_pgno, 1, &mx.mc_pg[i]);
 		}
 
 		while (mc->mc_snum > 0) {
