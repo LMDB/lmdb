@@ -6664,26 +6664,17 @@ mdb_page_get(MDB_cursor *mc, pgno_t pgno,
 #endif
 	MDB_page **ret)
 {
-	MDB_txn *txn = mc->mc_txn;
+	MDB_txn *txn = mc->mc_txn, *tx2;
 	MDB_page *p = NULL;
 
 	if (! (mc->mc_flags & (C_ORIG_RDONLY|C_WRITEMAP))) {
-		MDB_txn *tx2 = txn;
-		do {
+		for (tx2 = txn;; ) {
 			MDB_ID2L dl = tx2->mt_u.dirty_list;
+			MDB_IDL  sl;
 			unsigned x;
-			/* Spilled pages were dirtied in this txn and flushed
-			 * because the dirty list got full. Bring this page
-			 * back in from the map (but don't unspill it here,
-			 * leave that unless page_touch happens again).
+			/* tx2 may have malloced its own "dirty" version of the
+			 * page, with the same page number.
 			 */
-			if (tx2->mt_spill_pgs) {
-				MDB_ID pn = pgno << 1;
-				x = mdb_midl_search(tx2->mt_spill_pgs, pn);
-				if (x <= tx2->mt_spill_pgs[0] && tx2->mt_spill_pgs[x] == pn) {
-					goto mapped;
-				}
-			}
 			if (dl[0].mid) {
 				unsigned x = mdb_mid2l_search(dl, pgno);
 				if (x <= dl[0].mid && dl[x].mid == pgno) {
@@ -6691,7 +6682,23 @@ mdb_page_get(MDB_cursor *mc, pgno_t pgno,
 					goto done;
 				}
 			}
-		} while ((tx2 = tx2->mt_parent) != NULL);
+			/* Spilled pages were dirtied in this txn, then cleaned
+			 * and flushed to the map when dirty_list got full.
+			 * Check if tx2 spilled the page before moving on to
+			 * search the parent.  (But don't unspill here, leave
+			 * that unless page_touch happens again.)
+			 */
+			sl = tx2->mt_spill_pgs;
+			if ((tx2 = tx2->mt_parent) == NULL)
+				break;
+			if (sl) {
+				MDB_ID pn = pgno << 1;
+				x = mdb_midl_search(sl, pn);
+				if (x <= sl[0] && sl[x] == pn) {
+					goto mapped;
+				}
+			}
+		}
 	}
 
 	if (pgno >= txn->mt_next_pgno) {
