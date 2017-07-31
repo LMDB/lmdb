@@ -34,7 +34,7 @@ static void prstat(MDB_stat *ms)
 
 static void usage(char *prog)
 {
-	fprintf(stderr, "usage: %s [-V] [-n] [-e] [-r[r]] [-f[f[f]]] [-a|-s subdb] dbpath\n", prog);
+	fprintf(stderr, "usage: %s [-V] [-n] [-e] [-r[r]] [-f[f[f]]] [-v] [-a|-s subdb] dbpath\n", prog);
 	exit(EXIT_FAILURE);
 }
 
@@ -61,6 +61,7 @@ int main(int argc, char *argv[])
 	 * -f: print freelist info
 	 * -r: print reader info
 	 * -n: use NOSUBDIR flag on env_open
+	 * -v: use previous metapage
 	 * -V: print version and exit
 	 * (default) print stat of only the main DB
 	 */
@@ -83,6 +84,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'n':
 			envflags |= MDB_NOSUBDIR;
+			break;
+		case 'v':
+			envflags |= MDB_PREVMETA;
 			break;
 		case 'r':
 			rdrinfo++;

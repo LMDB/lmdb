@@ -151,7 +151,7 @@ static int dumpit(MDB_txn *txn, MDB_dbi dbi, char *name)
 
 static void usage(char *prog)
 {
-	fprintf(stderr, "usage: %s [-V] [-f output] [-l] [-n] [-p] [-a|-s subdb] dbpath\n", prog);
+	fprintf(stderr, "usage: %s [-V] [-f output] [-l] [-n] [-p] [-v] [-a|-s subdb] dbpath\n", prog);
 	exit(EXIT_FAILURE);
 }
 
@@ -175,6 +175,7 @@ int main(int argc, char *argv[])
 	 * -n: use NOSUBDIR flag on env_open
 	 * -p: use printable characters
 	 * -f: write to file instead of stdout
+	 * -v: use previous metapage
 	 * -V: print version and exit
 	 * (default) dump only the main DB
 	 */
@@ -201,6 +202,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'n':
 			envflags |= MDB_NOSUBDIR;
+			break;
+		case 'v':
+			envflags |= MDB_PREVMETA;
 			break;
 		case 'p':
 			mode |= PRINT;

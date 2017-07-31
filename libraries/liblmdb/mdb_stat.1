@@ -1,5 +1,5 @@
-.TH MDB_STAT 1 "2015/09/30" "LMDB 0.9.17"
-.\" Copyright 2012-2018 Howard Chu, Symas Corp. All Rights Reserved.
+.TH MDB_STAT 1 "2017/07/31" "LMDB 0.9.70"
+.\" Copyright 2012-2019 Howard Chu, Symas Corp. All Rights Reserved.
 .\" Copying restrictions apply.  See COPYRIGHT/LICENSE.
 .SH NAME
 mdb_stat \- LMDB environment status tool
@@ -13,6 +13,8 @@ mdb_stat \- LMDB environment status tool
 .BR \-f [ f [ f ]]]
 [\c
 .BR \-n ]
+[\c
+.BR \-v ]
 [\c
 .BR \-r [ r ]]
 [\c
@@ -38,6 +40,10 @@ If \fB\-fff\fP is given, display the full list of page IDs in the freelist.
 .TP
 .BR \-n
 Display the status of an LMDB database which does not use subdirectories.
+.TP
+.BR \-v
+Use the previous environment state instead of the latest state.
+This may be useful if the latest state has been corrupted.
 .TP
 .BR \-r
 Display information about the environment reader table.
