@@ -5661,13 +5661,13 @@ mdb_enctest(const MDB_val *src, MDB_val *dst, const MDB_val *key, int encdec)
 static int ESECT
 mdb_env_envflags(MDB_env *env)
 {
-	static const char names[] = "ace" "fhi" "lmn" "rst" "w";
+	static const char names[] = "ace" "fhi" "lmn" "rst" "vw";
 	static const unsigned f[] = {
 		/*a*/ MDB_MAPASYNC, /*c*/ MDB_REMAP_CHUNKS, /*e*/ MDB_ENCRYPT,
 		/*f*/ MDB_FIXEDMAP, /*h*/ MDB_NORDAHEAD,    /*i*/ MDB_NOMEMINIT,
 		/*l*/ MDB_NOLOCK,   /*m*/ MDB_NOMETASYNC,   /*n*/ MDB_NOSUBDIR,
 		/*r*/ MDB_RDONLY,   /*s*/ MDB_NOSYNC,       /*t*/ MDB_NOTLS,
-		/*w*/ MDB_WRITEMAP,
+		/*v*/ MDB_PREVMETA, /*w*/ MDB_WRITEMAP,
 	};
 	unsigned flags = 0;
 	const char *s, *opts = getenv("LMDB_FLAGS");
