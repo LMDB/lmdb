@@ -6992,8 +6992,7 @@ mdb_ovpage_free(MDB_cursor *mc, MDB_page *mp)
 			}
 		}
 		txn->mt_dirty_room++;
-		if (!(env->me_flags & MDB_WRITEMAP))
-			mdb_dpage_free(env, mp);
+		mdb_dpage_free(env, mp);
 release:
 		/* Insert in me_pghead */
 		mop = env->me_pghead;
