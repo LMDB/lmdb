@@ -2234,10 +2234,27 @@ mdb_cursor_unref(MDB_cursor *mc)
 	 ? mdb_cursor_unref(mc) \
 	 : (void)0)
 
+/* Unref ovpage \b omp in \b mc and tracked cursors */
+static void
+mdb_ovpage_unref_all(MDB_cursor *mc, MDB_page *omp)
+{
+	MDB_txn *txn = mc->mc_txn;
+	MDB_cursor *next = txn->mt_cursors[mc->mc_dbi];
+	for (;; mc = next, next = mc->mc_next) {
+		if (MC_OVPG(mc) == omp) {
+			mdb_page_unref(mc->mc_txn, omp);
+			MC_SET_OVPG(mc, NULL);
+		}
+		if (next == NULL)
+			break;
+	}
+}
+
 #else
 #define MDB_REMAPPING(flags)	0
 #define MDB_PAGE_UNREF(txn, mp)
 #define MDB_CURSOR_UNREF(mc, force) ((void)0)
+#define mdb_ovpage_unref_all(mc, omp, pgno) ((void)0)
 #endif /* MDB_RPAGE_CACHE */
 
 /** Loosen or free a single page.
@@ -6943,6 +6960,7 @@ mdb_ovpage_free(MDB_cursor *mc, MDB_page *mp)
 	unsigned x = 0, ovpages = mp->mp_pages;
 	MDB_env *env = txn->mt_env;
 	MDB_ID pn = pg << 1;
+	MDB_page *freeme = NULL;
 	int rc;
 
 	DPRINTF(("free ov page %"Yu" (%d)", pg, ovpages));
@@ -6992,7 +7010,7 @@ mdb_ovpage_free(MDB_cursor *mc, MDB_page *mp)
 			}
 		}
 		txn->mt_dirty_room++;
-		mdb_dpage_free(env, mp);
+		freeme = mp;
 release:
 		/* Insert in me_pghead */
 		mop = env->me_pghead;
@@ -7008,6 +7026,12 @@ release:
 			return rc;
 	}
 	mc->mc_db->md_overflow_pages -= ovpages;
+
+	if (MDB_REMAPPING(env->me_flags))
+		mdb_ovpage_unref_all(mc, mp);
+	if (freeme)
+		mdb_dpage_free(env, freeme);
+
 	return 0;
 }
 
