@@ -175,7 +175,7 @@ int main(int argc, char *argv[])
 	 * -n: use NOSUBDIR flag on env_open
 	 * -p: use printable characters
 	 * -f: write to file instead of stdout
-	 * -v: use previous metapage
+	 * -v: use previous snapshot
 	 * -V: print version and exit
 	 * (default) dump only the main DB
 	 */
@@ -204,7 +204,7 @@ int main(int argc, char *argv[])
 			envflags |= MDB_NOSUBDIR;
 			break;
 		case 'v':
-			envflags |= MDB_PREVMETA;
+			envflags |= MDB_PREVSNAPSHOT;
 			break;
 		case 'p':
 			mode |= PRINT;

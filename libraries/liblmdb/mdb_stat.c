@@ -61,7 +61,7 @@ int main(int argc, char *argv[])
 	 * -f: print freelist info
 	 * -r: print reader info
 	 * -n: use NOSUBDIR flag on env_open
-	 * -v: use previous metapage
+	 * -v: use previous snapshot
 	 * -V: print version and exit
 	 * (default) print stat of only the main DB
 	 */
@@ -86,7 +86,7 @@ int main(int argc, char *argv[])
 			envflags |= MDB_NOSUBDIR;
 			break;
 		case 'v':
-			envflags |= MDB_PREVMETA;
+			envflags |= MDB_PREVSNAPSHOT;
 			break;
 		case 'r':
 			rdrinfo++;

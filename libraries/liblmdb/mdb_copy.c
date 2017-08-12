@@ -39,7 +39,7 @@ int main(int argc,char * argv[])
 		if (argv[1][1] == 'n' && argv[1][2] == '\0')
 			flags |= MDB_NOSUBDIR;
 		else if (argv[1][1] == 'v' && argv[1][2] == '\0')
-			flags |= MDB_PREVMETA;
+			flags |= MDB_PREVSNAPSHOT;
 		else if (argv[1][1] == 'c' && argv[1][2] == '\0')
 			cpflags |= MDB_CP_COMPACT;
 		else if (argv[1][1] == 'V' && argv[1][2] == '\0') {
