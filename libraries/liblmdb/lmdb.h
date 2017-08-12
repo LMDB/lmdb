@@ -354,8 +354,8 @@ typedef void (MDB_enc_func)(const MDB_val *src, MDB_val *dst, const MDB_val *key
 #define MDB_NORDAHEAD	0x800000
 	/** don't initialize malloc'd memory before writing to datafile */
 #define MDB_NOMEMINIT	0x1000000
-	/** use the previous meta page rather than the latest one */
-#define MDB_PREVMETA	0x2000000
+	/** use the previous snapshot rather than the latest one */
+#define MDB_PREVSNAPSHOT	0x2000000
 	/** don't use a single mmap, remap individual chunks (needs MDB_RPAGE_CACHE) */
 #define MDB_REMAP_CHUNKS	0x4000000
 /** @} */
@@ -672,10 +672,12 @@ int  mdb_env_create(MDB_env **env);
 	 *		caller is expected to overwrite all of the memory that was
 	 *		reserved in that case.
 	 *		This flag may be changed at any time using #mdb_env_set_flags().
-	 *	<li>#MDB_PREVMETA
-	 *		Open the environment with the previous meta page rather than the latest
+	 *	<li>#MDB_PREVSNAPSHOT
+	 *		Open the environment with the previous snapshot rather than the latest
 	 *		one. This loses the latest transaction, but may help work around some
-	 *		types of corruption.
+	 *		types of corruption. If opened with write access, this must be the
+	 *		only process using the environment. This flag is automatically reset
+	 *		after a write transaction is successfully committed.
 	 * </ul>
 	 * @param[in] mode The UNIX permissions to set on created files and semaphores.
 	 * This parameter is ignored on Windows.
