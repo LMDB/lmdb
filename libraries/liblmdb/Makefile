@@ -44,6 +44,12 @@ IDOCS	= mdb_stat.1 mdb_copy.1 mdb_dump.1 mdb_load.1
 PROGS	= $(IPROGS) mtest mtest2 mtest3 mtest4 mtest5
 all:	$(ILIBS) $(PROGS)
 
+install_static_lib: liblmdb.a
+	mkdir -p $(DESTDIR)$(libdir)
+	mkdir -p $(DESTDIR)$(includedir)
+	for f in liblmdb.a; do cp $$f $(DESTDIR)$(libdir); done
+	for f in $(IHDRS); do cp $$f $(DESTDIR)$(includedir); done
+
 install: $(ILIBS) $(IPROGS) $(IHDRS)
 	mkdir -p $(DESTDIR)$(bindir)
 	mkdir -p $(DESTDIR)$(libdir)
