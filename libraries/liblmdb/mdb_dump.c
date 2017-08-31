@@ -254,9 +254,9 @@ int main(int argc, char *argv[])
 		goto env_close;
 	}
 
-	rc = mdb_open(txn, subname, 0, &dbi);
+	rc = mdb_dbi_open(txn, subname, 0, &dbi);
 	if (rc) {
-		fprintf(stderr, "mdb_open failed, error %d %s\n", rc, mdb_strerror(rc));
+		fprintf(stderr, "mdb_dbi_open failed, error %d %s\n", rc, mdb_strerror(rc));
 		goto txn_abort;
 	}
 
@@ -271,27 +271,22 @@ int main(int argc, char *argv[])
 			goto txn_abort;
 		}
 		while ((rc = mdb_cursor_get(cursor, &key, NULL, MDB_NEXT_NODUP)) == 0) {
-			char *str;
 			MDB_dbi db2;
-			if (memchr(key.mv_data, '\0', key.mv_size))
+			if (memchr(key.mv_data, '\0', key.mv_size-1) || ((char *)key.mv_data)[key.mv_size=1] != '\0')
 				continue;
 			count++;
-			str = malloc(key.mv_size+1);
-			memcpy(str, key.mv_data, key.mv_size);
-			str[key.mv_size] = '\0';
-			rc = mdb_open(txn, str, 0, &db2);
+			rc = mdb_dbi_open(txn, key.mv_data, 0, &db2);
 			if (rc == MDB_SUCCESS) {
 				if (list) {
-					printf("%s\n", str);
+					printf("%s\n", (char *)key.mv_data);
 					list++;
 				} else {
-					rc = dumpit(txn, db2, str);
+					rc = dumpit(txn, db2, key.mv_data);
 					if (rc)
 						break;
 				}
-				mdb_close(env, db2);
+				mdb_dbi_close(env, db2);
 			}
-			free(str);
 			if (rc) continue;
 		}
 		mdb_cursor_close(cursor);

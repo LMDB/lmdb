@@ -204,9 +204,9 @@ int main(int argc, char *argv[])
 		printf("  Free pages: %"Yu"\n", pages);
 	}
 
-	rc = mdb_open(txn, subname, 0, &dbi);
+	rc = mdb_dbi_open(txn, subname, 0, &dbi);
 	if (rc) {
-		fprintf(stderr, "mdb_open failed, error %d %s\n", rc, mdb_strerror(rc));
+		fprintf(stderr, "mdb_dbi_open failed, error %d %s\n", rc, mdb_strerror(rc));
 		goto txn_abort;
 	}
 
@@ -228,17 +228,12 @@ int main(int argc, char *argv[])
 			goto txn_abort;
 		}
 		while ((rc = mdb_cursor_get(cursor, &key, NULL, MDB_NEXT_NODUP)) == 0) {
-			char *str;
 			MDB_dbi db2;
-			if (memchr(key.mv_data, '\0', key.mv_size))
+			if (memchr(key.mv_data, '\0', key.mv_size-1) || ((char *)key.mv_data)[key.mv_size-1] != '\0')
 				continue;
-			str = malloc(key.mv_size+1);
-			memcpy(str, key.mv_data, key.mv_size);
-			str[key.mv_size] = '\0';
-			rc = mdb_open(txn, str, 0, &db2);
+			rc = mdb_dbi_open(txn, key.mv_data, 0, &db2);
 			if (rc == MDB_SUCCESS)
-				printf("Status of %s\n", str);
-			free(str);
+				printf("Status of %s\n", (char *)key.mv_data);
 			if (rc) continue;
 			rc = mdb_stat(txn, db2, &mst);
 			if (rc) {
@@ -246,7 +241,7 @@ int main(int argc, char *argv[])
 				goto txn_abort;
 			}
 			prstat(&mst);
-			mdb_close(env, db2);
+			mdb_dbi_close(env, db2);
 		}
 		mdb_cursor_close(cursor);
 	}
@@ -254,7 +249,7 @@ int main(int argc, char *argv[])
 	if (rc == MDB_NOTFOUND)
 		rc = MDB_SUCCESS;
 
-	mdb_close(env, dbi);
+	mdb_dbi_close(env, dbi);
 txn_abort:
 	mdb_txn_abort(txn);
 env_close:

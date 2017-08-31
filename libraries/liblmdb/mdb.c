@@ -11110,7 +11110,7 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 	int rc, dbflag, exact;
 	unsigned int unused = 0, seq;
 	char *namedup;
-	size_t len;
+	size_t size;
 
 	if (flags & ~VALID_FLAGS)
 		return EINVAL;
@@ -11137,15 +11137,15 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 	}
 
 	/* Is the DB already open? */
-	len = strlen(name);
+	size = strlen(name) + 1;
 	for (i=CORE_DBS; i<txn->mt_numdbs; i++) {
 		if (!txn->mt_dbxs[i].md_name.mv_size) {
 			/* Remember this free slot */
 			if (!unused) unused = i;
 			continue;
 		}
-		if (len == txn->mt_dbxs[i].md_name.mv_size &&
-			!strncmp(name, txn->mt_dbxs[i].md_name.mv_data, len)) {
+		if (size == txn->mt_dbxs[i].md_name.mv_size &&
+			!strcmp(name, txn->mt_dbxs[i].md_name.mv_data)) {
 			*dbi = i;
 			return MDB_SUCCESS;
 		}
@@ -11162,7 +11162,7 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 	/* Find the DB info */
 	dbflag = DB_NEW|DB_VALID|DB_USRVALID;
 	exact = 0;
-	key.mv_size = len;
+	key.mv_size = size;
 	key.mv_data = (void *)name;
 	mdb_cursor_init(&mc, txn, MAIN_DBI, NULL);
 	rc = mdb_cursor_set(&mc, &key, &data, MDB_SET, &exact);
@@ -11197,7 +11197,7 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 		/* Got info, register DBI in this txn */
 		unsigned int slot = unused ? unused : txn->mt_numdbs;
 		txn->mt_dbxs[slot].md_name.mv_data = namedup;
-		txn->mt_dbxs[slot].md_name.mv_size = len;
+		txn->mt_dbxs[slot].md_name.mv_size = size;
 		txn->mt_dbxs[slot].md_rel = NULL;
 		txn->mt_dbflags[slot] = dbflag;
 		/* txn-> and env-> are the same in read txns, use
