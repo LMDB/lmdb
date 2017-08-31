@@ -9087,6 +9087,18 @@ mdb_cursor_dbi(MDB_cursor *mc)
 	return mc->mc_dbi;
 }
 
+int
+mdb_cursor_is_db(MDB_cursor *mc)
+{
+
+	if (mc && (mc->mc_flags & C_INITIALIZED) && mc->mc_snum) {
+		MDB_node *leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
+		if ((leaf->mn_flags & (F_DUPDATA|F_SUBDATA)) == F_SUBDATA)
+			return 1;
+	}
+	return 0;
+}
+
 /** Replace the key for a branch node with a new key.
  * Set #MDB_TXN_ERROR on failure.
  * @param[in] mc Cursor pointing to the node to operate on.

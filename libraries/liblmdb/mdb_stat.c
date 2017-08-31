@@ -229,7 +229,7 @@ int main(int argc, char *argv[])
 		}
 		while ((rc = mdb_cursor_get(cursor, &key, NULL, MDB_NEXT_NODUP)) == 0) {
 			MDB_dbi db2;
-			if (memchr(key.mv_data, '\0', key.mv_size-1) || ((char *)key.mv_data)[key.mv_size-1] != '\0')
+			if (!mdb_cursor_is_db(cursor))
 				continue;
 			rc = mdb_dbi_open(txn, key.mv_data, 0, &db2);
 			if (rc == MDB_SUCCESS)

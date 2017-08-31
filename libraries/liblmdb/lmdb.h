@@ -1506,6 +1506,13 @@ MDB_txn *mdb_cursor_txn(MDB_cursor *cursor);
 	 */
 MDB_dbi mdb_cursor_dbi(MDB_cursor *cursor);
 
+	/** @brief Check if the cursor is pointing to a named database record.
+	 *
+	 * @param[in] cursor A cursor handle returned by #mdb_cursor_open()
+	 * @return 1 if current record is a named database, 0 otherwise.
+	 */
+int mdb_cursor_is_db(MDB_cursor *cursor);
+
 	/** @brief Retrieve by cursor.
 	 *
 	 * This function retrieves key/data pairs from the database. The address and length
