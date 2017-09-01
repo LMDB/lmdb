@@ -224,7 +224,7 @@ typedef int mdb_filehandle_t;
 
 /** @defgroup mdb LMDB API
  *	@{
- *	@brief OpenLDAP Lightning Memory-Mapped Database Manager
+ *	@brief Symas Lightning Memory-Mapped Database Manager
  */
 /** @defgroup Version Version Macros
  *	@{
@@ -1161,6 +1161,8 @@ int  mdb_txn_renew(MDB_txn *txn);
 	 * To use named databases (with name != NULL), #mdb_env_set_maxdbs()
 	 * must be called before opening the environment.  Database names are
 	 * keys in the unnamed database, and may be read but not written.
+	 * @note Names are C strings and stored with their NUL terminator included.
+	 * In LMDB 0.9 the NUL terminator was omitted.
 	 *
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] name The name of the database to open. If only a single
