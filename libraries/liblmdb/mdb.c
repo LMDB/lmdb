@@ -7269,6 +7269,11 @@ fetchm:
 			rc = MDB_INCOMPATIBLE;
 			break;
 		}
+		if (mc->mc_ki[mc->mc_top] >= NUMKEYS(mc->mc_pg[mc->mc_top])) {
+			mc->mc_ki[mc->mc_top] = NUMKEYS(mc->mc_pg[mc->mc_top]);
+			rc = MDB_NOTFOUND;
+			break;
+		}
 		{
 			MDB_node *leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
 			if (!F_ISSET(leaf->mn_flags, F_DUPDATA)) {
@@ -7921,6 +7926,7 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 						if (!(m2->mc_flags & C_INITIALIZED)) continue;
 						if (m2->mc_pg[mc->mc_top] == mp) {
 							MDB_node *n2 = leaf;
+							if (m2->mc_ki[mc->mc_top] >= NUMKEYS(mp)) continue;
 							if (m2->mc_ki[mc->mc_top] != mc->mc_ki[mc->mc_top]) {
 								n2 = NODEPTR(mp, m2->mc_ki[mc->mc_top]);
 								if (n2->mn_flags & F_SUBDATA) continue;
