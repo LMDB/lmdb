@@ -7041,6 +7041,8 @@ release:
 		if (rc)
 			return rc;
 	}
+	if (MC_OVPG(mc) == mp)
+		MC_SET_OVPG(mc, NULL);
 	mc->mc_db->md_overflow_pages -= ovpages;
 
 	if (MDB_REMAPPING(env->me_flags))
