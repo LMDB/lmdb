@@ -8454,13 +8454,7 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 						if (m2 == mc || m2->mc_snum < mc->mc_snum) continue;
 						if (!(m2->mc_flags & C_INITIALIZED)) continue;
 						if (m2->mc_pg[mc->mc_top] == mp) {
-							MDB_node *n2 = leaf;
-							if (m2->mc_ki[mc->mc_top] >= NUMKEYS(mp)) continue;
-							if (m2->mc_ki[mc->mc_top] != mc->mc_ki[mc->mc_top]) {
-								n2 = NODEPTR(mp, m2->mc_ki[mc->mc_top]);
-								if (n2->mn_flags & F_SUBDATA) continue;
-							}
-							m2->mc_xcursor->mx_cursor.mc_pg[0] = NODEDATA(n2);
+							XCURSOR_REFRESH(m2, mc->mc_top, mp);
 						}
 					}
 				}
