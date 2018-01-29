@@ -6418,7 +6418,11 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int flags)
 		}
 	}
 
-	mdb_cassert(mc, root > 1);
+	if (root < 2) {
+		DPUTS("invalid root pgno");
+		return MDB_CORRUPTED;
+	}
+
 	if (!mc->mc_pg[0] || mc->mc_pg[0]->mp_pgno != root) {
 #ifdef MDB_VL32
 		if (mc->mc_pg[0])
@@ -7071,6 +7075,8 @@ mdb_cursor_first(MDB_cursor *mc, MDB_val *key, MDB_val *data)
 
 	if (data) {
 		if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
+			if (!(mc->mc_dbflag & DB_DUPDATA))
+				return MDB_CORRUPTED;
 			mdb_xcursor_init1(mc, leaf);
 			rc = mdb_cursor_first(&mc->mc_xcursor->mx_cursor, data, NULL);
 			if (rc)
