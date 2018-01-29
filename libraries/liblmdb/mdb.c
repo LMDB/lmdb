@@ -6739,6 +6739,8 @@ skip:
 	leaf = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
 
 	if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
+		if (!(mc->mc_dbflag & DB_DUPDATA))
+			return MDB_CORRUPTED;
 		mdb_xcursor_init1(mc, leaf);
 	}
 	if (data) {
