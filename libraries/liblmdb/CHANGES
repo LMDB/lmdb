@@ -4,6 +4,7 @@ LMDB 0.9.22 Engineering
 	Fix regression with new db from 0.9.19 (ITS#8760)
 	Fix liblmdb to build on Solaris (ITS#8612)
 	Fix delete behavior with DUPSORT DB (ITS#8622)
+	Fix mdb_cursor_get/mdb_cursor_del behavior (ITS#8722)
 
 LMDB 0.9.21 Release (2017/06/01)
 	Fix xcursor after cursor_del (ITS#8622)
