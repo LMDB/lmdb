@@ -1,6 +1,7 @@
 LMDB 0.9 Change Log
 
-LMDB 0.9.22 Engineering
+LMDB 0.9.22 Release (2018-03-21)
+	Fix MDB_DUPSORT alignment bug (ITS#8819)
 	Fix regression with new db from 0.9.19 (ITS#8760)
 	Fix liblmdb to build on Solaris (ITS#8612)
 	Fix delete behavior with DUPSORT DB (ITS#8622)
