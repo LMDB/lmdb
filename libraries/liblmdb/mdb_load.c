@@ -68,6 +68,7 @@ static void readhdr(void)
 {
 	char *ptr;
 
+	flags = 0;
 	while (fgets(dbuf.mv_data, dbuf.mv_size, stdin) != NULL) {
 		lineno++;
 		if (!strncmp(dbuf.mv_data, "VERSION=", STRLENOF("VERSION="))) {
@@ -374,7 +375,6 @@ int main(int argc, char *argv[])
 	while(!Eof) {
 		MDB_val key, data;
 		int batch = 0;
-		flags = 0;
 
 		if (!dohdr) {
 			dohdr = 1;
