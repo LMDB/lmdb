@@ -3444,10 +3444,41 @@ mdb_freelist_save(MDB_txn *txn)
 		 * we may be unable to return them to me_pghead.
 		 */
 		MDB_page *mp = txn->mt_loose_pgs;
+		MDB_ID2 *dl = txn->mt_u.dirty_list;
+		unsigned x;
 		if ((rc = mdb_midl_need(&txn->mt_free_pgs, txn->mt_loose_count)) != 0)
 			return rc;
-		for (; mp; mp = NEXT_LOOSE_PAGE(mp))
+		for (; mp; mp = NEXT_LOOSE_PAGE(mp)) {
 			mdb_midl_xappend(txn->mt_free_pgs, mp->mp_pgno);
+			/* must also remove from dirty list */
+			if (txn->mt_flags & MDB_TXN_WRITEMAP) {
+				for (x=1; x<=dl[0].mid; x++)
+					if (dl[x].mid == mp->mp_pgno)
+						break;
+				mdb_tassert(txn, x <= dl[0].mid);
+			} else {
+				x = mdb_mid2l_search(dl, mp->mp_pgno);
+				mdb_tassert(txn, dl[x].mid == mp->mp_pgno);
+			}
+			dl[x].mptr = NULL;
+			mdb_dpage_free(env, mp);
+		}
+		{
+			/* squash freed slots out of the dirty list */
+			unsigned y;
+			for (y=1; dl[y].mptr && y <= dl[0].mid; y++);
+			if (y <= dl[0].mid) {
+				for(x=y, y++;;) {
+					while (!dl[y].mptr && y <= dl[0].mid) y++;
+					if (y > dl[0].mid) break;
+					dl[x++] = dl[y++];
+				}
+				dl[0].mid = x-1;
+			} else {
+				/* all slots freed */
+				dl[0].mid = 0;
+			}
+		}
 		txn->mt_loose_pgs = NULL;
 		txn->mt_loose_count = 0;
 	}
