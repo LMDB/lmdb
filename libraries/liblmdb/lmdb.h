@@ -908,6 +908,16 @@ int  mdb_env_get_fd(MDB_env *env, mdb_filehandle_t *fd);
 	 */
 int  mdb_env_set_mapsize(MDB_env *env, mdb_size_t size);
 
+
+	/** @brief Set the size of DB pages in bytes.
+	 *
+	 * The size defaults to the OS page size. Smaller or larger values may be
+	 * desired depending on the size of keys and values being used. Also, an
+	 * explicit size may need to be set when using filesystems like ZFS which
+	 * don't use the OS page size.
+	 */
+int  mdb_env_set_pagesize(MDB_env *env, int size);
+
 	/** @brief Set the maximum number of threads/reader slots for the environment.
 	 *
 	 * This defines the number of slots in the lock table that is used to track readers in the

@@ -4439,6 +4439,8 @@ mdb_env_read_header(MDB_env *env, int prev, MDB_meta *meta)
 		env->me_mapsize &= ~(VM_ALIGN-1);
 		env->me_psize = env->me_os_psize;
 		rc = mdb_env_map(env, NULL);
+		if (rc)
+			return rc;
 		p = (MDB_page *)env->me_map;
 		for (i=0; i<NUM_METAS; i++) {
 			if (!F_ISSET(p->mp_flags, P_META))
@@ -11267,6 +11269,19 @@ mdb_env_get_fd(MDB_env *env, mdb_filehandle_t *arg)
 		return EINVAL;
 
 	*arg = env->me_fd;
+	return MDB_SUCCESS;
+}
+
+int ESECT
+mdb_env_set_pagesize(MDB_env *env, int size)
+{
+	if (!env || env->me_map)
+		return EINVAL;
+	if (size > MAX_PAGESIZE || size < 256)
+		return EINVAL;
+	if (size & (size-1))
+		return EINVAL;
+	env->me_os_psize = size;
 	return MDB_SUCCESS;
 }
 
