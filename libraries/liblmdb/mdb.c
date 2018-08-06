@@ -52,7 +52,7 @@
  * NTDLL.DLL at runtime, to avoid buildtime dependencies on any
  * NTDLL import libraries.
  */
-typedef NTSTATUS WINAPI (NtCreateSectionFunc)
+typedef NTSTATUS (WINAPI NtCreateSectionFunc)
   (OUT PHANDLE sh, IN ACCESS_MASK acc,
   IN void * oa OPTIONAL,
   IN PLARGE_INTEGER ms OPTIONAL,
@@ -65,7 +65,7 @@ typedef enum _SECTION_INHERIT {
 	ViewUnmap = 2
 } SECTION_INHERIT;
 
-typedef NTSTATUS WINAPI (NtMapViewOfSectionFunc)
+typedef NTSTATUS (WINAPI NtMapViewOfSectionFunc)
   (IN PHANDLE sh, IN HANDLE ph,
   IN OUT PVOID *addr, IN ULONG_PTR zbits,
   IN SIZE_T cs, IN OUT PLARGE_INTEGER off OPTIONAL,
@@ -74,7 +74,7 @@ typedef NTSTATUS WINAPI (NtMapViewOfSectionFunc)
 
 static NtMapViewOfSectionFunc *NtMapViewOfSection;
 
-typedef NTSTATUS WINAPI (NtCloseFunc)(HANDLE h);
+typedef NTSTATUS (WINAPI NtCloseFunc)(HANDLE h);
 
 static NtCloseFunc *NtClose;
 
