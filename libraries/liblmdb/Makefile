@@ -109,7 +109,7 @@ coverage: xmtest
 	gcov xmidl.c
 
 xmtest:	mtest.o xmdb.o xmidl.o
-	gcc -o xmtest mtest.o xmdb.o xmidl.o -pthread $(COV_FLAGS)
+	$(CC) -o xmtest mtest.o xmdb.o xmidl.o -pthread $(COV_FLAGS)
 
 xmdb.o: mdb.c lmdb.h midl.h
 	$(CC) $(CFLAGS) -fPIC $(CPPFLAGS) -O0 $(COV_FLAGS) -c mdb.c -o $@
