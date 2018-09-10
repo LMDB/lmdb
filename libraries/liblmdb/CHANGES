@@ -1,6 +1,11 @@
 LMDB 0.9 Change Log
 
 LMDB 0.9.23 Engineering
+	ITS#8756 Fix loose pages in dirty list
+	ITS#8831 Fix mdb_load flag init
+	ITS#8844 Fix mdb_env_close in forked process
+	Documentation
+		ITS#8908 GET_MULTIPLE etc don't change passed in key
 
 LMDB 0.9.22 Release (2018/03/22)
 	Fix MDB_DUPSORT alignment bug (ITS#8819)
