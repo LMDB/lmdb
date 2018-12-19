@@ -1,6 +1,6 @@
 LMDB 0.9 Change Log
 
-LMDB 0.9.23 Engineering
+LMDB 0.9.23 Release (2018/12/19)
 	ITS#8756 Fix loose pages in dirty list
 	ITS#8831 Fix mdb_load flag init
 	ITS#8844 Fix mdb_env_close in forked process
