@@ -386,7 +386,6 @@ int main(int argc, char *argv[])
 	while(!Eof) {
 		MDB_val key, data;
 		int batch = 0;
-		flags = 0;
 		int appflag;
 
 		if (!dohdr) {
