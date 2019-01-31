@@ -1,6 +1,7 @@
 LMDB 0.9 Change Log
 
 LMDB 0.9.24 Engineering
+	ITS#8969 Tweak mdb_page_split
 
 LMDB 0.9.23 Release (2018/12/19)
 	ITS#8756 Fix loose pages in dirty list
