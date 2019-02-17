@@ -4741,7 +4741,7 @@ mdb_env_open2(MDB_env *env, int prev)
 		env->me_pidquery = PROCESS_QUERY_INFORMATION;
 	/* Grab functions we need from NTDLL */
 	if (!NtCreateSection) {
-		HMODULE h = GetModuleHandle("NTDLL.DLL");
+		HMODULE h = GetModuleHandleW(L"NTDLL.DLL");
 		if (!h)
 			return MDB_PROBLEM;
 		NtClose = (NtCloseFunc *)GetProcAddress(h, "NtClose");
