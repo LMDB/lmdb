@@ -2934,6 +2934,13 @@ mdb_txn_id(MDB_txn *txn)
     return txn->mt_txnid;
 }
 
+int mdb_txn_flags(MDB_txn *txn, unsigned int *flags)
+{
+    if(!txn) return EINVAL;
+    *flags = txn->mt_flags & MDB_RDONLY;
+    return MDB_SUCCESS;
+}
+
 /** Export or close DBI handles opened in this txn. */
 static void
 mdb_dbis_update(MDB_txn *txn, int keep)

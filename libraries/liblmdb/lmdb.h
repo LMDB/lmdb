@@ -989,6 +989,14 @@ MDB_env *mdb_txn_env(MDB_txn *txn);
 	 */
 size_t mdb_txn_id(MDB_txn *txn);
 
+	/** @brief Retrieve the transaction's flags
+	 *
+	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
+	 * @param[out] flags Address where the flags will be returned.
+	 * @return A non-zero error value on failure and 0 on success.
+	 */
+int mdb_txn_flags(MDB_txn *txn, unsigned int *flags);
+
 	/** @brief Commit all the operations of a transaction into the database.
 	 *
 	 * The transaction handle is freed. It and its cursors must not be used
