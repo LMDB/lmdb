@@ -1,5 +1,8 @@
 LMDB 0.9 Change Log
 
+LMDB 0.9.25 Engineering
+	ITS#9068 fix mdb_dump/load backslashes in printable content
+
 LMDB 0.9.24 Release (2019/07/24)
 	ITS#8969 Tweak mdb_page_split
 	ITS#8975 WIN32 fix writemap set_mapsize crash
