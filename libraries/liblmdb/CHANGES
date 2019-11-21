@@ -2,6 +2,7 @@ LMDB 0.9 Change Log
 
 LMDB 0.9.25 Engineering
 	ITS#9068 fix mdb_dump/load backslashes in printable content
+	ITS#9118 add MAP_NOSYNC for FreeBSD
 
 LMDB 0.9.24 Release (2019/07/24)
 	ITS#8969 Tweak mdb_page_split
