@@ -4010,7 +4010,7 @@ mdb_env_map(MDB_env *env, void *addr)
 	if (rc)
 		return rc;
 #else
-	int mmap_flags = MAP_SHARED:
+	int mmap_flags = MAP_SHARED;
 	int prot = PROT_READ;
 #ifdef MAP_NOSYNC	/* Used on FreeBSD */
 	if (flags & MDB_NOSYNC)
