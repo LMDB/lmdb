@@ -3570,12 +3570,12 @@ mdb_txn_end(MDB_txn *txn, unsigned mode)
 			txn->mt_parent->mt_flags &= ~MDB_TXN_HAS_CHILD;
 			env->me_pgstate = ((MDB_ntxn *)txn)->mnt_pgstate;
 			mdb_midl_free(txn->mt_free_pgs);
-			mdb_midl_free(txn->mt_spill_pgs);
-#if OVERFLOW_NOTYET
-			mdb_mid2l_free(txn->mt_dirty_ovs);
-#endif
 			free(txn->mt_u.dirty_list);
 		}
+		mdb_midl_free(txn->mt_spill_pgs);
+#if OVERFLOW_NOTYET
+		mdb_mid2l_free(txn->mt_dirty_ovs);
+#endif
 
 		mdb_midl_free(pghead);
 	}
