@@ -1,6 +1,6 @@
 LMDB 0.9 Change Log
 
-LMDB 0.9.25 Engineering
+LMDB 0.9.25 Release (2020/01/30)
 	ITS#9068 fix mdb_dump/load backslashes in printable content
 	ITS#9118 add MAP_NOSYNC for FreeBSD
 	ITS#9155 free mt_spill_pgs in non-nested txn on end
