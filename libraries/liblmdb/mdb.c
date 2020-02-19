@@ -4760,7 +4760,14 @@ mdb_env_map(MDB_env *env, void *addr)
 		alloctype = MEM_RESERVE;
 	}
 
+#ifdef MDB_FIXEDSIZE
+	LARGE_INTEGER fsize;
+	fsize.LowPart = msize & 0xffffffff;
+	fsize.HighPart = msize >> 16 >> 16;
+	rc = NtCreateSection(&mh, access, NULL, &fsize, secprot, SEC_RESERVE, env->me_fd);
+#else
 	rc = NtCreateSection(&mh, access, NULL, NULL, secprot, SEC_RESERVE, env->me_fd);
+#endif
 	if (rc)
 		return mdb_nt2win32(rc);
 	map = addr;
