@@ -1493,7 +1493,7 @@ struct MDB_env {
 	MDB_txn		*me_txn;		/**< current write transaction */
 	MDB_txn		*me_txn0;		/**< prealloc'd write transaction */
 	mdb_size_t	me_mapsize;		/**< size of the data memory map */
-	off_t		me_size;		/**< current file size */
+	size_t		me_size;		/**< current file size */
 	pgno_t		me_maxpg;		/**< me_mapsize / me_psize */
 	MDB_dbx		*me_dbxs;		/**< array of static DB info */
 	uint16_t	*me_dbflags;	/**< array of flags from MDB_db.md_flags */
@@ -3662,7 +3662,7 @@ mdb_page_flush(MDB_txn *txn, int keep)
 	unsigned	psize = env->me_psize, j;
 	int			i, pagecount = dl[0].mid, rc;
 	size_t		size = 0;
-	off_t		pos = 0;
+	size_t		pos = 0;
 	pgno_t		pgno = 0;
 	MDB_page	*dp = NULL;
 #ifdef _WIN32
@@ -3675,7 +3675,7 @@ mdb_page_flush(MDB_txn *txn, int keep)
 	HANDLE fd = env->me_fd;
 #endif
 	ssize_t		wsize = 0, wres;
-	off_t		wpos = 0, next_pos = 1; /* impossible pos, so pos != next_pos */
+	size_t		wpos = 0, next_pos = 1; /* impossible pos, so pos != next_pos */
 	int			n = 0;
 
 	j = i = keep;
@@ -4269,7 +4269,7 @@ mdb_env_write_meta(MDB_txn *txn)
 	MDB_meta	meta, metab, *mp;
 	unsigned flags;
 	mdb_size_t mapsize;
-	off_t off;
+	size_t off;
 	int rc, len, toggle;
 	char *ptr;
 	HANDLE mfd;
@@ -5277,7 +5277,7 @@ mdb_env_setup_locks(MDB_env *env, MDB_name *fname, int mode, int *excl)
 	union semun semu;
 #endif
 	int rc;
-	off_t size, rsize;
+	size_t size, rsize;
 
 	rc = mdb_fopen(env, fname, MDB_O_LOCKS, mode, &env->me_lfd);
 	if (rc) {
@@ -6148,7 +6148,7 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pg0, MDB_page **ret)
 		len, &off, &len, ViewUnmap, (env->me_flags & MDB_RDONLY) ? 0 : MEM_RESERVE, PAGE_READONLY); \
 	if (rc) rc = mdb_nt2win32(rc)
 #else
-	off_t off;
+	size_t off;
 	size_t len;
 #define SET_OFF(off,val)	off = val
 #define MAP(rc,env,addr,len,off)	\
