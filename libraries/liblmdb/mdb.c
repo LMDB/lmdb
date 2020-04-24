@@ -96,7 +96,7 @@ static NtCloseFunc *NtClose;
 #  define SSIZE_MAX	INT_MAX
 # endif
 #endif
-#define MDB_OFF_T	LARGE_INTEGER
+#define MDB_OFF_T	int64_t
 #else
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -6146,7 +6146,7 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pg0, MDB_page **ret)
 	pgno_t pgno;
 	int rc, retries = 1;
 #ifdef _WIN32
-	MDB_OFF_T off;
+	LARGE_INTEGER off;
 	SIZE_T len;
 #define SET_OFF(off,val)	off.QuadPart = val
 #define MAP(rc,env,addr,len,off)	\
@@ -6155,7 +6155,7 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pg0, MDB_page **ret)
 		len, &off, &len, ViewUnmap, (env->me_flags & MDB_RDONLY) ? 0 : MEM_RESERVE, PAGE_READONLY); \
 	if (rc) rc = mdb_nt2win32(rc)
 #else
-	MDB_OFF_T off;
+	off_t off;
 	size_t len;
 #define SET_OFF(off,val)	off = val
 #define MAP(rc,env,addr,len,off)	\
