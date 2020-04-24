@@ -4762,6 +4762,11 @@ mdb_env_map(MDB_env *env, void *addr)
 		alloctype = MEM_RESERVE;
 	}
 
+	/** Some users are afraid of seeing their disk space getting used
+	 * all at once, so the default is now to do incremental file growth.
+	 * But that has a large performance impact, so give the option of
+	 * allocating the file up front.
+	 */
 #ifdef MDB_FIXEDSIZE
 	LARGE_INTEGER fsize;
 	fsize.LowPart = msize & 0xffffffff;
