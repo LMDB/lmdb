@@ -610,7 +610,7 @@ int  mdb_env_create(MDB_env **env);
 	 *	<li>#MDB_NOTLS
 	 *		Don't use Thread-Local Storage. Tie reader locktable slots to
 	 *		#MDB_txn objects instead of to threads. I.e. #mdb_txn_reset() keeps
-	 *		the slot reseved for the #MDB_txn object. A thread may use parallel
+	 *		the slot reserved for the #MDB_txn object. A thread may use parallel
 	 *		read-only transactions. A read-only transaction may span threads if
 	 *		the user synchronizes its use. Applications that multiplex many
 	 *		user threads over individual OS threads need this option. Such an
