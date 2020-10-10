@@ -1446,6 +1446,7 @@ struct MDB_txn {
 #define MDB_TXN_DIRTY		0x04		/**< must write, even if dirty list is empty */
 #define MDB_TXN_SPILLS		0x08		/**< txn or a parent has spilled pages */
 #define MDB_TXN_HAS_CHILD	0x10		/**< txn has an #MDB_txn.%mt_child */
+#define MDB_TXN_DIRTYNUM	0x20		/**< dirty list uses nump list */
 	/** most operations on the txn are currently illegal */
 #define MDB_TXN_BLOCKED		(MDB_TXN_FINISHED|MDB_TXN_ERROR|MDB_TXN_HAS_CHILD)
 /** @} */
@@ -1620,6 +1621,7 @@ struct MDB_env {
 	 *	Unused except for a dummy element when #MDB_WRITEMAP.
 	 */
 	MDB_ID2L	me_dirty_list;
+	int			*me_dirty_nump;
 	/** Max number of freelist items that can fit in a single overflow page */
 	int			me_maxfree_1pg;
 	/** Max size of a node on a page */
@@ -1630,8 +1632,8 @@ struct MDB_env {
 	int		me_live_reader;		/**< have liveness lock in reader table */
 #ifdef _WIN32
 	int		me_pidquery;		/**< Used in OpenProcess */
-	OVERLAPPED	*ov;			/**< Used for for overlapping I/O requests */
-	int		ovs;				/**< Count of OVERLAPPEDs */
+	OVERLAPPED		*me_ov;			/**< Used for overlapping I/O requests */
+	int		me_ovs;				/**< Count of MDB_overlaps */
 #endif
 #ifdef MDB_USE_POSIX_MUTEX	/* Posix mutexes reside in shared mem */
 #	define		me_rmutex	me_txns->mti_rmutex /**< Shared reader lock */
@@ -2202,8 +2204,16 @@ mdb_dlist_free(MDB_txn *txn)
 	MDB_ID2L dl = txn->mt_u.dirty_list;
 	unsigned i, n = dl[0].mid;
 
-	for (i = 1; i <= n; i++) {
-		mdb_dpage_free(env, dl[i].mptr);
+	if (txn->mt_flags & MDB_TXN_DIRTYNUM) {
+		int *dl_nump = env->me_dirty_nump;
+		for (i = 1; i <= n; i++) {
+			mdb_dpage_free_n(env, dl[i].mptr, dl_nump[i]);
+		}
+		txn->mt_flags ^= MDB_TXN_DIRTYNUM;
+	} else {
+		for (i = 1; i <= n; i++) {
+			mdb_dpage_free(env, dl[i].mptr);
+		}
 	}
 	dl[0].mid = 0;
 }
@@ -3912,18 +3922,17 @@ mdb_page_flush(MDB_txn *txn, int keep)
 	MDB_env		*env = txn->mt_env;
 	MDB_ID2L	dl = txn->mt_u.dirty_list;
 	unsigned	psize = env->me_psize, j;
-	int			i, pagecount = dl[0].mid, rc;
+	int			i, pagecount = dl[0].mid, rc, *dl_nump, nump = 1;
 	size_t		size = 0;
 	MDB_OFF_T	pos = 0;
 	pgno_t		pgno = 0;
 	MDB_page	*dp = NULL;
 #if MDB_RPAGE_CACHE
-	int			nump = 1;
 	MDB_page	*encp;
 #endif
 #ifdef _WIN32
-	OVERLAPPED	ov;
-	MDB_page    *wdp;
+	OVERLAPPED	*ov, *this_ov;
+	MDB_page	*wdp;
 	int async_i = 0;
 	HANDLE fd = (env->me_flags & MDB_NOSYNC) ? env->me_fd : env->me_ovfd;
 #else
@@ -3946,25 +3955,35 @@ mdb_page_flush(MDB_txn *txn, int keep)
 		goto done;
 	}
 
+	/* setup nump list, flag that it's in use */
+	dl_nump = env->me_dirty_nump;
+	for (n=1; n<=pagecount; n++) {
+		dp = dl[n].mptr;
+		dl_nump[n] = IS_OVERFLOW(dp) ? dp->mp_pages : 1;
+	}
+	n = 0;
+	txn->mt_flags |= MDB_TXN_DIRTYNUM;
+
 #ifdef _WIN32
-	if (pagecount - keep >= env->ovs) {
+	if (pagecount - keep >= env->me_ovs) {
 		/* ran out of room in ov array, and re-malloc, copy handles and free previous */
 		int ovs = (pagecount - keep) * 1.5; /* provide extra padding to reduce number of re-allocations */
 		int new_size = ovs * sizeof(OVERLAPPED);
 		ov = malloc(new_size);
 		if (ov == NULL)
 			return ENOMEM;
-		int previous_size = env->ovs * sizeof(OVERLAPPED);
-		memcpy(ov, env->ov, previous_size); /* Copy previous OVERLAPPED data to retain event handles */
+		int previous_size = env->me_ovs * sizeof(OVERLAPPED);
+		memcpy(ov, env->me_ov, previous_size); /* Copy previous OVERLAPPED data to retain event handles */
 		/* And clear rest of memory */
-		memset(&ov[env->ovs], 0, new_size - previous_size);
-		if (env->ovs > 0) {
-			free(env->ov); /* release previous allocation */
+		memset(&ov[env->me_ovs], 0, new_size - previous_size);
+		if (env->me_ovs > 0) {
+			free(env->me_ov); /* release previous allocation */
 		}
 
-		env->ov = ov;
-		env->ovs = ovs;
+		env->me_ov = ov;
+		env->me_ovs = ovs;
 	}
+	ov = env->me_ov;
 #endif
 
 	/* Write the pages */
@@ -3982,15 +4001,8 @@ mdb_page_flush(MDB_txn *txn, int keep)
 			dp->mp_txnid = txn->mt_txnid;
 			pos = pgno * psize;
 			size = psize;
-#if MDB_RPAGE_CACHE
-			nump = 1;
-			if (IS_OVERFLOW(dp)) {
-				nump = dp->mp_pages;
-				size *= dp->mp_pages;
-			}
-#else
-			if (IS_OVERFLOW(dp)) size *= dp->mp_pages;
-#endif
+			nump = dl_nump[i];
+			size *= nump;
 		}
 		/* Write up to MDB_COMMIT_PAGES dirty pages at a time. */
 		if (pos!=next_pos || n==MDB_COMMIT_PAGES || wsize+size>MAX_WRITE
@@ -4013,7 +4025,7 @@ retry_write:
 				rc = 0;
 				/* Write previous page(s) */
 #ifdef _WIN32
-				OVERLAPPED *this_ov = &ov[async_i];
+				this_ov = &ov[async_i];
 				/* Clear status, and keep hEvent, we reuse that */
 				this_ov->Internal = 0;
 				this_ov->Offset = wpos & 0xffffffff;
@@ -4033,6 +4045,7 @@ retry_write:
 						DPRINTF(("WriteFile: %d", rc));
 						return rc;
 					}
+					rc = 0;
 				}
 				async_i++;
 #else /* _WIN32 */
@@ -4067,15 +4080,6 @@ retry_seek:
 					}
 				}
 #endif /* _WIN32 */
-#if MDB_RPAGE_CACHE
-				if (env->me_encfunc) {
-					int j, num1;
-					for (j=0; j<n; j++) {
-						num1 = 1 + (iov[j].iov_len > psize);
-						mdb_dpage_free_n(env, (MDB_page *)iov[j].iov_base, num1);
-					}
-				}
-#endif
 				if (rc)
 					return rc;
 				n = 0;
@@ -4096,7 +4100,9 @@ retry_seek:
 			out.mv_size = size;
 			out.mv_data = encp;
 			env->me_encfunc(&in, &out, env->me_enckey, 1);
+			mdb_dpage_free_n(env, dp, nump);
 			dp = encp;
+			dl[i].mptr = dp;
 		}
 #endif
 #ifdef _WIN32
@@ -4143,9 +4149,6 @@ retry_seek:
 
     if (!(env->me_flags & MDB_WRITEMAP)) {
         /* Don't free pages when using writemap (can only get here in NOSYNC mode in Windows)
-         * MIPS has cache coherency issues, this is a no-op everywhere else
-         * Note: for any size >= on-chip cache size, entire on-chip cache is
-         * flushed.
          */
 		for (i = keep; ++i <= pagecount; ) {
 			dp = dl[i].mptr;
@@ -4155,9 +4158,10 @@ retry_seek:
 				dl[j].mid = dp->mp_pgno;
 				continue;
 			}
-			mdb_dpage_free(env, dp);
+			mdb_dpage_free_n(env, dp, dl_nump[i]);
 		}
 	}
+	txn->mt_flags ^= MDB_TXN_DIRTYNUM;
 
 done:
 	i--;
@@ -5205,7 +5209,7 @@ mdb_env_open2(MDB_env *env, int prev)
 		if (!NtCreateSection)
 			return MDB_PROBLEM;
 	}
-	env->ovs = 0;
+	env->me_ovs = 0;
 #endif /* _WIN32 */
 
 #ifdef BROKEN_FDATASYNC
@@ -6010,6 +6014,8 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 		if (!((env->me_free_pgs = mdb_midl_alloc(MDB_IDL_UM_MAX)) &&
 			  (env->me_dirty_list = calloc(dl_size, sizeof(MDB_ID2)))))
 			rc = ENOMEM;
+		if (env->me_dirty_list && !(env->me_dirty_nump = malloc(dl_size * sizeof(int))))
+			rc = ENOMEM;
 	}
 
 	env->me_flags = flags;
@@ -6142,6 +6148,7 @@ mdb_env_close_active(MDB_env *env, int excl)
 	free(env->me_dbflags);
 	free(env->me_path);
 	free(env->me_dirty_list);
+	free(env->me_dirty_nump);
 #if MDB_RPAGE_CACHE
 	if (MDB_REMAPPING(env->me_flags)) {
 	if (env->me_txn0 && env->me_txn0->mt_rpages)
@@ -6180,11 +6187,11 @@ mdb_env_close_active(MDB_env *env, int excl)
 	if (env->me_mfd != INVALID_HANDLE_VALUE)
 		(void) close(env->me_mfd);
 #ifdef _WIN32
-	if (env->ovs > 0) {
-		for (i = 0; i < env->ovs; i++) {
-			CloseHandle(env->ov[i].hEvent);
+	if (env->me_ovs > 0) {
+		for (i = 0; i < env->me_ovs; i++) {
+			CloseHandle(env->me_ov[i].hEvent);
 		}
-		free(env->ov);
+		free(env->me_ov);
 	}
 	if (env->me_ovfd != INVALID_HANDLE_VALUE)
 		(void) close(env->me_ovfd);
