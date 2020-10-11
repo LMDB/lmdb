@@ -1828,6 +1828,8 @@ static char *const mdb_errstr[] = {
 	"MDB_BAD_VALSIZE: Unsupported size of key/DB name/data, or wrong DUPFIXED size",
 	"MDB_BAD_DBI: The specified DBI handle was closed/changed unexpectedly",
 	"MDB_PROBLEM: Unexpected problem - txn should abort",
+	"MDB_BAD_CHECKSUM: Page checksum mismatch",
+	"MDB_CRYPTO_FAIL: Page encryption or decryption failed",
 };
 
 char *
