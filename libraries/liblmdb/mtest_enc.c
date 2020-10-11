@@ -21,9 +21,10 @@
 #define CHECK(test, msg) ((test) ? (void)0 : ((void)fprintf(stderr, \
 	"%s:%d: %s: %s\n", __FILE__, __LINE__, msg, mdb_strerror(rc)), abort()))
 
-static void encfunc(const MDB_val *src, MDB_val *dst, const MDB_val *key, int encdec)
+static int encfunc(const MDB_val *src, MDB_val *dst, const MDB_val *key, int encdec)
 {
 	chacha8(src->mv_data, src->mv_size, key[0].mv_data, key[1].mv_data, dst->mv_data);
+	return 0;
 }
 
 int main(int argc,char * argv[])
@@ -36,11 +37,10 @@ int main(int argc,char * argv[])
 	MDB_stat mst;
 	MDB_cursor *cursor, *cur2;
 	MDB_cursor_op op;
-	MDB_val enckey[2];
+	MDB_val enckey;
 	int count;
 	int *values;
 	char sval[32] = "";
-	char eiv[] = {3, 1, 4, 1, 5, 9, 2, 6};
 	char ekey[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
 		17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32};
 
@@ -53,15 +53,13 @@ int main(int argc,char * argv[])
 			values[i] = rand()%1024;
 	    }
     
-		enckey[0].mv_data = ekey;
-		enckey[0].mv_size = sizeof(ekey);
-		enckey[1].mv_data = eiv;
-		enckey[1].mv_size = sizeof(eiv);
+		enckey.mv_data = ekey;
+		enckey.mv_size = sizeof(ekey);
 
 		E(mdb_env_create(&env));
 		E(mdb_env_set_maxreaders(env, 1));
 		E(mdb_env_set_mapsize(env, 10485760));
-		E(mdb_env_set_encrypt(env, encfunc, enckey));
+		E(mdb_env_set_encrypt(env, encfunc, &enckey, 0));
 		E(mdb_env_open(env, "./testdb", 0 /*|MDB_NOSYNC*/, 0664));
 
 		E(mdb_txn_begin(env, NULL, 0, &txn));

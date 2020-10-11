@@ -317,14 +317,26 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
  *
  * Encrypt or decrypt the data in src and store the result in dst using the
  * provided key. The result must be the same number of bytes as the input.
- * The input size will always be a multiple of the page size.
  * @param[in] src The input data to be transformed.
  * @param[out] dst Storage for the result.
- * @param[in] key An array of two values: key[0] is the encryption key,
- * and key[1] is the initialization vector.
+ * @param[in] key An array of three values: key[0] is the encryption key,
+ * key[1] is the initialization vector, and key[2] is the authentication
+ * data, if any.
  * @param[in] encdec 1 to encrypt, 0 to decrypt.
+ * @return A non-zero error value on failure and 0 on success.
  */
-typedef void (MDB_enc_func)(const MDB_val *src, MDB_val *dst, const MDB_val *key, int encdec);
+typedef int (MDB_enc_func)(const MDB_val *src, MDB_val *dst, const MDB_val *key, int encdec);
+
+/** @brief A callback function used to checksum pages in the env.
+ *
+ * Compute the checksum of the data in src and store the result in dst,
+ * An optional key may be used with keyed hash algorithms.
+ * @param[in] src The input data to be transformed.
+ * @param[out] dst Storage for the result.
+ * @param[in] key An encryption key, if encryption was configured. This
+ * parameter will be NULL if there is no key.
+ */
+typedef void (MDB_sum_func)(const MDB_val *src, MDB_val *dst, const MDB_val *key);
 #endif
 
 /** @defgroup	mdb_env	Environment Flags
@@ -506,8 +518,12 @@ typedef enum MDB_cursor_op {
 #define MDB_BAD_DBI		(-30780)
 	/** Unexpected problem - txn should abort */
 #define MDB_PROBLEM		(-30779)
+	/** Page checksum incorrect */
+#define MDB_BAD_CHECKSUM	(-30778)
+	/** Encryption/decryption failed */
+#define MDB_CRYPTO_FAIL		(-30777)
 	/** The last defined error code */
-#define MDB_LAST_ERRCODE	MDB_PROBLEM
+#define MDB_LAST_ERRCODE	MDB_CRYPTO_FAIL
 /** @} */
 
 /** @brief Statistics for a database in the environment */
@@ -1017,11 +1033,22 @@ int  mdb_env_set_assert(MDB_env *env, MDB_assert_func *func);
 	 * It implicitly sets #MDB_REMAP_CHUNKS on the env.
 	 * @param[in] env An environment handle returned by #mdb_env_create().
 	 * @param[in] func An #MDB_enc_func function.
-	 * @param[in] key An array of two values: key[0] is the encryption key,
-	 * and key[1] is the initialization vector.
+	 * @param[in] key The encryption key.
+	 * @param[in] size The size of authentication data in bytes, if any.
+	 * Set this to zero for unauthenticated encryption mechanisms.
 	 * @return A non-zero error value on failure and 0 on success.
 	 */
-int mdb_env_set_encrypt(MDB_env *env, MDB_enc_func *func, const MDB_val *key);
+int mdb_env_set_encrypt(MDB_env *env, MDB_enc_func *func, const MDB_val *key, unsigned int size);
+
+	/** @brief Set checksums on an environment.
+	 *
+	 * This must be called before #mdb_env_open().
+	 * @param[in] env An environment handle returned by #mdb_env_create().
+	 * @param[in] func An #MDB_sum_func function.
+	 * @param[in] size The size of computed checksum values, in bytes.
+	 * @return A non-zero error value on failure and 0 on success.
+	 */
+int mdb_env_set_checksum(MDB_env *env, MDB_sum_func *func, unsigned int size);
 #endif
 
 	/** @brief Create a transaction for use with the environment.
