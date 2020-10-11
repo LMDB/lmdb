@@ -72,7 +72,7 @@ static int encfunc(const MDB_val *src, MDB_val *dst, const MDB_val *key, int enc
 	int ivl, outl, rc;
 	mdb_size_t *ptr;
 	EVP_CIPHER_CTX ctx = {0};
-	EVP_CHACHA_AEAD_CTX cactx = {0};
+	EVP_CHACHA_AEAD_CTX cactx;
 
 	ctx.cipher_data = &cactx;
 	ptr = key[1].mv_data;
