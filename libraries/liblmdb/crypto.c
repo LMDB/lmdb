@@ -20,29 +20,76 @@ static int str2key(const char *passwd, MDB_val *key)
 	return 0;
 }
 
+/* cheats - internal OpenSSL 1.1 structures */
+typedef struct evp_cipher_ctx_st {
+    const EVP_CIPHER *cipher;
+    ENGINE *engine;             /* functional reference if 'cipher' is
+                                 * ENGINE-provided */
+    int encrypt;                /* encrypt or decrypt */
+    int buf_len;                /* number we have left */
+    unsigned char oiv[EVP_MAX_IV_LENGTH]; /* original iv */
+    unsigned char iv[EVP_MAX_IV_LENGTH]; /* working iv */
+    unsigned char buf[EVP_MAX_BLOCK_LENGTH]; /* saved partial block */
+    int num;                    /* used by cfb/ofb/ctr mode */
+    /* FIXME: Should this even exist? It appears unused */
+    void *app_data;             /* application stuff */
+    int key_len;                /* May change for variable length cipher */
+    unsigned long flags;        /* Various flags */
+    void *cipher_data;          /* per EVP data */
+    int final_used;
+    int block_mask;
+    unsigned char final[EVP_MAX_BLOCK_LENGTH]; /* possible final block */
+} EVP_CIPHER_CTX;
+
+#define	CHACHA_KEY_SIZE	32
+#define CHACHA_CTR_SIZE	16
+#define CHACHA_BLK_SIZE	64
+#define POLY1305_BLOCK_SIZE	16
+
+typedef struct {
+    union {
+        double align;   /* this ensures even sizeof(EVP_CHACHA_KEY)%8==0 */
+        unsigned int d[CHACHA_KEY_SIZE / 4];
+    } key;
+    unsigned int  counter[CHACHA_CTR_SIZE / 4];
+    unsigned char buf[CHACHA_BLK_SIZE];
+    unsigned int  partial_len;
+} EVP_CHACHA_KEY;
+
+typedef struct {
+    EVP_CHACHA_KEY key;
+    unsigned int nonce[12/4];
+    unsigned char tag[POLY1305_BLOCK_SIZE];
+    unsigned char tls_aad[POLY1305_BLOCK_SIZE];
+    struct { uint64_t aad, text; } len;
+    int aad, mac_inited, tag_len, nonce_len;
+    size_t tls_payload_length;
+} EVP_CHACHA_AEAD_CTX;
+
 static int encfunc(const MDB_val *src, MDB_val *dst, const MDB_val *key, int encdec)
 {
 	unsigned char iv[12];
 	int ivl, outl, rc;
 	mdb_size_t *ptr;
-	EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+	EVP_CIPHER_CTX ctx = {0};
+	EVP_CHACHA_AEAD_CTX cactx = {0};
 
+	ctx.cipher_data = &cactx;
 	ptr = key[1].mv_data;
 	ivl = ptr[0] & 0xffffffff;
 	memcpy(iv, &ivl, 4);
 	memcpy(iv+4, ptr+1, sizeof(mdb_size_t));
-	EVP_CipherInit_ex(ctx, cipher, NULL, key[0].mv_data, iv, encdec);
-	EVP_CIPHER_CTX_set_padding(ctx, 0);
+	EVP_CipherInit_ex(&ctx, cipher, NULL, key[0].mv_data, iv, encdec);
+	EVP_CIPHER_CTX_set_padding(&ctx, 0);
 	if (!encdec) {
-		EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, key[2].mv_size, key[2].mv_data);
+		EVP_CIPHER_CTX_ctrl(&ctx, EVP_CTRL_AEAD_SET_TAG, key[2].mv_size, key[2].mv_data);
 	}
-	rc = EVP_CipherUpdate(ctx, dst->mv_data, &outl, src->mv_data, src->mv_size);
+	rc = EVP_CipherUpdate(&ctx, dst->mv_data, &outl, src->mv_data, src->mv_size);
 	if (rc)
-		rc = EVP_CipherFinal_ex(ctx, key[2].mv_data, &outl);
+		rc = EVP_CipherFinal_ex(&ctx, key[2].mv_data, &outl);
 	if (rc && encdec) {
-		EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, key[2].mv_size, key[2].mv_data);
+		EVP_CIPHER_CTX_ctrl(&ctx, EVP_CTRL_AEAD_GET_TAG, key[2].mv_size, key[2].mv_data);
 	}
-	EVP_CIPHER_CTX_free(ctx);
 	return rc == 0;
 }
 
