@@ -1830,6 +1830,7 @@ static char *const mdb_errstr[] = {
 	"MDB_PROBLEM: Unexpected problem - txn should abort",
 	"MDB_BAD_CHECKSUM: Page checksum mismatch",
 	"MDB_CRYPTO_FAIL: Page encryption or decryption failed",
+	"MDB_ENV_ENCRYPTION: Environment encryption mismatch",
 };
 
 char *
@@ -5338,7 +5339,7 @@ mdb_env_open2(MDB_env *env, int prev)
 		}
 	}
 	if ((env->me_flags ^ env->me_metas[0]->mm_flags) & MDB_ENCRYPT)
-		return MDB_INCOMPATIBLE;
+		return MDB_ENV_ENCRYPTION;
 
 #if MDB_RPAGE_CACHE
 	if (!newenv && env->me_sumfunc) {
@@ -6933,16 +6934,17 @@ static int mdb_page_encrypt(MDB_env *env, MDB_page *dp, MDB_page *encp, size_t s
 	int xsize = sizeof(pgno_t) + sizeof(txnid_t);
 	in.mv_size = size - xsize;
 	in.mv_data = (char *)dp + xsize;
+	out.mv_size = in.mv_size;
+	out.mv_data = (char *)encp + xsize;
 	if (env->me_esumsize) {
 		in.mv_size -= env->me_esumsize;
+		out.mv_size -= env->me_esumsize;
 		enckeys[2].mv_size = env->me_esumsize;
-		enckeys[2].mv_data = in.mv_data + in.mv_size;
+		enckeys[2].mv_data = out.mv_data + out.mv_size;
 	} else {
 		enckeys[2].mv_size = 0;
 		enckeys[2].mv_data = 0;
 	}
-	out.mv_size = in.mv_size;
-	out.mv_data = (char *)encp + xsize;
 	encp->mp_pgno = dp->mp_pgno;
 	encp->mp_txnid = dp->mp_txnid;
 	enckeys[0] = env->me_enckey;

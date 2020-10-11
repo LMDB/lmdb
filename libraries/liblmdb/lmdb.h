@@ -522,8 +522,10 @@ typedef enum MDB_cursor_op {
 #define MDB_BAD_CHECKSUM	(-30778)
 	/** Encryption/decryption failed */
 #define MDB_CRYPTO_FAIL		(-30777)
+	/** Environment encryption mismatch */
+#define MDB_ENV_ENCRYPTION	(-30776)
 	/** The last defined error code */
-#define MDB_LAST_ERRCODE	MDB_CRYPTO_FAIL
+#define MDB_LAST_ERRCODE	MDB_ENV_ENCRYPTION
 /** @} */
 
 /** @brief Statistics for a database in the environment */
@@ -1722,6 +1724,31 @@ int	mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx);
 	 */
 int	mdb_reader_check(MDB_env *env, int *dead);
 /**	@} */
+
+/** @defgroup crypto LMDB Encryption Helper API
+ *	@{
+ *	@brief Helpers for setting up encryption
+ */
+
+	/** @brief A function for converting a string into an encryption key.
+	 *
+	 * @param[in] passwd The string to be converted.
+	 * @param[in,out] key The resulting key. The caller must
+	 * provide the space for the key.
+	 * @return 0 on success, non-zero on failure.
+	 */
+typedef int (MDB_str2key_func)(const char *passwd, MDB_val *key);
+
+typedef struct MDB_crypto_funcs {
+	MDB_str2key_func *mcf_str2key;
+	MDB_enc_func *mcf_encfunc;
+	MDB_sum_func *mcf_sumfunc;
+	int mcf_keysize;
+	int mcf_esumsize;
+	int mcf_sumsize;
+} MDB_crypto_funcs;
+
+typedef MDB_crypto_funcs *(MDB_crypto_hooks)();
 
 #ifdef __cplusplus
 }
