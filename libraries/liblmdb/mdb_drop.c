@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include "lmdb.h"
+#include "module.h"
 
 static volatile sig_atomic_t gotsig;
 
@@ -29,7 +30,7 @@ static void dumpsig( int sig )
 
 static void usage(char *prog)
 {
-	fprintf(stderr, "usage: %s [-V] [-n] [-d] [-s subdb] dbpath\n", prog);
+	fprintf(stderr, "usage: %s [-V] [-n] [-d] [-m module [-w password]] [-s subdb] dbpath\n", prog);
 	exit(EXIT_FAILURE);
 }
 
@@ -43,6 +44,9 @@ int main(int argc, char *argv[])
 	char *envname;
 	char *subname = NULL;
 	int envflags = 0, delete = 0;
+	char *module = NULL, *password = NULL;
+	void *mlm = NULL;
+	char *errmsg;
 
 	if (argc < 2) {
 		usage(prog);
@@ -54,7 +58,7 @@ int main(int argc, char *argv[])
 	 * -V: print version and exit
 	 * (default) empty the main DB
 	 */
-	while ((i = getopt(argc, argv, "dns:V")) != EOF) {
+	while ((i = getopt(argc, argv, "dm:ns:w:V")) != EOF) {
 		switch(i) {
 		case 'V':
 			printf("%s\n", MDB_VERSION_STRING);
@@ -68,6 +72,12 @@ int main(int argc, char *argv[])
 			break;
 		case 's':
 			subname = optarg;
+			break;
+		case 'm':
+			module = optarg;
+			break;
+		case 'w':
+			password = optarg;
 			break;
 		default:
 			usage(prog);
@@ -91,6 +101,13 @@ int main(int argc, char *argv[])
 	if (rc) {
 		fprintf(stderr, "mdb_env_create failed, error %d %s\n", rc, mdb_strerror(rc));
 		return EXIT_FAILURE;
+	}
+	if (module) {
+		mlm = mlm_setup(env, module, password, &errmsg);
+		if (!mlm) {
+			fprintf(stderr, "Failed to load crypto module: %s\n", errmsg);
+			goto env_close;
+		}
 	}
 
 	mdb_env_set_maxdbs(env, 2);
@@ -130,6 +147,8 @@ txn_abort:
 		mdb_txn_abort(txn);
 env_close:
 	mdb_env_close(env);
+	if (mlm)
+		mlm_unload(mlm);
 
 	return rc ? EXIT_FAILURE : EXIT_SUCCESS;
 }

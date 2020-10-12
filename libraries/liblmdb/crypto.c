@@ -1,3 +1,15 @@
+/* crypto.c - LMDB encryption helper module */
+/*
+ * Copyright 2020 Howard Chu, Symas Corp.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted only as authorized by the Symas
+ * Dual-Use License.
+ *
+ * A copy of this license is available in the file LICENSE in the
+ * source distribution.
+ */
 #include <string.h>
 
 #include <openssl/engine.h>
@@ -8,7 +20,7 @@ MDB_crypto_hooks MDB_crypto;
 
 static EVP_CIPHER *cipher;
 
-static int str2key(const char *passwd, MDB_val *key)
+static int mcf_str2key(const char *passwd, MDB_val *key)
 {
 	unsigned int size;
 	EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
@@ -66,7 +78,7 @@ typedef struct {
     size_t tls_payload_length;
 } EVP_CHACHA_AEAD_CTX;
 
-static int encfunc(const MDB_val *src, MDB_val *dst, const MDB_val *key, int encdec)
+static int mcf_encfunc(const MDB_val *src, MDB_val *dst, const MDB_val *key, int encdec)
 {
 	unsigned char iv[12];
 	int ivl, outl, rc;
@@ -93,17 +105,17 @@ static int encfunc(const MDB_val *src, MDB_val *dst, const MDB_val *key, int enc
 	return rc == 0;
 }
 
-static const MDB_crypto_funcs table = {
-	str2key,
-	encfunc,
+static const MDB_crypto_funcs mcf_table = {
+	mcf_str2key,
+	mcf_encfunc,
 	NULL,
-	32,
-	16,
+	CHACHA_KEY_SIZE,
+	POLY1305_BLOCK_SIZE,
 	0
 };
 
 MDB_crypto_funcs *MDB_crypto()
 {
 	cipher = (EVP_CIPHER *)EVP_chacha20_poly1305();
-	return (MDB_crypto_funcs *)&table;
+	return (MDB_crypto_funcs *)&mcf_table;
 }

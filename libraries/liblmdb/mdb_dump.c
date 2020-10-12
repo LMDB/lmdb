@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include "lmdb.h"
+#include "module.h"
 
 #define Yu	MDB_PRIy(u)
 
@@ -153,7 +154,7 @@ static int dumpit(MDB_txn *txn, MDB_dbi dbi, char *name)
 
 static void usage(char *prog)
 {
-	fprintf(stderr, "usage: %s [-V] [-f output] [-l] [-n] [-p] [-v] [-a|-s subdb] dbpath\n", prog);
+	fprintf(stderr, "usage: %s [-V] [-f output] [-l] [-n] [-p] [-v] [-m module [-w password]] [-a|-s subdb] dbpath\n", prog);
 	exit(EXIT_FAILURE);
 }
 
@@ -167,6 +168,8 @@ int main(int argc, char *argv[])
 	char *envname;
 	char *subname = NULL;
 	int alldbs = 0, envflags = 0, list = 0;
+	char *module = NULL, *password = NULL, *errmsg;
+	void *mlm = NULL;
 
 	if (argc < 2) {
 		usage(prog);
@@ -181,7 +184,7 @@ int main(int argc, char *argv[])
 	 * -V: print version and exit
 	 * (default) dump only the main DB
 	 */
-	while ((i = getopt(argc, argv, "af:lnps:vV")) != EOF) {
+	while ((i = getopt(argc, argv, "af:lm:nps:vw:V")) != EOF) {
 		switch(i) {
 		case 'V':
 			printf("%s\n", MDB_VERSION_STRING);
@@ -216,6 +219,12 @@ int main(int argc, char *argv[])
 				usage(prog);
 			subname = optarg;
 			break;
+		case 'm':
+			module = optarg;
+			break;
+		case 'w':
+			password = optarg;
+			break;
 		default:
 			usage(prog);
 		}
@@ -238,6 +247,14 @@ int main(int argc, char *argv[])
 	if (rc) {
 		fprintf(stderr, "mdb_env_create failed, error %d %s\n", rc, mdb_strerror(rc));
 		return EXIT_FAILURE;
+	}
+
+	if (module) {
+		mlm = mlm_setup(env, module, password, &errmsg);
+		if (!mlm) {
+			fprintf(stderr, "Failed to load crypto module: %s\n", errmsg);
+			goto env_close;
+		}
 	}
 
 	if (alldbs || subname) {

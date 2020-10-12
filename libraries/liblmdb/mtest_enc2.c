@@ -15,13 +15,13 @@
 #include <stdlib.h>
 #include <time.h>
 #include "lmdb.h"
+#include "module.h"
 
 #define E(expr) CHECK((rc = (expr)) == MDB_SUCCESS, #expr)
 #define RES(err, expr) ((rc = expr) == (err) || (CHECK(!rc, #expr), 0))
 #define CHECK(test, msg) ((test) ? (void)0 : ((void)fprintf(stderr, \
 	"%s:%d: %s: %s\n", __FILE__, __LINE__, msg, mdb_strerror(rc)), abort()))
 
-extern MDB_crypto_hooks MDB_crypto;
 MDB_crypto_funcs *cf;
 
 int main(int argc,char * argv[])
@@ -40,6 +40,8 @@ int main(int argc,char * argv[])
 	char sval[32] = "";
 	char password[] = "This is my passphrase for now...";
 	char *ekey;
+	void *lm;
+	char *errmsg;
 
 	srand(time(NULL));
 
@@ -50,7 +52,11 @@ int main(int argc,char * argv[])
 			values[i] = rand()%1024;
 	    }
     
-		cf = MDB_crypto();
+		lm = lm_load("./crypto.lm", NULL, &cf, &errmsg);
+		if (!lm) {
+			fprintf(stderr,"Failed to load crypto module: %s\n", errmsg);
+			exit(1);
+		}
 
 		E(mdb_env_create(&env));
 		E(mdb_env_set_maxreaders(env, 1));
@@ -193,6 +199,7 @@ int main(int argc,char * argv[])
 
 		mdb_dbi_close(env, dbi);
 		mdb_env_close(env);
+		lm_unload(lm);
 
 	return 0;
 }

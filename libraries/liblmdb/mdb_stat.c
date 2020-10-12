@@ -16,15 +16,14 @@
 #include <string.h>
 #include <unistd.h>
 #include "lmdb.h"
+#include "module.h"
 
 #define Z	MDB_FMT_Z
 #define Yu	MDB_PRIy(u)
 
 static void prstat(MDB_stat *ms)
 {
-#if 0
 	printf("  Page size: %u\n", ms->ms_psize);
-#endif
 	printf("  Tree depth: %u\n", ms->ms_depth);
 	printf("  Branch pages: %"Yu"\n",   ms->ms_branch_pages);
 	printf("  Leaf pages: %"Yu"\n",     ms->ms_leaf_pages);
@@ -34,7 +33,7 @@ static void prstat(MDB_stat *ms)
 
 static void usage(char *prog)
 {
-	fprintf(stderr, "usage: %s [-V] [-n] [-e] [-r[r]] [-f[f[f]]] [-v] [-a|-s subdb] dbpath\n", prog);
+	fprintf(stderr, "usage: %s [-V] [-n] [-e] [-r[r]] [-f[f[f]]] [-v] [-m module [-w password]] [-a|-s subdb] dbpath\n", prog);
 	exit(EXIT_FAILURE);
 }
 
@@ -50,6 +49,8 @@ int main(int argc, char *argv[])
 	char *envname;
 	char *subname = NULL;
 	int alldbs = 0, envinfo = 0, envflags = 0, freinfo = 0, rdrinfo = 0;
+	char *module = NULL, *password = NULL, *errmsg;
+	void *mlm = NULL;
 
 	if (argc < 2) {
 		usage(prog);
@@ -65,7 +66,7 @@ int main(int argc, char *argv[])
 	 * -V: print version and exit
 	 * (default) print stat of only the main DB
 	 */
-	while ((i = getopt(argc, argv, "Vaefnrs:v")) != EOF) {
+	while ((i = getopt(argc, argv, "Vaefm:nrs:vw:")) != EOF) {
 		switch(i) {
 		case 'V':
 			printf("%s\n", MDB_VERSION_STRING);
@@ -96,6 +97,12 @@ int main(int argc, char *argv[])
 				usage(prog);
 			subname = optarg;
 			break;
+		case 'm':
+			module = optarg;
+			break;
+		case 'w':
+			password = optarg;
+			break;
 		default:
 			usage(prog);
 		}
@@ -109,6 +116,14 @@ int main(int argc, char *argv[])
 	if (rc) {
 		fprintf(stderr, "mdb_env_create failed, error %d %s\n", rc, mdb_strerror(rc));
 		return EXIT_FAILURE;
+	}
+
+	if (module) {
+		mlm = mlm_setup(env, module, password, &errmsg);
+		if (!mlm) {
+			fprintf(stderr, "Failed to load crypto module: %s\n", errmsg);
+			goto env_close;
+		}
 	}
 
 	if (alldbs || subname) {
