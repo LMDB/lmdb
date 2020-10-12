@@ -1760,6 +1760,7 @@ typedef struct MDB_crypto_funcs {
 	 * @return A pointer to a #MDB_crypto_funcs structure.
 	 */
 typedef MDB_crypto_funcs *(MDB_crypto_hooks)(void);
+/**	@} */
 
 #ifdef __cplusplus
 }
