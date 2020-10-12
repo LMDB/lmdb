@@ -34,13 +34,11 @@ int main(int argc,char * argv[])
 	MDB_stat mst;
 	MDB_cursor *cursor, *cur2;
 	MDB_cursor_op op;
-	MDB_val enckey;
 	int count;
 	int *values;
 	char sval[32] = "";
 	char password[] = "This is my passphrase for now...";
-	char *ekey;
-	void *lm;
+	void *mlm;
 	char *errmsg;
 
 	srand(time(NULL));
@@ -52,28 +50,14 @@ int main(int argc,char * argv[])
 			values[i] = rand()%1024;
 	    }
     
-		lm = lm_load("./crypto.lm", NULL, &cf, &errmsg);
-		if (!lm) {
+		E(mdb_env_create(&env));
+		mlm = mlm_setup(env, "./crypto.lm", password, &errmsg);
+		if (!mlm) {
 			fprintf(stderr,"Failed to load crypto module: %s\n", errmsg);
 			exit(1);
 		}
-
-		E(mdb_env_create(&env));
 		E(mdb_env_set_maxreaders(env, 1));
 		E(mdb_env_set_mapsize(env, 10485760));
-		if (cf->mcf_sumfunc) {
-			E(mdb_env_set_checksum(env, cf->mcf_sumfunc, cf->mcf_sumsize));
-		}
-		if (cf->mcf_encfunc) {
-			ekey = malloc(cf->mcf_keysize);
-			enckey.mv_data = ekey;
-			enckey.mv_size = cf->mcf_keysize;
-			if (cf->mcf_str2key)
-				cf->mcf_str2key(password, &enckey);
-			else
-				strncpy(ekey, password, cf->mcf_keysize);
-			E(mdb_env_set_encrypt(env, cf->mcf_encfunc, &enckey, cf->mcf_esumsize));
-		}
 		E(mdb_env_open(env, "./testdb", 0 /*|MDB_NOSYNC*/, 0664));
 
 		E(mdb_txn_begin(env, NULL, 0, &txn));
@@ -199,7 +183,7 @@ int main(int argc,char * argv[])
 
 		mdb_dbi_close(env, dbi);
 		mdb_env_close(env);
-		lm_unload(lm);
+		mlm_unload(mlm);
 
 	return 0;
 }

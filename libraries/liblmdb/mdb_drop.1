@@ -12,6 +12,10 @@ mdb_drop \- LMDB database delete tool
 [\c
 .BR \-d ]
 [\c
+.BI \-m \ module
+[\c
+.BI \-w \ password\fR]]
+[\c
 .BI \-s \ subdb\fR]
 .BR \ envpath
 .SH DESCRIPTION
@@ -29,6 +33,15 @@ Operate on an LMDB database which does not use subdirectories.
 .TP
 .BR \-d
 Delete the specified database, don't just empty it.
+.TP
+.BI \-m \ module
+Load the specified dynamic module to utilize cryptographic functions.
+This is required to operate on environments that have been configured
+with page-level checksums or encryption.
+.TP
+.BI \-w \ password
+Specify the password for an encrypted environment. This is only
+used if a cryptography module has been loaded.
 .TP
 .BR \-s \ subdb
 Operate on a specific subdatabase. If no database is specified, only the main database is dropped.

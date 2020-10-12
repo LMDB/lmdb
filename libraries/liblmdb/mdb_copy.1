@@ -13,6 +13,10 @@ mdb_copy \- LMDB environment copy tool
 .BR \-n ]
 [\c
 .BR \-v ]
+[\c
+.BI \-m \ module
+[\c
+.BI \-w \ password\fR]]
 .B srcpath
 [\c
 .BR dstpath ]
@@ -46,6 +50,15 @@ Open LDMB environment(s) which do not use subdirectories.
 .BR \-v
 Use the previous environment state instead of the latest state.
 This may be useful if the latest state has been corrupted.
+.TP
+.BI \-m \ module
+Load the specified dynamic module to utilize cryptographic functions.
+This is required to operate on environments that have been configured
+with page-level checksums or encryption.
+.TP
+.BI \-w \ password
+Specify the password for an encrypted environment. This is only
+used if a cryptography module has been loaded.
 
 .SH DIAGNOSTICS
 Exit status is zero if no errors occur.

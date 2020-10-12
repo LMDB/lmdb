@@ -18,6 +18,10 @@ mdb_dump \- LMDB environment export tool
 [\c
 .BR \-p ]
 [\c
+.BI \-m \ module
+[\c
+.BI \-w \ password\fR]]
+[\c
 .BR \-a \ |
 .BI \-s \ subdb\fR]
 .BR \ envpath
@@ -56,6 +60,15 @@ use standard text editors and tools to modify the contents of databases.
 Note: different systems may have different notions about what characters
 are considered printing characters, and databases dumped in this manner may
 be less portable to external systems. 
+.TP
+.BI \-m \ module
+Load the specified dynamic module to utilize cryptographic functions.
+This is required to operate on environments that have been configured
+with page-level checksums or encryption.
+.TP
+.BI \-w \ password
+Specify the password for an encrypted environment. This is only
+used if a cryptography module has been loaded.
 .TP
 .BR \-a
 Dump all of the subdatabases in the environment.

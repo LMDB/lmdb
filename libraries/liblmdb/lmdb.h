@@ -1739,16 +1739,27 @@ int	mdb_reader_check(MDB_env *env, int *dead);
 	 */
 typedef int (MDB_str2key_func)(const char *passwd, MDB_val *key);
 
+	/** @brief A structure for dynamically loaded crypto modules.
+	 *
+	 * This is the information that the command line tools expect
+	 * in order to operate on encrypted or checksummed environments.
+	 */
 typedef struct MDB_crypto_funcs {
 	MDB_str2key_func *mcf_str2key;
 	MDB_enc_func *mcf_encfunc;
 	MDB_sum_func *mcf_sumfunc;
-	int mcf_keysize;
-	int mcf_esumsize;
-	int mcf_sumsize;
+	int mcf_keysize;	/**< The size of an encryption key, in bytes */
+	int mcf_esumsize;	/**< The size of the MAC, for authenticated encryption */
+	int mcf_sumsize;	/**< The size of the checksum, for plain checksums */
 } MDB_crypto_funcs;
 
-typedef MDB_crypto_funcs *(MDB_crypto_hooks)();
+	/** @brief The function that returns the #MDB_crypto_funcs structure.
+	 *
+	 * The command line tools expect this function to be named "MDB_crypto".
+	 * It must be exported by the dynamic module so that the tools can use it.
+	 * @return A pointer to a #MDB_crypto_funcs structure.
+	 */
+typedef MDB_crypto_funcs *(MDB_crypto_hooks)(void);
 
 #ifdef __cplusplus
 }
@@ -1756,6 +1767,7 @@ typedef MDB_crypto_funcs *(MDB_crypto_hooks)();
 /** @page tools LMDB Command Line Tools
 	The following describes the command line tools that are available for LMDB.
 	\li \ref mdb_copy_1
+	\li \ref mdb_drop_1
 	\li \ref mdb_dump_1
 	\li \ref mdb_load_1
 	\li \ref mdb_stat_1

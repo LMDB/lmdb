@@ -16,6 +16,10 @@ mdb_stat \- LMDB environment status tool
 [\c
 .BR \-v ]
 [\c
+.BI \-m \ module
+[\c
+.BI \-w \ password\fR]]
+[\c
 .BR \-r [ r ]]
 [\c
 .BR \-a \ |
@@ -44,6 +48,15 @@ Display the status of an LMDB database which does not use subdirectories.
 .BR \-v
 Use the previous environment state instead of the latest state.
 This may be useful if the latest state has been corrupted.
+.TP
+.BI \-m \ module
+Load the specified dynamic module to utilize cryptographic functions.
+This is required to operate on environments that have been configured
+with page-level checksums or encryption.
+.TP
+.BI \-w \ password
+Specify the password for an encrypted environment. This is only
+used if a cryptography module has been loaded.
 .TP
 .BR \-r
 Display information about the environment reader table.

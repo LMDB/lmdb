@@ -12,6 +12,10 @@ mdb_load \- LMDB environment import tool
 [\c
 .BR \-n ]
 [\c
+.BI \-m \ module
+[\c
+.BI \-w \ password\fR]]
+[\c
 .BI \-s \ subdb\fR]
 [\c
 .BR \-N ]
@@ -49,6 +53,15 @@ Read from the specified file instead of from the standard input.
 .TP
 .BR \-n
 Load an LMDB database which does not use subdirectories.
+.TP
+.BI \-m \ module
+Load the specified dynamic module to utilize cryptographic functions.
+This is required to operate on environments that have been configured
+with page-level checksums or encryption.
+.TP
+.BI \-w \ password
+Specify the password for an encrypted environment. This is only
+used if a cryptography module has been loaded.
 .TP
 .BR \-s \ subdb
 Load a specific subdatabase. If no database is specified, data is loaded into the main database.
