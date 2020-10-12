@@ -11,6 +11,7 @@
  * source distribution.
  */
 #include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
 #include <time.h>
 #include "lmdb.h"
@@ -37,8 +38,8 @@ int main(int argc,char * argv[])
 	int count;
 	int *values;
 	char sval[32] = "";
-	char password[] = "This is my passphrase for now";
-	char ekey[32];
+	char password[] = "This is my passphrase for now...";
+	char *ekey;
 
 	srand(time(NULL));
 
@@ -50,14 +51,23 @@ int main(int argc,char * argv[])
 	    }
     
 		cf = MDB_crypto();
-		enckey.mv_data = ekey;
-		enckey.mv_size = sizeof(ekey);
-		cf->mcf_str2key(password, &enckey);
 
 		E(mdb_env_create(&env));
 		E(mdb_env_set_maxreaders(env, 1));
 		E(mdb_env_set_mapsize(env, 10485760));
-		E(mdb_env_set_encrypt(env, cf->mcf_encfunc, &enckey, cf->mcf_esumsize));
+		if (cf->mcf_sumfunc) {
+			E(mdb_env_set_checksum(env, cf->mcf_sumfunc, cf->mcf_sumsize));
+		}
+		if (cf->mcf_encfunc) {
+			ekey = malloc(cf->mcf_keysize);
+			enckey.mv_data = ekey;
+			enckey.mv_size = cf->mcf_keysize;
+			if (cf->mcf_str2key)
+				cf->mcf_str2key(password, &enckey);
+			else
+				strncpy(ekey, password, cf->mcf_keysize);
+			E(mdb_env_set_encrypt(env, cf->mcf_encfunc, &enckey, cf->mcf_esumsize));
+		}
 		E(mdb_env_open(env, "./testdb", 0 /*|MDB_NOSYNC*/, 0664));
 
 		E(mdb_txn_begin(env, NULL, 0, &txn));
