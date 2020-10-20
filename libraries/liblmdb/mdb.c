@@ -6564,7 +6564,7 @@ mdb_rpage_encsum(MDB_env *env, MDB_ID3 *id3, unsigned rem, int numpgs)
 		unsigned short muse = id3->muse;
 		rc = mdb_rpage_decrypt(env, id3, rem, numpgs);
 		if (!rc && env->me_sumfunc && muse != id3->muse) {
-			MDB_page *p = (MDB_page *)(id3->menc + rem * env->me_psize);
+			MDB_page *p = (MDB_page *)((char *)id3->menc + rem * env->me_psize);
 			rc = mdb_page_chk_checksum(env, p, numpgs * env->me_psize);
 		}
 	} else {
@@ -6578,7 +6578,7 @@ mdb_rpage_encsum(MDB_env *env, MDB_ID3 *id3, unsigned rem, int numpgs)
 				bit = 1;
 
 			id3->muse |= (bit << rem);
-			p = (MDB_page *)(id3->mptr + rem * env->me_psize);
+			p = (MDB_page *)((char *)id3->mptr + rem * env->me_psize);
 			rc = mdb_page_chk_checksum(env, p, numpgs * env->me_psize);
 		}
 	}
@@ -6940,7 +6940,7 @@ static int mdb_page_encrypt(MDB_env *env, MDB_page *dp, MDB_page *encp, size_t s
 		in.mv_size -= env->me_esumsize;
 		out.mv_size -= env->me_esumsize;
 		enckeys[2].mv_size = env->me_esumsize;
-		enckeys[2].mv_data = out.mv_data + out.mv_size;
+		enckeys[2].mv_data = (char *)out.mv_data + out.mv_size;
 	} else {
 		enckeys[2].mv_size = 0;
 		enckeys[2].mv_data = 0;
@@ -6972,11 +6972,11 @@ static int mdb_rpage_decrypt(MDB_env *env, MDB_ID3 *id3, int rem, int numpgs)
 		in.mv_data = (char *)id3->mptr + rem * env->me_psize + xsize;
 		enckeys[0] = env->me_enckey;
 		enckeys[1].mv_size = xsize;
-		enckeys[1].mv_data = in.mv_data - xsize;
+		enckeys[1].mv_data = (char *)in.mv_data - xsize;
 		if (env->me_esumsize) {
 			in.mv_size -= env->me_esumsize;
 			enckeys[2].mv_size = env->me_esumsize;
-			enckeys[2].mv_data = in.mv_data + in.mv_size;
+			enckeys[2].mv_data = (char *)in.mv_data + in.mv_size;
 		} else {
 			enckeys[2].mv_size = 0;
 			enckeys[2].mv_data = 0;
@@ -6988,7 +6988,7 @@ static int mdb_rpage_decrypt(MDB_env *env, MDB_ID3 *id3, int rem, int numpgs)
 		else {
 			MDB_page *penc, *pclr;
 			penc = (MDB_page *)enckeys[1].mv_data;
-			pclr = (MDB_page *)(out.mv_data - xsize);
+			pclr = (MDB_page *)((char *)out.mv_data - xsize);
 			pclr->mp_pgno = penc->mp_pgno;
 			pclr->mp_txnid = penc->mp_txnid;
 		}
@@ -7020,7 +7020,7 @@ static void mdb_page_set_checksum(MDB_env *env, MDB_page *mp, size_t size)
 	src.mv_size = size - env->me_sumsize;
 	src.mv_data = mp;
 	dst.mv_size = env->me_sumsize;
-	dst.mv_data = src.mv_data + src.mv_size;
+	dst.mv_data = (char *)src.mv_data + src.mv_size;
 	if (env->me_encfunc)
 		key = &env->me_enckey;
 	else
@@ -7035,7 +7035,7 @@ static int mdb_page_chk_checksum(MDB_env *env, MDB_page *mp, size_t size)
 	src.mv_size = size - env->me_sumsize;
 	src.mv_data = mp;
 	chk.mv_size = env->me_sumsize;
-	chk.mv_data = src.mv_data + src.mv_size;
+	chk.mv_data = (char *)src.mv_data + src.mv_size;
 	dst.mv_size = env->me_sumsize;
 	dst.mv_data = sumbuf;
 	if (env->me_encfunc)
