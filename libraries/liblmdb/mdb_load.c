@@ -40,6 +40,8 @@ static MDB_envinfo info;
 static MDB_val kbuf, dbuf;
 static MDB_val k0buf;
 
+static unsigned int pagesize;
+
 #define Yu	MDB_PRIy(u)
 
 #define STRLENOF(s)	(sizeof(s)-1)
@@ -126,6 +128,17 @@ static void readhdr(void)
 			if (i != 1) {
 				fprintf(stderr, "%s: line %"Yu": invalid maxreaders %s\n",
 					prog, lineno, (char *)dbuf.mv_data+STRLENOF("maxreaders="));
+				exit(EXIT_FAILURE);
+			}
+		} else if (!strncmp(dbuf.mv_data, "db_pagesize=", STRLENOF("db_pagesize="))) {
+			int i;
+			ptr = memchr(dbuf.mv_data, '\n', dbuf.mv_size);
+			if (ptr) *ptr = '\0';
+			i = sscanf((char *)dbuf.mv_data+STRLENOF("db_pagesize="),
+				"%u", &pagesize);
+			if (i != 1) {
+				fprintf(stderr, "%s: line %"Yu": invalid pagesize %s\n",
+					prog, lineno, (char *)dbuf.mv_data+STRLENOF("db_pagesize="));
 				exit(EXIT_FAILURE);
 			}
 		} else {
@@ -384,6 +397,9 @@ int main(int argc, char *argv[])
 	if (info.me_mapsize)
 		mdb_env_set_mapsize(env, info.me_mapsize);
 
+	if (pagesize)
+		mdb_env_set_pagesize(env, pagesize);
+
 	if (info.me_mapaddr)
 		envflags |= MDB_FIXEDMAP;
 
@@ -442,6 +458,10 @@ int main(int argc, char *argv[])
 			if (rc) {
 				fprintf(stderr, "%s: line %"Yu": failed to read key value\n", prog, lineno);
 				goto txn_abort;
+			}
+			if (!key.mv_size) {
+				fprintf(stderr, "%s: line %"Yu": zero-length key(ignored)\n", prog, lineno);
+				continue;
 			}
 
 			if (append) {
