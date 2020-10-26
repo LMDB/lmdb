@@ -1,6 +1,6 @@
 LMDB 0.9 Change Log
 
-LMDB 0.9.27 Engineering
+LMDB 0.9.27 Release (2020/10/26)
 	ITS#9376 fix repeated DUPSORT cursor deletes
 
 LMDB 0.9.26 Release (2020/08/11)
