@@ -2418,7 +2418,7 @@ mdb_page_dirty(MDB_txn *txn, MDB_page *mp)
  *
  * If there are free pages available from older transactions, they
  * are re-used first. Otherwise allocate a new page at mt_next_pgno.
- * Do not modify the freedB, just merge freeDB records into me_pghead[]
+ * Do not modify the freeDB, just merge freeDB records into me_pghead[]
  * and move me_pglast to say which records were consumed.  Only this
  * function can create me_pghead and move me_pglast/mt_next_pgno.
  * When #MDB_DEVEL & 2, it is not affected by #mdb_freelist_save(): it
