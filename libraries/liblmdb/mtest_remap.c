@@ -1,6 +1,6 @@
 /* mtest_remap.c - memory-mapped database tester/toy with page remapping */
 /*
- * Copyright 2011-2017 Howard Chu, Symas Corp.
+ * Copyright 2011-2021 Howard Chu, Symas Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without

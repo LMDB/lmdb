@@ -1,6 +1,6 @@
 /* crypto.c - LMDB encryption helper module */
 /*
- * Copyright 2020 Howard Chu, Symas Corp.
+ * Copyright 2020-2021 Howard Chu, Symas Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
