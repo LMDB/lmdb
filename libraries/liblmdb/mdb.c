@@ -9544,10 +9544,10 @@ mdb_cursor_del0(MDB_cursor *mc)
 					}
 					m3->mc_xcursor->mx_cursor.mc_flags |= C_DEL;
 				}
-				m3->mc_flags |= C_DEL;
 			}
 		}
 	}
+	m3->mc_flags |= C_DEL;
 
 fail:
 	if (rc)
