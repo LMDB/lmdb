@@ -132,8 +132,10 @@ static int mdb_midl_grow( MDB_IDL *idp, int num )
 {
 	MDB_IDL idn = *idp-1;
 	/* grow it */
+	MDB_IDL idn_copy = idn;
 	idn = realloc(idn, (*idn + num + 2) * sizeof(MDB_ID));
 	if (!idn)
+		free(idn_copy);		// Avoid potential memory leak when realloc() returns nullptr
 		return ENOMEM;
 	*idn++ += num;
 	*idp = idn;
