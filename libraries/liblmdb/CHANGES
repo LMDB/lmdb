@@ -2,6 +2,7 @@ LMDB 0.9 Change Log
 
 LMDB 0.9.29 Engineering
 	ITS#9461 refix ITS#9376
+	ITS#9500 fix regression from ITS#8662
 
 LMDB 0.9.28 Release (2021/02/04)
 	ITS#8662 add -a append option to mdb_load
