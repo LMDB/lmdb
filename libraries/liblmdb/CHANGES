@@ -1,5 +1,7 @@
 LMDB 0.9 Change Log
 
+LMDB 0.9.30 Engineering
+
 LMDB 0.9.29 Release (2021/03/16)
 	ITS#9461 refix ITS#9376
 	ITS#9500 fix regression from ITS#8662
