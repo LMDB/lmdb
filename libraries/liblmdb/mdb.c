@@ -3008,9 +3008,9 @@ mdb_env_sync0(MDB_env *env, int force, pgno_t numpgs)
 	int rc = 0;
 	if (env->me_flags & MDB_RDONLY)
 		return EACCES;
-	if (force
-#ifndef _WIN32	/* Sync is normally achieved in Windows by doing WRITE_THROUGH writes */
-		|| !(env->me_flags & MDB_NOSYNC)
+	if (force || !(env->me_flags & MDB_NOSYNC)
+#ifdef _WIN32	/* Sync is normally achieved in Windows by doing WRITE_THROUGH writes */
+		&& (env->me_flags & MDB_WRITEMAP)
 #endif
 		) {
 		if (env->me_flags & MDB_WRITEMAP) {
@@ -3958,13 +3958,7 @@ mdb_page_flush(MDB_txn *txn, int keep)
 
 	j = i = keep;
 
-	if (env->me_flags & MDB_WRITEMAP
-#ifdef _WIN32
-		/* In windows, we still do writes to the file (with write-through enabled in sync mode),
-		 * as this is faster than FlushViewOfFile/FlushFileBuffers */
-		&& (env->me_flags & MDB_NOSYNC)
-#endif
-	) {
+	if (env->me_flags & MDB_WRITEMAP) {
 		goto done;
 	}
 
