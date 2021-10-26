@@ -1,6 +1,7 @@
 LMDB 0.9 Change Log
 
 LMDB 0.9.30 Engineering
+	ITS#9723 clear C_EOF on cursor with MDB_FIRST_DUP
 
 LMDB 0.9.29 Release (2021/03/16)
 	ITS#9461 refix ITS#9376
