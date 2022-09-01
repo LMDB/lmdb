@@ -164,9 +164,10 @@ typedef SSIZE_T	ssize_t;
 #if defined(__FreeBSD__) && defined(__FreeBSD_version) && __FreeBSD_version >= 1100110
 # define MDB_USE_POSIX_MUTEX	1
 # define MDB_USE_ROBUST	1
-#elif defined(__APPLE__) && !defined(MDB_USE_ROBUST)
-# define MDB_USE_POSIX_SEM	1
 #elif defined(__APPLE__) || defined (BSD) || defined(__FreeBSD_kernel__)
+# if defined(__APPLE__) && !defined(MDB_USE_ROBUST)
+# define MSB_USE_POSIX_SEM	1
+# endif
 # if !(defined(MDB_USE_POSIX_MUTEX) || defined(MDB_USE_POSIX_SEM))
 # define MDB_USE_SYSV_SEM	1
 # endif
