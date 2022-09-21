@@ -3717,7 +3717,6 @@ mdb_freelist_save(MDB_txn *txn)
 		unsigned x;
 		if ((rc = mdb_midl_need(&txn->mt_free_pgs, txn->mt_loose_count)) != 0)
 			return rc;
-		lost_loose = txn->mt_loose_count;
 		for (; mp; mp = NEXT_LOOSE_PAGE(mp)) {
 			mdb_midl_xappend(txn->mt_free_pgs, mp->mp_pgno);
 			/* must also remove from dirty list */
