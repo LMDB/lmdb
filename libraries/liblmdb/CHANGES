@@ -1,6 +1,6 @@
 LMDB 0.9 Change Log
 
-LMDB 0.9.30 Engineering
+LMDB 0.9.30 Release (2022/10/19)
 	ITS#9919 - Mark infrequently used functions as cold
 	ITS#9723 - clear C_EOF on cursor with MDB_FIRST_DUP
 	ITS#9030 - Use sys/cachectl.h rather than asm/cachectl.h on mips
