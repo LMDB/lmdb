@@ -1082,8 +1082,8 @@ typedef struct MDB_page2 {
 #define SIZELEFT(p)	 (indx_t)(MP_UPPER(p) - MP_LOWER(p))
 
 	/** The percentage of space used in the page, in tenths of a percent. */
-#define PAGEFILL(env, p) (1000L * ((env)->me_psize - PAGEHDRSZ - SIZELEFT(p)) / \
-				((env)->me_psize - PAGEHDRSZ))
+#define PAGEFILL(env, p) (1000L * ((env)->me_pagespace - SIZELEFT(p)) / \
+				(env)->me_pagespace)
 	/** The minimum page fill factor, in tenths of a percent.
 	 *	Pages emptier than this are candidates for merging.
 	 */
@@ -1662,6 +1662,7 @@ struct MDB_env {
 	OVERLAPPED		*me_ov;			/**< Used for overlapping I/O requests */
 	int		me_ovs;				/**< Count of MDB_overlaps */
 #endif
+	int		me_pagespace;		/**< usable space in a page */
 #ifdef MDB_USE_POSIX_MUTEX	/* Posix mutexes reside in shared mem */
 #	define		me_rmutex	me_txns->mti_rmutex /**< Shared reader lock */
 #	define		me_wmutex	me_txns->mti_wmutex /**< Shared writer lock */
@@ -5305,6 +5306,11 @@ mdb_env_open2(MDB_env *env, int prev)
 	} else {
 		env->me_psize = meta.mm_psize;
 	}
+	env->me_pagespace = env->me_psize - PAGEHDRSZ
+#ifdef MDB_RPAGE_CACHE
+		- env->me_sumsize - env->me_esumsize
+#endif
+	;
 
 	/* Was a mapsize configured? */
 	if (!env->me_mapsize) {
@@ -5371,8 +5377,8 @@ mdb_env_open2(MDB_env *env, int prev)
 	}
 #endif
 
-	env->me_maxfree_1pg = (env->me_psize - PAGEHDRSZ) / sizeof(pgno_t) - 1;
-	env->me_nodemax = (((env->me_psize - PAGEHDRSZ) / MDB_MINKEYS) & -2)
+	env->me_maxfree_1pg = env->me_pagespace / sizeof(pgno_t) - 1;
+	env->me_nodemax = ((env->me_pagespace / MDB_MINKEYS) & -2)
 		- sizeof(indx_t);
 #if !(MDB_MAXKEYSIZE)
 	env->me_maxkey = env->me_nodemax - (NODESIZE + sizeof(MDB_db));
@@ -10458,7 +10464,7 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 			int psize, nsize, k, keythresh;
 
 			/* Maximum free space in an empty page */
-			pmax = env->me_psize - PAGEHDRSZ;
+			pmax = env->me_pagespace;
 			/* Threshold number of keys considered "small" */
 			keythresh = env->me_psize >> 7;
 
