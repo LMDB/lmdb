@@ -8737,9 +8737,13 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 				mc->mc_ki[mc->mc_top] = x;
 			}
 		} else {
-			int psize, nsize, k;
+			int psize, nsize, k, keythresh;
+
 			/* Maximum free space in an empty page */
 			pmax = env->me_psize - PAGEHDRSZ;
+			/* Threshold number of keys considered "small" */
+			keythresh = env->me_psize >> 7;
+
 			if (IS_LEAF(mp))
 				nsize = mdb_leaf_size(env, newkey, newdata);
 			else
@@ -8780,7 +8784,7 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 			 * the split so the new page is emptier than the old page.
 			 * This yields better packing during sequential inserts.
 			 */
-			if (nkeys < 32 || nsize > pmax/16 || newindx >= nkeys) {
+			if (nkeys < keythresh || nsize > pmax/16 || newindx >= nkeys) {
 				/* Find split point */
 				psize = 0;
 				if (newindx <= split_indx || newindx >= nkeys) {
