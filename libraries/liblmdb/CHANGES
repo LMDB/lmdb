@@ -1,6 +1,7 @@
 LMDB 0.9 Change Log
 
 LMDB 0.9.31 Engineering
+	ITS#8447 - Fix cursor_put(MDB_CURRENT) on DUPSORT DB with different sized data
 
 LMDB 0.9.30 Release (2023/02/08)
 	ITS#9806 - LMDB page_split: key threshold depends on page size
