@@ -466,7 +466,7 @@ int main(int argc, char *argv[])
 					fprintf(stderr, "mdb_cursor_open failed, error %d %s\n", rc, mdb_strerror(rc));
 					goto txn_abort;
 				}
-				if (appflag & MDB_APPENDDUP) {
+				if (append) {
 					MDB_val k, d;
 					mdb_cursor_get(mc, &k, &d, MDB_LAST);
 				}
