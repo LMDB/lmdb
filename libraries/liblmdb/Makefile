@@ -95,6 +95,8 @@ mtest_enc:    mtest_enc.o chacha8.o liblmdb.a
 mtest_enc2:	  mtest_enc2.o module.o liblmdb.a crypto.lm
 	$(CC) $(LDFLAGS) -pthread -o $@ mtest_enc2.o module.o liblmdb.a $(LDL)
 
+mplay:	mplay.o liblmdb.a
+
 crypto.lm:	crypto.c
 	$(CC) -shared $(CFLAGS) -o $@ $^ -lcrypto
 
