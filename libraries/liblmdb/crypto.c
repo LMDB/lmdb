@@ -46,11 +46,23 @@ typedef struct evp_cipher_ctx_st {
     /* FIXME: Should this even exist? It appears unused */
     void *app_data;             /* application stuff */
     int key_len;                /* May change for variable length cipher */
+#if OPENSSL_VERSION_NUMBER >= 0x30006000
+    int iv_len;                 /* IV length */
+#endif
     unsigned long flags;        /* Various flags */
     void *cipher_data;          /* per EVP data */
     int final_used;
     int block_mask;
     unsigned char final[EVP_MAX_BLOCK_LENGTH]; /* possible final block */
+
+#if OPENSSL_VERSION_NUMBER >= 0x30000000
+    /*
+     * Opaque ctx returned from a providers cipher algorithm implementation
+     * OSSL_FUNC_cipher_newctx()
+     */
+    void *algctx;
+    EVP_CIPHER *fetched_cipher;
+#endif
 } EVP_CIPHER_CTX;
 
 #define	CHACHA_KEY_SIZE	32
