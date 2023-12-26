@@ -96,7 +96,7 @@ mtest_enc2:	  mtest_enc2.o module.o liblmdb.a crypto.lm
 	$(CC) $(LDFLAGS) -pthread -o $@ mtest_enc2.o module.o liblmdb.a $(LDL)
 
 crypto.lm:	crypto.c
-	$(CC) -shared -o $@ -lcrypto
+	$(CC) -shared $(CFLAGS) -o $@ $^ -lcrypto
 
 mdb.o: mdb.c lmdb.h midl.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c mdb.c
