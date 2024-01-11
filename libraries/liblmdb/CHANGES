@@ -1,6 +1,8 @@
 LMDB 0.9 Change Log
 
 LMDB 0.9.32 Engineering
+	ITS#9378 - Add ability to replay log and replay log tool
+	ITS#10125 - mdb_load: fix cursor reinit in Append mode
 	ITS#10095 - partial revert of ITS#9278. The patch was incorrect and introduced numerous race conditions.
 
 LMDB 0.9.31 Release (2023/07/10)
