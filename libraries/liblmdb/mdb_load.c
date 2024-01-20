@@ -449,7 +449,7 @@ int main(int argc, char *argv[])
 			if (rc == MDB_KEYEXIST && putflags)
 				continue;
 			if (rc) {
-				fprintf(stderr, "%s: line %"Yu": mdb_cursor_put failed, error %d %s\n", prog, lineno, rc, mdb_strerror(rc));
+				fprintf(stderr, "%s: line %" Z "d: mdb_cursor_put failed, error %d %s\n", prog, lineno, rc, mdb_strerror(rc));
 				goto txn_abort;
 			}
 			batch++;
