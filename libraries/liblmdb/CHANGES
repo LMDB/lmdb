@@ -1,5 +1,8 @@
 LMDB 0.9 Change Log
 
+LMDB 0.9.33 Engineering
+	ITS#9037 mdb_page_search: fix error code when DBI record is missing
+
 LMDB 0.9.32 Release (2024/01/29)
 	ITS#9378 - Add ability to replay log and replay log tool
 	ITS#10095 - partial revert of ITS#9278. The patch was incorrect and introduced numerous race conditions.
