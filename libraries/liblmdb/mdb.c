@@ -6670,7 +6670,7 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int flags)
 					MDB_node *leaf = mdb_node_search(&mc2,
 						&mc->mc_dbx->md_name, &exact);
 					if (!exact)
-						return MDB_NOTFOUND;
+						return MDB_BAD_DBI;
 					if ((leaf->mn_flags & (F_DUPDATA|F_SUBDATA)) != F_SUBDATA)
 						return MDB_INCOMPATIBLE; /* not a named DB */
 					rc = mdb_node_read(&mc2, leaf, &data);
