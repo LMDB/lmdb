@@ -2771,6 +2771,10 @@ mdb_txn_renew0(MDB_txn *txn)
 					UNLOCK_MUTEX(rmutex);
 					return MDB_READERS_FULL;
 				}
+				if ((env->me_flags & MDB_RDONLY) && !ti->mti_txnid)  {
+					meta = mdb_env_pick_meta(env);
+					ti->mti_txnid = meta->mm_txnid;
+				}
 				r = &ti->mti_readers[i];
 				/* Claim the reader slot, carefully since other code
 				 * uses the reader table un-mutexed: First reset the
