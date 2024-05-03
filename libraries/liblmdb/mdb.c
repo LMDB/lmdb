@@ -2771,10 +2771,6 @@ mdb_txn_renew0(MDB_txn *txn)
 					UNLOCK_MUTEX(rmutex);
 					return MDB_READERS_FULL;
 				}
-				if ((env->me_flags & MDB_RDONLY) && !ti->mti_txnid)  {
-					meta = mdb_env_pick_meta(env);
-					ti->mti_txnid = meta->mm_txnid;
-				}
 				r = &ti->mti_readers[i];
 				/* Claim the reader slot, carefully since other code
 				 * uses the reader table un-mutexed: First reset the
@@ -2800,9 +2796,14 @@ mdb_txn_renew0(MDB_txn *txn)
 			do /* LY: Retry on a race, ITS#7970. */
 				r->mr_txnid = ti->mti_txnid;
 			while(r->mr_txnid != ti->mti_txnid);
+			if (!r->mr_txnid && (env->me_flags & MDB_RDONLY)) {
+				meta = mdb_env_pick_meta(env);
+				r->mr_txnid = meta->mm_txnid;
+			} else {
+				meta = env->me_metas[r->mr_txnid & 1];
+			}
 			txn->mt_txnid = r->mr_txnid;
 			txn->mt_u.reader = r;
-			meta = env->me_metas[txn->mt_txnid & 1];
 		}
 
 	} else {
