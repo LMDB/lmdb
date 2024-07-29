@@ -3918,9 +3918,11 @@ retry_seek:
 		rc = 0;
 		while (--async_i >= 0) {
 			if (ov[async_i].hEvent) {
-				if (!GetOverlappedResult(fd, &ov[async_i], &wres, TRUE)) {
+				DWORD temp_wres;
+				if (!GetOverlappedResult(fd, &ov[async_i], &temp_wres, TRUE)) {
 					rc = ErrCode(); /* Continue on so that all the event signals are reset */
 				}
+				wres = temp_wres;
 			}
 		}
 		if (rc) { /* any error on GetOverlappedResult, exit now */
