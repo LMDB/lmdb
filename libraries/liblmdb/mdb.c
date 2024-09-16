@@ -10560,6 +10560,10 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 			copy->mp_flags = mp->mp_flags;
 			copy->mp_lower = (PAGEHDRSZ-PAGEBASE);
 			copy->mp_upper = env->me_psize - PAGEBASE;
+#if MDB_RPAGE_CACHE
+			copy->mp_upper -= env->me_sumsize;
+			copy->mp_upper -= env->me_esumsize;
+#endif
 
 			/* prepare to insert */
 			for (i=0, j=0; i<nkeys; i++) {
