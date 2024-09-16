@@ -8970,11 +8970,7 @@ mdb_page_new(MDB_cursor *mc, uint32_t flags, int num, MDB_page **mp)
 	    np->mp_pgno, mc->mc_txn->mt_env->me_psize));
 	np->mp_flags |= flags;
 	np->mp_lower = (PAGEHDRSZ-PAGEBASE);
-	np->mp_upper = mc->mc_txn->mt_env->me_psize - PAGEBASE;
-#if MDB_RPAGE_CACHE
-	np->mp_upper -= mc->mc_txn->mt_env->me_sumsize;
-	np->mp_upper -= mc->mc_txn->mt_env->me_esumsize;
-#endif
+	np->mp_upper = mc->mc_txn->mt_env->me_pagespace;
 
 	if (IS_BRANCH(np))
 		mc->mc_db->md_branch_pages++;
@@ -10559,11 +10555,7 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 			copy->mp_pgno  = mp->mp_pgno;
 			copy->mp_flags = mp->mp_flags;
 			copy->mp_lower = (PAGEHDRSZ-PAGEBASE);
-			copy->mp_upper = env->me_psize - PAGEBASE;
-#if MDB_RPAGE_CACHE
-			copy->mp_upper -= env->me_sumsize;
-			copy->mp_upper -= env->me_esumsize;
-#endif
+			copy->mp_upper = env->me_pagespace;
 
 			/* prepare to insert */
 			for (i=0, j=0; i<nkeys; i++) {
