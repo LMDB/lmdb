@@ -14,3 +14,4 @@
 void *mlm_load(const char *file, const char *name, MDB_crypto_funcs **mcf_ptr, char **errmsg);
 void mlm_unload(void *lm);
 void *mlm_setup(MDB_env *env, const char *file, const char *password, char **errmsg);
+void mlm_setup0(MDB_env *env, MDB_crypto_funcs *cf, const char *password);
