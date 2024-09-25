@@ -77,6 +77,9 @@ typedef struct evp_cipher_head {
 	int key_len;
 	int iv_len;
 	unsigned long flags;
+#if OPENSSL_VERSION_NUMBER >= 0x30000000
+	int origin;
+#endif
 	int (*init)(EVP_CIPHER_CTX *ctx, const unsigned char *key,
 		const unsigned char *iv, int enc);
 } evp_cipher_head;
@@ -129,7 +132,7 @@ static int mcf_encfunc(const MDB_val *src, MDB_val *dst, const MDB_val *key, int
 	mdb_size_t *ptr;
 	MY_CIPHER_CTX myctx = {0};
 	EVP_CIPHER_CTX *ctx = (EVP_CIPHER_CTX *)&myctx;
-	my_cipherdata cactx;
+	my_cipherdata cactx = {0};
 	evp_cipher_head *eh = (evp_cipher_head *)cipher;
 
 	ptr = key[1].mv_data;
