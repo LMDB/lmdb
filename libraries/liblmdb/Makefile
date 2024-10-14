@@ -98,7 +98,7 @@ mtest_enc2:	  mtest_enc2.o module.o liblmdb.a crypto.lm
 mplay:	mplay.o liblmdb.a
 
 crypto.lm:	crypto.c
-	$(CC) -shared $(CFLAGS) -o $@ $^ -lcrypto
+	$(CC) -shared $(CFLAGS) -o $@ $^ -lsodium
 
 mdb.o: mdb.c lmdb.h midl.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c mdb.c
