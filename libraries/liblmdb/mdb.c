@@ -6810,7 +6810,11 @@ mdb_rpage_get(MDB_txn *txn, pgno_t pg0, int numpgs, MDB_page **ret)
 		id3.muse = tl[x].muse;
 		tl[x].mref++;
 		if (env->me_encfunc || env->me_sumfunc) {
+			if (env->me_encfunc)
+				pthread_mutex_lock(&env->me_rpmutex);
 			rc = mdb_rpage_encsum(env, &id3, rem, numpgs);
+			if (env->me_encfunc)
+				pthread_mutex_unlock(&env->me_rpmutex);
 			if (rc) return rc;
 			tl[x].muse = id3.muse;
 		}
@@ -6990,7 +6994,11 @@ ok:
 	p = (MDB_page *)(base + rem * env->me_psize);
 	rc = MDB_SUCCESS;
 	if (env->me_encfunc || env->me_sumfunc) {
+		if (env->me_encfunc)
+			pthread_mutex_lock(&env->me_rpmutex);
 		rc = mdb_rpage_encsum(env, &id3, rem, numpgs);
+		if (env->me_encfunc)
+			pthread_mutex_unlock(&env->me_rpmutex);
 	}
 #if MDB_DEBUG	/* we don't need this check any more */
 	if (IS_OVERFLOW(p)) {
