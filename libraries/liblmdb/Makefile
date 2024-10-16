@@ -67,12 +67,12 @@ test:	all
 	rm -rf testdb && mkdir testdb
 	./mtest && ./mdb_stat testdb
 
-liblmdb.a:	mdb.o midl.o
-	$(AR) rs $@ mdb.o midl.o
+liblmdb.a:	mdb.o midl.o module.o
+	$(AR) rs $@ mdb.o midl.o module.o
 
-liblmdb$(SOEXT):	mdb.lo midl.lo
+liblmdb$(SOEXT):	mdb.lo midl.lo module.lo
 #	$(CC) $(LDFLAGS) -pthread -shared -Wl,-Bsymbolic -o $@ mdb.o midl.o $(SOLIBS)
-	$(CC) $(LDFLAGS) -pthread -shared -o $@ mdb.lo midl.lo $(SOLIBS)
+	$(CC) $(LDFLAGS) -pthread -shared -o $@ mdb.lo midl.lo module.lo $(SOLIBS) $(LDL)
 
 mdb_stat: mdb_stat.o liblmdb.a
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDL)
@@ -111,6 +111,9 @@ mdb.lo: mdb.c lmdb.h midl.h
 
 midl.lo: midl.c midl.h
 	$(CC) $(CFLAGS) -fPIC $(CPPFLAGS) -c midl.c -o $@
+
+module.lo: module.c lmdb.h
+	$(CC) $(CFLAGS) -fPIC $(CPPFLAGS) -c module.c -o $@
 
 %:	%.o
 	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LDLIBS) -o $@
