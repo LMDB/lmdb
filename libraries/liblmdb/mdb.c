@@ -11511,9 +11511,7 @@ mdb_env_set_checksum(MDB_env *env, MDB_sum_func *func, unsigned int size)
 	return MDB_SUCCESS;
 }
 
-#ifdef _WIN32
-#include <windows.h>
-#else
+#ifndef _WIN32
 #include <dlfcn.h>
 #endif
 
