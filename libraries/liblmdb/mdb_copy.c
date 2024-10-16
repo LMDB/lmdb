@@ -21,7 +21,6 @@
 #include <stdlib.h>
 #include <signal.h>
 #include "lmdb.h"
-#include "module.h"
 
 static void
 sighandle(int sig)
@@ -80,11 +79,13 @@ int main(int argc,char * argv[])
 	rc = mdb_env_create(&env);
 	if (rc == MDB_SUCCESS) {
 		if (module) {
-			mlm = mlm_setup(env, module, password, &errmsg);
+			MDB_crypto_funcs *mcf;
+			mlm = mdb_modload(module, NULL, &mcf, &errmsg);
 			if (!mlm) {
 				fprintf(stderr, "Failed to load crypto module: %s\n", errmsg);
 				exit(EXIT_FAILURE);
 			}
+			mdb_modsetup(env, mcf, password);
 		}
 		rc = mdb_env_open(env, argv[1], flags, 0600);
 	}
@@ -100,7 +101,7 @@ int main(int argc,char * argv[])
 			progname, act, rc, mdb_strerror(rc));
 	mdb_env_close(env);
 	if (mlm)
-		mlm_unload(mlm);
+		mdb_modunload(mlm);
 
 	return rc ? EXIT_FAILURE : EXIT_SUCCESS;
 }

@@ -1760,6 +1760,37 @@ typedef struct MDB_crypto_funcs {
 	 * @return A pointer to a #MDB_crypto_funcs structure.
 	 */
 typedef MDB_crypto_funcs *(MDB_crypto_hooks)(void);
+
+	/** @brief Load a dynamically loadable module.
+	 *
+	 * @param[in] file The pathname of the module to load.
+	 * @param[in] symname The name of a symbol to resolve in the module.
+	 * @param[out] mcf_ptr The crypto hooks returned from the module.
+	 * @param[out] errmsg Messages for any errors from trying to load the module.
+	 * @return The handle to the loadable module that can be unloaded by #mdb_modunload(),
+	 * or NULL if loading failed.
+	 */
+void *mdb_modload(const char *file, const char *symname,
+			MDB_crypto_funcs **mcf_ptr, char **errmsg);
+
+	/** @brief Unload a dynamically loaded module.
+	 *
+	 * All environments that used the functions in the module must be closed
+	 * before unloading the module.
+	 * @param[in] handle The handle returned by #mdb_modload().
+	 */
+void mdb_modunload(void *handle);
+
+	/** @brief Set an environment to use the given crypto functions.
+	 *
+	 * This is just a wrapper around #mdb_env_set_encrypt() to ease use of
+	 * dynamically loaded crypto functions.
+	 * @param[in] env An environment handle returned by #mdb_env_create()
+	 * @param[in] funcs The crypto hooks retrieved by #mdb_modload().
+	 * @param[in] passphrase The secret used to generate the encryption key for the environment.
+	 */
+void mdb_modsetup(MDB_env *env, MDB_crypto_funcs *cf, const char *passphrase);
+
 /**	@} */
 
 #ifdef __cplusplus

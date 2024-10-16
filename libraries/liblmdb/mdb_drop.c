@@ -19,7 +19,6 @@
 #include <unistd.h>
 #include <signal.h>
 #include "lmdb.h"
-#include "module.h"
 
 static volatile sig_atomic_t gotsig;
 
@@ -103,11 +102,13 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 	if (module) {
-		mlm = mlm_setup(env, module, password, &errmsg);
+		MDB_crypto_funcs *mcf;
+		mlm = mdb_modload(module, NULL, &mcf, &errmsg);
 		if (!mlm) {
 			fprintf(stderr, "Failed to load crypto module: %s\n", errmsg);
 			goto env_close;
 		}
+		mdb_modsetup(env, mcf, password);
 	}
 
 	mdb_env_set_maxdbs(env, 2);
@@ -148,7 +149,7 @@ txn_abort:
 env_close:
 	mdb_env_close(env);
 	if (mlm)
-		mlm_unload(mlm);
+		mdb_modunload(mlm);
 
 	return rc ? EXIT_FAILURE : EXIT_SUCCESS;
 }

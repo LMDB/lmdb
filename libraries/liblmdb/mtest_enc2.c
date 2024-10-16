@@ -15,7 +15,6 @@
 #include <stdlib.h>
 #include <time.h>
 #include "lmdb.h"
-#include "module.h"
 
 #define E(expr) CHECK((rc = (expr)) == MDB_SUCCESS, #expr)
 #define RES(err, expr) ((rc = expr) == (err) || (CHECK(!rc, #expr), 0))
@@ -40,6 +39,7 @@ int main(int argc,char * argv[])
 	char password[] = "This is my passphrase for now...";
 	void *mlm;
 	char *errmsg;
+	MDB_crypto_funcs *mcf;
 
 	srand(time(NULL));
 
@@ -51,11 +51,12 @@ int main(int argc,char * argv[])
 	    }
     
 		E(mdb_env_create(&env));
-		mlm = mlm_setup(env, "./crypto.lm", password, &errmsg);
+		mlm = mdb_modload("./crypto.lm", NULL, &mcf, &errmsg);
 		if (!mlm) {
 			fprintf(stderr,"Failed to load crypto module: %s\n", errmsg);
 			exit(1);
 		}
+		mdb_modsetup(env, mcf, password);
 		E(mdb_env_set_maxreaders(env, 1));
 		E(mdb_env_set_mapsize(env, 10485760));
 		E(mdb_env_open(env, "./testdb", 0 /*|MDB_NOSYNC*/, 0664));
@@ -183,7 +184,7 @@ int main(int argc,char * argv[])
 
 		mdb_dbi_close(env, dbi);
 		mdb_env_close(env);
-		mlm_unload(mlm);
+		mdb_modunload(mlm);
 
 	return 0;
 }
