@@ -8593,7 +8593,7 @@ prep_subDB:
 					if ((rc = mdb_page_alloc(mc, 1, &mp)))
 						return rc;
 					fp_flags |= mp->mp_flags; /* P_ADM_FLAGS */
-					offset = env->me_psize - olddata.mv_size;
+					offset = env->me_pagespace + PAGEHDRSZ - olddata.mv_size;
 					flags |= F_DUPDATA|F_SUBDATA;
 					dummy.md_root = mp->mp_pgno;
 					sub_root = mp;
