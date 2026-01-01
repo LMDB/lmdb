@@ -3831,7 +3831,9 @@ mdb_page_flush(MDB_txn *txn, int keep)
 #endif
 			) {
 			if (n) {
+#ifndef _WIN32
 retry_write:
+#endif
 				/* Write previous page(s) */
 				DPRINTF(("committing page %"Z"u", pgno));
 #ifdef _WIN32
@@ -4455,13 +4457,17 @@ retry_write:
 		r2 = pwrite(env->me_fd, ptr, len, off);
 		(void)r2;	/* Silence warnings. We don't care about pwrite's return value */
 #endif
+#ifndef _WIN32
 fail:
+#endif
 		env->me_flags |= MDB_FATAL_ERROR;
 		return rc;
 	}
 	/* MIPS has cache coherency issues, this is a no-op everywhere else */
 	CACHEFLUSH(env->me_map + off, len, DCACHE);
+#ifndef _WIN32
 done:
+#endif
 	/* Memory ordering issues are irrelevant; since the entire writer
 	 * is wrapped by wmutex, all of these changes will become visible
 	 * after the wmutex is unlocked. Since the DB is multi-version,
