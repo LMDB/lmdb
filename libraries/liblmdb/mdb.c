@@ -4926,6 +4926,18 @@ mdb_fopen(const MDB_env *env, MDB_name *fname,
 # endif
 		}
 	}
+#else
+	else if ((which == MDB_O_RDWR) && (F_ISSET(env->me_flags, MDB_NTFSSPARSE)))
+	{
+		DWORD BytesReturned;
+
+		if (!DeviceIoControl(fd, FSCTL_SET_SPARSE, NULL, 0, NULL, 0, &BytesReturned, NULL))
+		{
+			rc = ErrCode();
+			CloseHandle(fd);
+			fd = INVALID_HANDLE_VALUE;
+		}
+	}	
 #endif	/* !_WIN32 */
 
 	*res = fd;
@@ -5622,7 +5634,7 @@ fail:
 	 */
 #define	CHANGEABLE	(MDB_NOSYNC|MDB_NOMETASYNC|MDB_MAPASYNC|MDB_NOMEMINIT)
 #define	CHANGELESS	(MDB_FIXEDMAP|MDB_NOSUBDIR|MDB_RDONLY| \
-	MDB_WRITEMAP|MDB_NOTLS|MDB_NOLOCK|MDB_NORDAHEAD|MDB_PREVSNAPSHOT|MDB_NTFSSTREAM)
+	MDB_WRITEMAP|MDB_NOTLS|MDB_NOLOCK|MDB_NORDAHEAD|MDB_PREVSNAPSHOT|MDB_NTFSSTREAM|MDB_NTFSSPARSE)
 
 #if VALID_FLAGS & PERSISTENT_FLAGS & (CHANGEABLE|CHANGELESS)
 # error "Persistent DB flags & env flags overlap, but both go in mm_flags"
