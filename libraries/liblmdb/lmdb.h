@@ -311,29 +311,31 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
  *	@{
  */
 	/** mmap at a fixed address (experimental) */
-#define MDB_FIXEDMAP	0x01
+#define MDB_FIXEDMAP		0x00000001
 	/** no environment directory */
-#define MDB_NOSUBDIR	0x4000
+#define MDB_NOSUBDIR		0x00004000
 	/** don't fsync after commit */
-#define MDB_NOSYNC		0x10000
+#define MDB_NOSYNC			0x00010000
 	/** read only */
-#define MDB_RDONLY		0x20000
+#define MDB_RDONLY			0x00020000
 	/** don't fsync metapage after commit */
-#define MDB_NOMETASYNC		0x40000
+#define MDB_NOMETASYNC		0x00040000
 	/** use writable mmap */
-#define MDB_WRITEMAP		0x80000
+#define MDB_WRITEMAP		0x00080000
 	/** use asynchronous msync when #MDB_WRITEMAP is used */
-#define MDB_MAPASYNC		0x100000
+#define MDB_MAPASYNC		0x00100000
 	/** tie reader locktable slots to #MDB_txn objects instead of to threads */
-#define MDB_NOTLS		0x200000
+#define MDB_NOTLS			0x00200000
 	/** don't do any locking, caller must manage their own locks */
-#define MDB_NOLOCK		0x400000
+#define MDB_NOLOCK			0x00400000
 	/** don't do readahead (no effect on Windows) */
-#define MDB_NORDAHEAD	0x800000
+#define MDB_NORDAHEAD		0x00800000
 	/** don't initialize malloc'd memory before writing to datafile */
-#define MDB_NOMEMINIT	0x1000000
+#define MDB_NOMEMINIT		0x01000000
 	/** use the previous snapshot rather than the latest one */
-#define MDB_PREVSNAPSHOT	0x2000000
+#define MDB_PREVSNAPSHOT	0x02000000
+	/** store the lock file as an NTFS stream within the main data file */
+#define MDB_NTFSSTREAM		0x04000000
 /** @} */
 
 /**	@defgroup	mdb_dbi_open	Database Flags

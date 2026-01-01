@@ -4757,12 +4757,13 @@ typedef struct MDB_name {
 } MDB_name;
 
 /** Filename suffixes [datafile,lockfile][without,with MDB_NOSUBDIR] */
-static const mdb_nchar_t *const mdb_suffixes[2][2] = {
-	{ MDB_NAME("/data.mdb"), MDB_NAME("")      },
-	{ MDB_NAME("/lock.mdb"), MDB_NAME("-lock") }
+static const mdb_nchar_t *const mdb_suffixes[3][2] = {
+	{ MDB_NAME("/data.mdb"),      MDB_NAME("")      },
+	{ MDB_NAME("/lock.mdb"),      MDB_NAME("-lock") },
+	{ MDB_NAME("/data.mdb:lock"), MDB_NAME(":lock") }
 };
 
-#define MDB_SUFFLEN 9	/**< Max string length in #mdb_suffixes[] */
+#define MDB_SUFFLEN 14	/**< Max string length in #mdb_suffixes[] */
 
 /** Set up filename + scratch area for filename suffix, for opening files.
  * It should be freed with #mdb_fname_destroy().
@@ -4845,7 +4846,7 @@ mdb_fopen(const MDB_env *env, MDB_name *fname,
 
 	if (fname->mn_alloced)		/* modifiable copy */
 		mdb_name_cpy(fname->mn_val + fname->mn_len,
-			mdb_suffixes[which==MDB_O_LOCKS][F_ISSET(env->me_flags, MDB_NOSUBDIR)]);
+			mdb_suffixes[(which==MDB_O_LOCKS)?(1+F_ISSET(env->me_flags, MDB_NTFSSTREAM)):0][F_ISSET(env->me_flags, MDB_NOSUBDIR)]);
 
 	/* The directory must already exist.  Usually the file need not.
 	 * MDB_O_META requires the file because we already created it using
@@ -5614,7 +5615,7 @@ fail:
 	 */
 #define	CHANGEABLE	(MDB_NOSYNC|MDB_NOMETASYNC|MDB_MAPASYNC|MDB_NOMEMINIT)
 #define	CHANGELESS	(MDB_FIXEDMAP|MDB_NOSUBDIR|MDB_RDONLY| \
-	MDB_WRITEMAP|MDB_NOTLS|MDB_NOLOCK|MDB_NORDAHEAD|MDB_PREVSNAPSHOT)
+	MDB_WRITEMAP|MDB_NOTLS|MDB_NOLOCK|MDB_NORDAHEAD|MDB_PREVSNAPSHOT|MDB_NTFSSTREAM)
 
 #if VALID_FLAGS & PERSISTENT_FLAGS & (CHANGEABLE|CHANGELESS)
 # error "Persistent DB flags & env flags overlap, but both go in mm_flags"
