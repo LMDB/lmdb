@@ -349,6 +349,9 @@ union semun {
 #ifdef _WIN32
 #define MDB_USE_HASH	1
 #define MDB_PIDLOCK	0
+#ifndef MDB_BUGCHECK
+#define MDB_BUGCHECK 0
+#endif
 #define THREAD_RET	DWORD
 #define pthread_t	HANDLE
 #define pthread_mutex_t	HANDLE
@@ -1824,7 +1827,11 @@ mdb_assert_fail(MDB_env *env, const char *expr_txt,
 	if (env->me_assert_func)
 		env->me_assert_func(env, buf);
 	fprintf(stderr, "%s\n", buf);
+#if (MDB_BUGCHECK) > 0
+	__fastfail(FAST_FAIL_FATAL_APP_EXIT);
+#else
 	abort();
+#endif
 }
 #else
 # define mdb_assert0(env, expr, expr_txt) ((void) 0)
