@@ -83,6 +83,15 @@
 #define CACHEFLUSH(addr, bytes, cache)
 #endif
 
+#if defined(__OpenBSD__)
+/* OpenBSD lacks a Unified Buffer Cache so it requires an explicit
+ * msync to make writes appear in the mmap.
+ */
+#define MDB_Invalidate(env, pos, len)	msync((char *)env->me_map + pos, len, MS_INVALIDATE)
+#else
+#define MDB_Invalidate(env, pos, len)
+#endif
+
 #if defined(__linux) && !defined(MDB_FDATASYNC_WORKS)
 /** fdatasync is broken on ext3/ext4fs on older kernels, see
  *	description in #mdb_env_open2 comments. You can safely
@@ -3473,11 +3482,13 @@ retry_write:
 						wsize -= MAX_WRITE;
 						wres = pwrite(env->me_fd, iov[0].iov_base, MAX_WRITE, wpos);
 						if (wres != MAX_WRITE)
-							goto bad_write;;
+							goto bad_write;
+						MDB_Invalidate(env, wpos, wres);
 						wpos += MAX_WRITE;
 						iov[0].iov_base += MAX_WRITE;
 					}
 					wres = pwrite(env->me_fd, iov[0].iov_base, wsize, wpos);
+					MDB_Invalidate(env, wpos, wsize);
 				} else {
 #ifdef MDB_USE_PWRITEV
 				wres = pwritev(env->me_fd, iov, n, wpos);
@@ -3506,6 +3517,7 @@ bad_write:
 					}
 					return rc;
 				}
+				MDB_Invalidate(env, wpos, wsize);
 				n = 0;
 			}
 			if (i > pagecount)
@@ -4042,6 +4054,7 @@ fail:
 		return rc;
 	}
 #endif
+	MDB_Invalidate(env, toggle * env->me_psize, env->me_psize);
 	/* MIPS has cache coherency issues, this is a no-op everywhere else */
 	CACHEFLUSH(env->me_map + off, len, DCACHE);
 done:
