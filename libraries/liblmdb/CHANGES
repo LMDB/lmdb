@@ -1,6 +1,7 @@
 LMDB 0.9 Change Log
 
 LMDB 0.9.37 Engineering
+	ITS#10615 - fix cache coherency on OpenBSD
 
 LMDB 0.9.36 Release (2026/08/06)
 	ITS#7772 - limit sub-page growth when re-adding existing data
