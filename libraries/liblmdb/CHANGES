@@ -1,5 +1,8 @@
 LMDB 1.0 Change Log
 
+LMDB 1.0.3 Engineering
+	ITS#10615 - fix cache coherency on OpenBSD
+
 LMDB 1.0.2 Release (2026/09/08)
 	ITS#10569 - fix version in lmdb.pc
 	ITS#10572 - more upgrade notes
