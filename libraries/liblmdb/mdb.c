@@ -3491,7 +3491,7 @@ retry_write:
 					MDB_Invalidate(env, wpos, wsize);
 				} else {
 #ifdef MDB_USE_PWRITEV
-				wres = pwritev(env->me_fd, iov, n, wpos);
+					wres = pwritev(env->me_fd, iov, n, wpos);
 #else
 retry_seek:
 					if (lseek(env->me_fd, wpos, SEEK_SET) == -1) {
@@ -3502,8 +3502,8 @@ retry_seek:
 						return rc;
 					}
 					wres = writev(env->me_fd, iov, n);
-				}
 #endif
+				}
 bad_write:
 				if (wres != wsize) {
 					if (wres < 0) {
