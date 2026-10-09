@@ -4279,8 +4279,8 @@ retry_seek:
 						rc = 0;
 						wres = writev(fd, iov, n);
 					}
-				}
 #endif
+				}
 bad_write:
 				if (wres != wsize) {
 					if (wres < 0) {
