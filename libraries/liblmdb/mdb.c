@@ -9209,6 +9209,8 @@ _mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 			rc = mdb_drop0(&mc->mc_xcursor->mx_cursor, 0);
 			if (rc)
 				goto fail;
+			mc->mc_db->md_branch_pages -= mc->mc_xcursor->mx_db.md_branch_pages;
+			mc->mc_db->md_leaf_pages -= mc->mc_xcursor->mx_db.md_leaf_pages;
 		}
 	}
 	/* LMDB passes F_SUBDATA in 'flags' to delete a DB record */
