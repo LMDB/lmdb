@@ -7680,14 +7680,16 @@ mdb_cursor_touch(MDB_cursor *mc)
 }
 
 static void
-mdb_subdb_adjust(MDB_cursor *mc, MDB_db *old, MDB_db *new)
+mdb_subdb_adjust(MDB_cursor *mc, const void *vold, MDB_db *new)
 {
+	MDB_db old;
 	int delta;
 
-	delta = new->md_branch_pages - old->md_branch_pages;
+	memcpy(&old, vold, sizeof(MDB_db));
+	delta = new->md_branch_pages - old.md_branch_pages;
 	mc->mc_db->md_branch_pages += delta;
 
-	delta = new->md_leaf_pages - old->md_leaf_pages;
+	delta = new->md_leaf_pages - old.md_leaf_pages;
 	mc->mc_db->md_leaf_pages += delta;
 }
 
